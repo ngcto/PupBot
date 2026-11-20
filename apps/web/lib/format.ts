@@ -19,7 +19,13 @@ export function formatFileSize(bytes: number): string {
 }
 
 export function previewText(text: string, max = 60): string {
-  const single = text.replace(/\s+/g, " ").trim();
+  const plain = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/[*_#>|-]{1,}/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1");
+  const single = plain.replace(/\s+/g, " ").trim();
   return single.length > max ? `${single.slice(0, max)}…` : single;
 }
 

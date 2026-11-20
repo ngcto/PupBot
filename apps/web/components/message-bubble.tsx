@@ -107,7 +107,7 @@ export function MessageBubble({
           className={cn(
             "pointer-events-none absolute -top-8 flex items-center gap-0.5 rounded-pill border border-menu bg-raised px-1 py-0.5 opacity-0 shadow-menu transition-opacity duration-100",
             "group-hover/message:pointer-events-auto group-hover/message:opacity-100",
-            isUser ? "right-0" : "left-0",
+            "right-0",
           )}
         >
           <Tooltip content="Copy">

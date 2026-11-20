@@ -50,7 +50,7 @@ export function CreateBotDialog({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
 
         <div className="flex flex-1 flex-col items-center gap-5 px-6 py-6">
-          <Avatar shape={shape} color={color} size={96} nose title="" />
+          <Avatar shape={shape} color={color} size={96} title="" />
           <Input
             aria-label="Bot name"
             value={name}

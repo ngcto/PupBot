@@ -60,6 +60,13 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
     .from(botTable)
     .where(eq(botTable.workspaceId, workspace.id));
 
+  // A new bot inherits the workspace's default endpoint so chat works at once.
+  const [defaultEndpoint] = await db
+    .select({ id: modelEndpoint.id, modelId: modelEndpoint.modelId })
+    .from(modelEndpoint)
+    .where(eq(modelEndpoint.workspaceId, workspace.id))
+    .limit(1);
+
   await db.transaction(async (tx) => {
     await tx.insert(botTable).values({
       id: botId,
@@ -68,6 +75,8 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
       avatar: { shape: input.shape, color: input.color },
       accentColor: input.accentColor,
       instructions: "",
+      modelEndpointId: defaultEndpoint?.id ?? null,
+      modelId: defaultEndpoint?.modelId ?? null,
       position: Number(existing),
     });
     await tx.insert(conversation).values({

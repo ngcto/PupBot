@@ -1,7 +1,53 @@
+import { serverEnv } from "@pupbot/config";
 import { and, eq } from "drizzle-orm";
 import { database } from "./client.ts";
 import { newId } from "./ids.ts";
-import { botSection, workspace } from "./schema.ts";
+import { botSection, modelCatalog, modelEndpoint, workspace } from "./schema.ts";
+
+/**
+ * In development a fresh workspace gets the local stub endpoint, so a new user
+ * can chat immediately with no key. Production workspaces start empty and the
+ * user adds an endpoint in Settings › Models.
+ */
+async function seedStubEndpoint(workspaceId: string): Promise<void> {
+  const env = serverEnv();
+  if (!env.STUB_PROVIDER || env.NODE_ENV === "production") return;
+
+  const db = database();
+  const baseUrl = `${env.API_URL.replace(/\/+$/, "")}/dev/stub/v1`;
+
+  const [catalog] = await db
+    .insert(modelCatalog)
+    .values({
+      id: newId(),
+      provider: "pupbot",
+      modelId: "pup-stub",
+      name: "Pup stub (dev)",
+      contextWindow: 100_000,
+      maxOutput: 8_192,
+      pricing: { input: 0, output: 0 },
+      modalities: { input: ["text"], output: ["text"] },
+      toolSupport: false,
+      reasoning: false,
+    })
+    .onConflictDoUpdate({
+      target: [modelCatalog.provider, modelCatalog.modelId],
+      set: { name: "Pup stub (dev)" },
+    })
+    .returning();
+
+  await db.insert(modelEndpoint).values({
+    id: newId(),
+    workspaceId,
+    kind: "openai-chat",
+    label: "Local stub endpoint",
+    baseUrl,
+    modelId: "pup-stub",
+    modelCatalogId: catalog?.id ?? null,
+    catalogMatch: "matched",
+    contextWindow: 100_000,
+  });
+}
 
 /**
  * Every user gets exactly one default workspace. Called after sign-up and on
@@ -18,7 +64,12 @@ export async function ensureWorkspace(userId: string, userName = "You") {
     .onConflictDoNothing()
     .returning();
 
-  if (created) return created;
+  if (created) {
+    await seedStubEndpoint(created.id).catch((error) => {
+      console.warn("[workspace] could not seed the stub endpoint:", error);
+    });
+    return created;
+  }
   const raced = await db.select().from(workspace).where(eq(workspace.ownerId, userId)).limit(1);
   if (!raced[0]) throw new Error("workspace could not be created");
   return raced[0];

@@ -3,6 +3,8 @@ import { AppShell } from "../../../components/app-shell.tsx";
 import { loadShellData } from "../../../lib/data.ts";
 import { currentWorkspace, requireUser } from "../../../lib/session.ts";
 
+export const dynamic = "force-dynamic";
+
 export default async function BotPage({ params }: { params: Promise<{ botId: string }> }) {
   const { botId } = await params;
   const user = await requireUser();

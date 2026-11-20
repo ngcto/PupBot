@@ -9,7 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests",
+    "contact-sheet": "tsx scripts/contact-sheet.ts"
   },
   "dependencies": {
     "open-bot-avatar": "^0.2.1"
@@ -20,7 +21,8 @@
   "devDependencies": {
     "@types/react": "^19.3.0",
     "react": "^19.3.1",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
-    "vitest": "^5.1.1"
+    "vitest": "5.1.1"
   }
 }

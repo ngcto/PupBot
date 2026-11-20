@@ -11,6 +11,7 @@ import { CreateBotDialog } from "./create-bot-dialog.tsx";
 import { PrimaryBotDialog } from "./primary-bot-dialog.tsx";
 import { Rail } from "./rail.tsx";
 import { SearchPalette } from "./search-palette.tsx";
+import { SettingsDialog } from "./settings-dialog.tsx";
 import { Sidebar } from "./sidebar.tsx";
 
 export function AppShell({ data }: { data: ShellData }) {
@@ -20,6 +21,7 @@ export function AppShell({ data }: { data: ShellData }) {
   const [primaryOpen, setPrimaryOpen] = useState(false);
   const [settingsBotId, setSettingsBotId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const activeBot = data.activeBot;
   const settingsBot = useMemo(
@@ -77,7 +79,8 @@ export function AppShell({ data }: { data: ShellData }) {
         onOpenPalette={() => setPaletteOpen(true)}
         onChoosePrimary={() => setPrimaryOpen(true)}
         onOpenSettings={(botId) => setSettingsBotId(botId)}
-        onOpenAccount={() => setPaletteOpen(true)}
+        onOpenAccount={() => setSettingsOpen(true)}
+        onOpenSettingsDialog={() => setSettingsOpen(true)}
       />
 
       {activeBot ? (
@@ -115,6 +118,7 @@ export function AppShell({ data }: { data: ShellData }) {
         onCreateBot={() => setCreateOpen(true)}
         onOpenSettings={(botId) => setSettingsBotId(botId)}
       />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={data.user} bots={data.bots} />
       {settingsBot ? (
         <BotSettingsDialog
           bot={settingsBot}

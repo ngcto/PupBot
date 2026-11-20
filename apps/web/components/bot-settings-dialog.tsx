@@ -79,7 +79,7 @@ export function BotSettingsDialog({
         <div className="flex flex-col gap-6 px-5 py-5">
           <Group label="Identity">
             <div className="flex items-start gap-4 p-4">
-              <Avatar shape={shape} color={color} size={64} nose title="" />
+              <Avatar shape={shape} color={color} size={64} title="" />
               <div className="flex-1 space-y-3">
                 <Input aria-label="Bot name" value={name} onChange={(event) => setName(event.target.value)} />
                 <Textarea

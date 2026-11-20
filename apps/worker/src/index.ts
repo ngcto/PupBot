@@ -1,8 +1,11 @@
 import { executeRun } from "@pupbot/agent";
+import { loadEnv } from "@pupbot/config/load-env";
 import { RUN_QUEUE, closeDatabase, database, startBoss } from "@pupbot/db";
 import type { RunJobData } from "@pupbot/db";
 import { createGateway } from "@pupbot/providers";
 import { registerCatalogJobs } from "./jobs/catalog.ts";
+
+loadEnv();
 
 const gateway = createGateway();
 const boss = await startBoss();

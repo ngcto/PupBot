@@ -7,7 +7,15 @@ import { useRouter } from "next/navigation";
 import type { ReactElement } from "react";
 import { authClient } from "../lib/auth-client.ts";
 
-export function AccountMenu({ user, children }: { user: { name: string; email: string }; children: ReactElement<Record<string, unknown>> }) {
+export function AccountMenu({
+  user,
+  children,
+  onOpenSettings,
+}: {
+  user: { name: string; email: string };
+  children: ReactElement<Record<string, unknown>>;
+  onOpenSettings: () => void;
+}) {
   const router = useRouter();
 
   return (
@@ -20,15 +28,11 @@ export function AccountMenu({ user, children }: { user: { name: string; email: s
           <p className="mt-2 text-sm text-ink-muted">Free plan · 0% used</p>
         </div>
         <MenuSeparator />
-        <MenuItem
-          onClick={() => {
-            router.push("/settings");
-          }}
-        >
+        <MenuItem onClick={onOpenSettings}>
           <HugeiconsIcon icon={Settings01Icon} size={16} strokeWidth={1.7} />
           Settings
         </MenuItem>
-        <MenuItem onClick={() => router.push("/settings?tab=general")}>
+        <MenuItem onClick={onOpenSettings}>
           <HugeiconsIcon icon={UserAdd01Icon} size={16} strokeWidth={1.7} />
           Add account
         </MenuItem>

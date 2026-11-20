@@ -5,7 +5,7 @@ import {
   Cancel01Icon,
   Mic01Icon,
   PlusSignIcon,
-  SentIcon,
+  ArrowUp02Icon,
   VoiceIcon,
 } from "@hugeicons/core-free-icons";
 import { Avatar } from "@pupbot/avatars/react";
@@ -124,6 +124,7 @@ export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pe
             <Tooltip content={canSend ? "Send" : "Send"}>
               <button
                 type="button"
+                data-testid="send"
                 aria-label="Send"
                 disabled={!canSend || pending}
                 onClick={submit}
@@ -134,7 +135,7 @@ export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pe
                 style={canSend ? { background: sendAccent(bot.accentColor) } : undefined}
               >
                 <HugeiconsIcon
-                  icon={SentIcon}
+                  icon={ArrowUp02Icon}
                   size={14}
                   strokeWidth={2}
                   className={canSend && isNearWhite(bot.accentColor) ? "text-canvas" : undefined}

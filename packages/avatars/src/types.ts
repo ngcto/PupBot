@@ -1,17 +1,5 @@
-export type AvatarShapeId =
-  | "pup"
-  | "fold"
-  | "point"
-  | "flop"
-  | "tuft"
-  | "snout"
-  | "pug"
-  | "dane"
-  | "bun"
-  | "shag"
-  | "squish"
-  | "vulpine"
-  | "crown";
+/** Shape ids are provisional until HOME-44 publishes `avatars.json`. */
+export type AvatarShapeId = string;
 
 export type AvatarColorId =
   | "chalk"
@@ -54,6 +42,4 @@ export interface AvatarRenderInput {
   /** A palette id or any `#rgb`/`#rrggbb` value. */
   color: AvatarColorId | string;
   size?: number;
-  /** Optional nose mark, only for renders at 48px and above. */
-  nose?: boolean;
 }

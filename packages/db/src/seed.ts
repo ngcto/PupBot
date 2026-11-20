@@ -1,3 +1,4 @@
+import { loadEnv } from "@pupbot/config/load-env";
 import { and, eq } from "drizzle-orm";
 import { auth } from "./auth.ts";
 import { closeDatabase, database } from "./client.ts";
@@ -20,7 +21,9 @@ const DEMO_EMAIL = "demo@pupbot.dev";
 const DEMO_PASSWORD = "pupbot-demo";
 const DEMO_NAME = "Ng";
 
-const STUB_BASE_URL = (process.env.API_URL ?? "http://localhost:8787").replace(/\/+$/, "") + "/dev/stub/v1";
+const STUB_BASE_URL = () => (process.env.API_URL ?? "http://localhost:8787").replace(/\/+$/, "") + "/dev/stub/v1";
+
+loadEnv();
 
 async function seed() {
   const db = database();
@@ -67,7 +70,7 @@ async function seed() {
       workspaceId: workspace.id,
       kind: "openai-chat",
       label: "Local stub endpoint",
-      baseUrl: STUB_BASE_URL,
+      baseUrl: STUB_BASE_URL(),
       modelId: "pup-stub",
       modelCatalogId: catalog?.id,
       catalogMatch: "matched",
@@ -116,7 +119,7 @@ async function seed() {
   const seeds = [
     {
       name: "Pup",
-      shape: "pup",
+      shape: "orb",
       color: "amber",
       accent: "#f69412",
       primary: true,
@@ -137,7 +140,7 @@ async function seed() {
     },
     {
       name: "Rex",
-      shape: "fold",
+      shape: "drop",
       color: "sky",
       accent: "#1884fc",
       primary: false,
@@ -148,7 +151,7 @@ async function seed() {
     },
     {
       name: "Mochi",
-      shape: "crown",
+      shape: "scallop",
       color: "leaf",
       accent: "#14c370",
       primary: false,

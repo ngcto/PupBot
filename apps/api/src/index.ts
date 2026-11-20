@@ -1,7 +1,10 @@
 import { serve } from "@hono/node-server";
 import { serverEnv } from "@pupbot/config";
+import { loadEnv } from "@pupbot/config/load-env";
 import { closeDatabase } from "@pupbot/db";
 import { createApp } from "./app.ts";
+
+loadEnv();
 
 const app = createApp();
 const port = serverEnv().API_PORT;

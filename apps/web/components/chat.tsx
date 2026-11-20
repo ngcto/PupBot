@@ -51,6 +51,13 @@ export function Chat({
   const rows = useMemo(() => buildRows(messages), [messages]);
 
   useEffect(() => {
+    const node = scroller.current;
+    if (node) node.scrollTop = node.scrollHeight;
+    // Land at the latest message when the bot opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (!atBottom.current) return;
     const node = scroller.current;
     if (node) node.scrollTop = node.scrollHeight;

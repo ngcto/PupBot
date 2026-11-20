@@ -1,4 +1,7 @@
+import { loadEnv } from "@pupbot/config/load-env";
 import { closeDatabase, database, syncModelCatalog } from "@pupbot/db";
+
+loadEnv();
 
 try {
   const { total, providers } = await syncModelCatalog(database());

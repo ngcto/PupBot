@@ -1,3 +1,4 @@
+import { loadEnv } from "@pupbot/config/load-env";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
@@ -14,6 +15,8 @@ import { modelCatalog } from "../src/schema.ts";
 const fixture: Record<string, any> = JSON.parse(
   readFileSync(fileURLToPath(new URL("./fixtures/models-dev.json", import.meta.url)), "utf8"),
 );
+
+loadEnv();
 
 describe("catalogRowsFrom", () => {
   const rows = catalogRowsFrom(fixture);

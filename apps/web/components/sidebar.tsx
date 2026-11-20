@@ -54,6 +54,7 @@ interface SidebarProps {
   onChoosePrimary: () => void;
   onOpenSettings: (botId: string) => void;
   onOpenAccount: () => void;
+  onOpenSettingsDialog: () => void;
 }
 
 export function Sidebar({
@@ -66,6 +67,7 @@ export function Sidebar({
   onOpenPalette,
   onChoosePrimary,
   onOpenSettings,
+  onOpenSettingsDialog,
 }: SidebarProps) {
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const visible = bots.filter((bot) => !bot.hidden);
@@ -109,6 +111,7 @@ export function Sidebar({
           <ContextMenuArea items={<PrimaryMenu bot={primary} onChoosePrimary={onChoosePrimary} onOpenSettings={onOpenSettings} />}>
             <button
               type="button"
+              data-testid="primary-bot"
               aria-label={`Open ${primary.name}`}
               onClick={() => onSelect(primary.id)}
               className="flex flex-col items-center gap-1"
@@ -182,7 +185,7 @@ export function Sidebar({
       </div>
 
       <div className="flex h-[52px] items-center gap-2.5 px-3 pb-[8px]">
-        <AccountMenu user={user}>
+        <AccountMenu user={user} onOpenSettings={onOpenSettingsDialog}>
           <button
             type="button"
             aria-label="Account"

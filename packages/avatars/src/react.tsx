@@ -12,7 +12,7 @@ export interface AvatarProps extends AvatarRenderInput {
  * Server and client render the same SVG string, so there is never a hydration
  * mismatch and no second renderer to keep in sync.
  */
-export function Avatar({ shape, color, size = 32, nose = false, className, title }: AvatarProps) {
+export function Avatar({ shape, color, size = 32, className, title }: AvatarProps) {
   const label = title ?? `${shapeById(shape).name} avatar`;
   return (
     <span
@@ -20,7 +20,7 @@ export function Avatar({ shape, color, size = 32, nose = false, className, title
       style={{ display: "inline-flex", width: size, height: size, flex: "none" }}
       role="img"
       aria-label={label}
-      dangerouslySetInnerHTML={{ __html: renderAvatarSvg({ shape, color, size, nose }) }}
+      dangerouslySetInnerHTML={{ __html: renderAvatarSvg({ shape, color, size }) }}
     />
   );
 }

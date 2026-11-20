@@ -1,3 +1,4 @@
+import { loadEnv } from "@pupbot/config/load-env";
 import { createApp } from "../src/app.ts";
 import { executeRun } from "@pupbot/agent";
 import {
@@ -30,6 +31,8 @@ function slowGateway(words: string[], gapMs: number): ModelGateway {
     },
   };
 }
+
+loadEnv();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

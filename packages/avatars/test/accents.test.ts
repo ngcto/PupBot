@@ -55,16 +55,13 @@ describe("deriveAccent", () => {
 
 describe("renderAvatarSvg", () => {
   it("is identical across two calls for the same input", () => {
-    const first = renderAvatarSvg({ shape: "pup", color: "amber", size: 64 });
-    expect(renderAvatarSvg({ shape: "pup", color: "amber", size: 64 })).toBe(first);
+    const first = renderAvatarSvg({ shape: "orb", color: "amber", size: 64 });
+    expect(renderAvatarSvg({ shape: "orb", color: "amber", size: 64 })).toBe(first);
   });
 
   it("fills the head with the palette hex", () => {
-    expect(renderAvatarSvg({ shape: "pup", color: "amber", size: 64 }).toLowerCase()).toContain("#f69412");
+    expect(renderAvatarSvg({ shape: "orb", color: "amber", size: 64 }).toLowerCase()).toContain("#f69412");
   });
 
-  it("adds the nose only at 48px and above", () => {
-    expect(renderAvatarSvg({ shape: "pup", color: "amber", size: 32, nose: true })).not.toContain("<ellipse");
-    expect(renderAvatarSvg({ shape: "pup", color: "amber", size: 48, nose: true })).toContain("<ellipse");
-  });
+
 });

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgres://pupbot:pupbot@localhost:5432/pupbot
+  BETTER_AUTH_SECRET: ci-only-secret-ci-only-secret-ci-only
+  BETTER_AUTH_URL: http://localhost:3000
+  API_URL: http://localhost:8787
+  NEXT_PUBLIC_API_URL: http://localhost:8787
+  CREDENTIAL_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  STUB_PROVIDER: "true"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pupbot
+          POSTGRES_PASSWORD: pupbot
+          POSTGRES_DB: pupbot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pupbot -d pupbot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+        env:
+          CI: "true"

@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { loadShellData } from "../lib/data.ts";
 import { currentWorkspace, getSessionUser } from "../lib/session.ts";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const user = await getSessionUser();
   if (!user) redirect("/sign-in");
