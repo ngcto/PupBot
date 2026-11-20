@@ -2,6 +2,7 @@ import { executeRun } from "@pupbot/agent";
 import { RUN_QUEUE, closeDatabase, database, startBoss } from "@pupbot/db";
 import type { RunJobData } from "@pupbot/db";
 import { createGateway } from "@pupbot/providers";
+import { registerCatalogJobs } from "./jobs/catalog.ts";
 
 const gateway = createGateway();
 const boss = await startBoss();
@@ -19,6 +20,7 @@ await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
   }
 });
 
+await registerCatalogJobs(boss);
 console.log("pupbot worker listening for runs");
 
 const shutdown = async () => {
