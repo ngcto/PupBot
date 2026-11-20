@@ -138,7 +138,7 @@ function build(draft: Draft): AvatarShape {
   };
 }
 
-const eyes = (x: number, y: number, spacing = 12, scale = 1.6): Draft["eyes"] => ({ x, y, spacing, scale });
+const eyes = (x: number, y: number, spacing = 12, scale = 1.36): Draft["eyes"] => ({ x, y, spacing, scale });
 
 const shaggy = scallop(50, 50, 45, 36, 7);
 shaggy.splice(7, 1, [43, 92, 4], [57, 92, 4]);
@@ -147,8 +147,8 @@ export const SHAPES: readonly AvatarShape[] = [
   build({
     id: "pup",
     name: "Pup",
-    note: "Round head, chin bump, short forward-folded ears, small centred snout",
-    vertices: symmetric([[50,12],[64,13,12],[78,18,8],[90,30,10],[92,48,10],[88,58,8],[78,48,2],[80,70,12],[68,90,12],[57,98,6],[50,98]]),
+    note: "Round head, chin bump, wide forward-folded ear flaps on the sides, small centred snout",
+    vertices: symmetric([[50,10],[68,12,14],[76,22,4],[92,26,8],[98,40,9],[90,52,8],[80,50,2],[82,66,14],[68,90,12],[57,98,6],[50,98]]),
     eyes: eyes(50, 54),
   }),
   build({
@@ -161,8 +161,8 @@ export const SHAPES: readonly AvatarShape[] = [
   build({
     id: "point",
     name: "Point",
-    note: "Tapered crown, upright triangular ear tips, flat-bottomed muzzle",
-    vertices: symmetric([[50,24],[60,24,6],[80,2,5],[92,40,8],[96,58,12],[88,78,10],[70,86,6],[64,100,6],[50,100]]),
+    note: "Domed skull, thick outward-leaning ears, flat-bottomed blunt muzzle",
+    vertices: symmetric([[50,20,16],[62,22,8],[66,30,3],[84,4,9],[96,36,9],[98,58,14],[88,78,12],[70,88,8],[66,100,8],[50,100]]),
     eyes: eyes(50, 60),
   }),
   build({
@@ -175,8 +175,8 @@ export const SHAPES: readonly AvatarShape[] = [
   build({
     id: "tuft",
     name: "Tuft",
-    note: "Two upright ears with a fur tuft between, short muzzle",
-    vertices: symmetric([[50,8,10],[58,22,5],[66,22,5],[80,4,9],[92,36,10],[96,60,12],[88,80,12],[68,90,10],[58,98,6],[50,98]]),
+    note: "Two rounded outward-leaning ears with a fur tuft between, blunt short muzzle",
+    vertices: symmetric([[50,6,10],[58,20,5],[64,24,3],[84,8,12],[96,36,10],[98,58,14],[90,78,12],[72,88,8],[66,98,8],[50,98]]),
     eyes: eyes(50, 58),
   }),
   build({
@@ -196,9 +196,9 @@ export const SHAPES: readonly AvatarShape[] = [
   build({
     id: "dane",
     name: "Dane",
-    note: "Tall narrow head, tall ears, long jaw",
-    vertices: symmetric([[50,22],[60,24,6],[76,2,5],[88,34,6],[90,54,12],[78,70,8],[74,84,4],[72,100,8],[50,100]]),
-    eyes: eyes(50, 42, 10, 1.4),
+    note: "Tall narrow head, thick outward-leaning ears, long blunt jaw",
+    vertices: symmetric([[50,20,14],[60,22,6],[64,28,3],[78,4,8],[91,34,8],[91,56,12],[82,72,8],[76,80,3],[74,100,8],[50,100]]),
+    eyes: eyes(50, 42, 10, 1.19),
   }),
   build({
     id: "bun",
@@ -224,15 +224,15 @@ export const SHAPES: readonly AvatarShape[] = [
   build({
     id: "vulpine",
     name: "Vulpine",
-    note: "Pointed tall head, two sharp ears, muzzle tapering to a point",
-    vertices: symmetric([[50,24],[58,25,4],[82,0,4],[93,38,4],[94,56,10],[74,80,12],[54,100,4],[50,100,4]]),
-    eyes: eyes(50, 56, 11, 1.5),
+    note: "Fox-like: sharp ears over a domed brow, blunt muzzle ending in a point",
+    vertices: symmetric([[50,26,14],[60,26,6],[64,30,3],[84,2,6],[94,38,6],[94,58,12],[82,76,10],[66,86,8],[54,100,4],[50,100,4]]),
+    eyes: eyes(50, 56, 11, 1.28),
   }),
   build({
     id: "crown",
     name: "Crown",
-    note: "Flat bottom with a three-point crest and upright ears at its outer points",
-    vertices: symmetric([[50,10,4],[60,28,4],[78,0,4],[92,40,5],[96,66,10],[90,95,9],[50,95]]),
+    note: "Three-point crest with thick outward-leaning ears, flat-bottomed blunt muzzle",
+    vertices: symmetric([[50,8,7],[58,26,3],[66,28,3],[84,4,9],[96,38,8],[98,62,12],[92,84,10],[76,92,4],[68,98,8],[50,98]]),
     eyes: eyes(50, 64),
   }),
 ] as const;
