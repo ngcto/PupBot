@@ -21,6 +21,8 @@ const serverSchema = z.object({
   S3_ACCESS_KEY: optionalSecret,
   S3_SECRET_KEY: optionalSecret,
   INSTABOX_API_KEY: optionalSecret,
+  /** How many boxes the Instabox account's plan allows (free: 1, grandfathered accounts: 5). */
+  INSTABOX_CAPACITY: z.coerce.number().int().positive().default(1),
   BOAT_API_KEY: optionalSecret,
   COMPOSIO_API_KEY: optionalSecret,
   OPENAI_API_KEY: optionalSecret,

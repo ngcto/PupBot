@@ -22,6 +22,18 @@ export interface ResolvedEndpoint {
   label: string;
 }
 
+/** What the harness needs from the computer layer: wake before the first token. */
+export interface RunComputer {
+  ensureReady: (botId: string) => Promise<{
+    ok: boolean;
+    reason?: string;
+    blocked?: boolean;
+    leaseId?: string;
+    woke?: boolean;
+  }>;
+  release: (botId: string, leaseId: string) => Promise<void>;
+}
+
 export interface ExecuteRunOptions {
   db: Database;
   gateway: ModelGateway;
@@ -29,6 +41,8 @@ export interface ExecuteRunOptions {
   /** How often the in-flight run checks `run.abort_requested`. */
   abortPollMs?: number;
   signal?: AbortSignal;
+  /** Wakes the bot's computer before the model runs; chat is blocked without one. */
+  computer?: RunComputer;
   resolveEndpoint?: (botRow: BotRow) => Promise<ResolvedEndpoint | null>;
   now?: () => Date;
 }
@@ -237,13 +251,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let failure: string | undefined;
+  let rotate: ReturnType<typeof setInterval> | undefined;
 
-  const rotate = setInterval(() => {
-    if (sawToken || controller.signal.aborted) return;
-    void events
-      .append({ type: "step", payload: { label: stepLabel(++stepIndex) } })
-      .catch(() => {});
-  }, STEP_ROTATE_MS);
 
   const flush = async (force = false) => {
     if (!pendingText && !pendingReasoning && !force) return;
@@ -266,7 +275,34 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     }
   };
 
+  let leaseId: string | undefined;
+
   try {
+    // Wake on first use, explicitly: Instabox refuses exec on a paused box and
+    // does not wake it, so the run shows what is happening instead of a spinner.
+    if (options.computer) {
+      await events.append({ type: "step", payload: { label: "Waking your computer" } });
+      const ready = await options.computer.ensureReady(row.bot.id);
+      if (!ready.ok) {
+        const reason = ready.reason ?? "Your computer could not be started.";
+        await failRun(db, { runId, messageId: assistantMessageId, text: "", reason, now });
+        await events.append({
+          type: "message.completed",
+          payload: { messageId: assistantMessageId, text: "", status: "error" },
+        });
+        await events.append({ type: "run.completed", payload: { status: "error", error: reason } });
+        return { status: "error", assistantMessageId, text: "", error: reason };
+      }
+      leaseId = ready.leaseId;
+    }
+
+    rotate = setInterval(() => {
+      if (sawToken || controller.signal.aborted) return;
+      void events
+        .append({ type: "step", payload: { label: stepLabel(++stepIndex) } })
+        .catch(() => {});
+    }, STEP_ROTATE_MS);
+
     const stream = gateway.stream({
       endpoint: resolved.config,
       messages: context,
@@ -300,8 +336,11 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     }
   } finally {
     clearInterval(poll);
-    clearInterval(rotate);
+    if (rotate) clearInterval(rotate);
     options.signal?.removeEventListener("abort", onExternalAbort);
+    if (options.computer && leaseId) {
+      await options.computer.release(row.bot.id, leaseId).catch(() => undefined);
+    }
   }
 
   await flush(true).catch(() => {});

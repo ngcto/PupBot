@@ -1,22 +1,20 @@
 "use server";
 
-import { StubComputerProvider } from "@pupbot/computers";
 import {
   encryptSecret,
   findCatalogMatch,
   newId,
   bot as botTable,
-  botComputer,
   botSection,
-  computer,
-  computerAccount,
   conversation,
   database,
   modelEndpoint,
   user as userTable,
 } from "@pupbot/db";
-import { and, asc, eq, count, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, count, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { ensureComputerPool } from "../lib/computers.ts";
+import { enqueueComputerProvision } from "../lib/queue.ts";
 import { currentWorkspace, requireUser } from "../lib/session.ts";
 
 const MAX_NAME = 60;
@@ -211,55 +209,33 @@ export async function updateBotSettings(botId: string, input: BotSettingsInput):
 }
 
 /**
- * The one-click fix behind a blocked composer. Until real providers land this
- * binds a stub computer, which is exactly the allocator's interface.
+ * The one-click fix behind a blocked composer, and the "Connect a computer"
+ * button: mark the bot as binding and let the worker allocate. Provisioning
+ * takes seconds and can back off, so it never runs inside the request.
  */
-export async function giveComputer(botId: string): Promise<{ status: string }> {
+export async function giveComputer(botId: string): Promise<{ state: string; reason: string | null }> {
   const { workspace, db } = await context();
   await ownedBot(workspace.id, botId);
 
-  const accounts = await db
-    .select()
-    .from(computerAccount)
-    .where(eq(computerAccount.provider, "stub"))
-    .limit(1);
-
-  let accountId = accounts[0]?.id;
-  if (!accountId) {
-    accountId = newId();
-    await db.insert(computerAccount).values({
-      id: accountId,
-      provider: "stub",
-      label: "Stub pool",
-      encryptedCredential: encryptSecret("stub-account"),
-      status: "active",
-      capacity: 5,
-    });
+  try {
+    await ensureComputerPool();
+    await enqueueComputerProvision(botId);
+  } catch (error) {
+    const reason = "The computer service is not reachable; try again.";
+    await db
+      .update(botTable)
+      .set({ computerState: "blocked", computerReason: reason, updatedAt: new Date() })
+      .where(eq(botTable.id, botId));
+    revalidatePath("/", "layout");
+    throw new Error(`${reason} (${error instanceof Error ? error.message : String(error)})`);
   }
 
-  const provider = new StubComputerProvider();
-  const ref = await provider.provision({ metadata: { botId } });
-
-  const computerId = newId();
-  await db.transaction(async (tx) => {
-    await tx
-      .update(botComputer)
-      .set({ releasedAt: new Date() })
-      .where(and(eq(botComputer.botId, botId), isNull(botComputer.releasedAt)));
-    await tx.insert(computer).values({
-      id: computerId,
-      accountId,
-      provider: ref.provider,
-      externalId: ref.id,
-      status: "awake",
-      specs: { vcpus: 4, memMiB: 8192 },
-      lastUsedAt: new Date(),
-    });
-    await tx.insert(botComputer).values({ id: newId(), botId, computerId });
-  });
-
+  await db
+    .update(botTable)
+    .set({ computerState: "binding", computerReason: null, updatedAt: new Date() })
+    .where(eq(botTable.id, botId));
   revalidatePath("/", "layout");
-  return { status: "awake" };
+  return { state: "binding", reason: null };
 }
 
 export interface EndpointInput {

@@ -3,6 +3,14 @@ import { serverEnv } from "@pupbot/config";
 
 export const RUN_QUEUE = "run";
 
+/** A bot waiting for a computer: the web action enqueues, the worker provisions. */
+export const COMPUTER_PROVISION_QUEUE = "computer-provision";
+
+export interface ComputerProvisionJobData {
+  botId: string;
+}
+
+
 export interface RunJobData {
   runId: string;
 }
