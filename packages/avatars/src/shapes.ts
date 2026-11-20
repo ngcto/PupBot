@@ -1,104 +1,90 @@
 import type { AvatarDefinition, AvatarShape, AvatarShapeId } from "./types.ts";
 
-/**
- * Geometry primitives. A definition is one filled path; subpaths overlap with
- * the nonzero rule, so a head is simply its parts written in one string and
- * they merge into a single silhouette.
- */
-const K = 0.5522847498;
-
 type Pt = [number, number];
+/** x, y and an optional corner radius. Without one the corner rounds as far as its neighbours allow. */
+type Vertex = [number, number, number?];
 
-function ellipse(cx: number, cy: number, rx: number, ry: number, rotationDeg = 0): string {
-  const rad = (rotationDeg * Math.PI) / 180;
+const K = 0.5522847498;
+const fmt = (n: number) => n.toFixed(2);
+
+/**
+ * One closed contour through the vertices with every corner rounded by a
+ * cubic. A head is one polygon, so ears and muzzle belong to the same outline
+ * instead of being unioned in, and every shape in the litter gets the same
+ * corner treatment: wide soft curves for the skull, a small radius for ear tips.
+ */
+function outline(vertices: Vertex[]): string {
+  const count = vertices.length;
+  const corners = vertices.map(([x, y, radius], i) => {
+    const prev = vertices[(i + count - 1) % count] as Vertex;
+    const next = vertices[(i + 1) % count] as Vertex;
+    const lengthIn = Math.hypot(x - prev[0], y - prev[1]);
+    const lengthOut = Math.hypot(next[0] - x, next[1] - y);
+    const cap = Math.min(lengthIn, lengthOut) / 2;
+    const r = Math.min(radius ?? cap, cap);
+    const start: Pt = [x + ((prev[0] - x) / lengthIn) * r, y + ((prev[1] - y) / lengthIn) * r];
+    const end: Pt = [x + ((next[0] - x) / lengthOut) * r, y + ((next[1] - y) / lengthOut) * r];
+    const c1: Pt = [start[0] + (x - start[0]) * K, start[1] + (y - start[1]) * K];
+    const c2: Pt = [end[0] + (x - end[0]) * K, end[1] + (y - end[1]) * K];
+    return { start, end, c1, c2 };
+  });
+  const p = (pt: Pt) => `${fmt(pt[0])} ${fmt(pt[1])}`;
+  const first = corners[0];
+  if (!first) throw new Error("an outline needs vertices");
+  const parts = [`M ${p(first.start)}`];
+  corners.forEach((corner, i) => {
+    if (i > 0) parts.push(`L ${p(corner.start)}`);
+    parts.push(`C ${p(corner.c1)} ${p(corner.c2)} ${p(corner.end)}`);
+  });
+  parts.push("Z");
+  return parts.join(" ");
+}
+
+/** Right half from the top-centre vertex to the bottom-centre vertex; the left half is its mirror. */
+function symmetric(half: Vertex[], axis = 50): Vertex[] {
+  const mirrored = half
+    .slice(1, -1)
+    .reverse()
+    .map(([x, y, r]): Vertex => [2 * axis - x, y, r]);
+  return [...half, ...mirrored];
+}
+
+function rotate(vertices: Vertex[], degrees: number, about: Pt = [50, 50]): Vertex[] {
+  const rad = (degrees * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
-  const point = (x: number, y: number): Pt => [cx + x * cos - y * sin, cy + x * sin + y * cos];
-  const p = (x: number, y: number) => point(x, y).map((n) => n.toFixed(2)).join(" ");
-  const kx = rx * K;
-  const ky = ry * K;
-  return [
-    `M ${p(-rx, 0)}`,
-    `C ${p(-rx, -ky)} ${p(-kx, -ry)} ${p(0, -ry)}`,
-    `C ${p(kx, -ry)} ${p(rx, -ky)} ${p(rx, 0)}`,
-    `C ${p(rx, ky)} ${p(kx, ry)} ${p(0, ry)}`,
-    `C ${p(-kx, ry)} ${p(-rx, ky)} ${p(-rx, 0)}`,
-    "Z",
-  ].join(" ");
+  return vertices.map(([x, y, r]): Vertex => {
+    const dx = x - about[0];
+    const dy = y - about[1];
+    return [about[0] + dx * cos - dy * sin, about[1] + dx * sin + dy * cos, r];
+  });
 }
 
-/** A tapered ear: straight sides into a rounded tip. */
-function cone(base: Pt, tip: Pt, halfWidth: number, tipWidth = 5): string {
-  const dx = tip[0] - base[0];
-  const dy = tip[1] - base[1];
-  const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length;
-  const uy = dy / length;
-  const px = -uy;
-  const py = ux;
-  const at = (t: number, side: number, width: number): Pt => [
-    base[0] + dx * t + px * side * width,
-    base[1] + dy * t + py * side * width,
-  ];
-  const p = (pt: Pt) => pt.map((n) => n.toFixed(2)).join(" ");
-  const a = at(0, 1, halfWidth);
-  const b = at(0.86, 1, halfWidth * 0.42);
-  const c = at(0.86, -1, halfWidth * 0.42);
-  const d = at(0, -1, halfWidth);
-  return `M ${p(a)} L ${p(b)} Q ${p(at(1, 0, tipWidth / 2))} ${p(c)} L ${p(d)} Z`;
-}
-
-/** N rounded bumps around an ellipse — fur, curls, scalloped edges. */
-function scallop(cx: number, cy: number, rx: number, ry: number, bumps: number, depth: number): string {
-  const step = (Math.PI * 2) / bumps;
-  const points: string[] = [];
-  for (let i = 0; i < bumps; i += 1) {
-    const angle = -Math.PI / 2 + i * step;
-    const outerX = cx + Math.cos(angle) * (rx + depth);
-    const outerY = cy + Math.sin(angle) * (ry + depth);
-    const nextAngle = angle + step;
-    const controlX = cx + Math.cos(angle + step / 2) * (rx + depth * 1.9);
-    const controlY = cy + Math.sin(angle + step / 2) * (ry + depth * 1.9);
-    const toX = cx + Math.cos(nextAngle) * (rx + depth);
-    const toY = cy + Math.sin(nextAngle) * (ry + depth);
-    if (i === 0) points.push(`M ${outerX.toFixed(2)} ${outerY.toFixed(2)}`);
-    points.push(
-      `Q ${controlX.toFixed(2)} ${controlY.toFixed(2)} ${toX.toFixed(2)} ${toY.toFixed(2)}`,
-    );
+/** A bumpy ring: peaks round, valleys tight. Peak 0 sits at twelve o'clock. */
+function scallop(cx: number, cy: number, outer: number, inner: number, bumps: number, flatten = 1): Vertex[] {
+  const out: Vertex[] = [];
+  for (let k = 0; k < bumps * 2; k += 1) {
+    const angle = -Math.PI / 2 + (k * Math.PI) / bumps;
+    const radius = k % 2 === 0 ? outer : inner;
+    out.push([cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius * flatten, k % 2 === 0 ? undefined : 2]);
   }
-  points.push("Z");
-  return points.join(" ");
-}
-
-function roundedRect(cx: number, cy: number, width: number, height: number, radius: number): string {
-  const x = cx - width / 2;
-  const y = cy - height / 2;
-  const r = Math.min(radius, width / 2, height / 2);
-  const right = x + width;
-  const bottom = y + height;
-  return [
-    `M ${x + r} ${y}`,
-    `L ${right - r} ${y}`,
-    `Q ${right} ${y} ${right} ${y + r}`,
-    `L ${right} ${bottom - r}`,
-    `Q ${right} ${bottom} ${right - r} ${bottom}`,
-    `L ${x + r} ${bottom}`,
-    `Q ${x} ${bottom} ${x} ${bottom - r}`,
-    `L ${x} ${y + r}`,
-    `Q ${x} ${y} ${x + r} ${y}`,
-    "Z",
-  ].join(" ");
+  return out;
 }
 
 interface Draft {
   id: AvatarShapeId;
   name: string;
   note: string;
-  parts: string[];
-  eyes: AvatarDefinition["eyes"];
+  vertices: Vertex[];
+  /** Position in the authored space; spacing and scale are final viewBox units. */
+  eyes: { x: number; y: number; spacing: number; scale: number };
 }
 
-/** The renderer keeps geometry inside 8..92; scale and centre each silhouette to use that box. */
+/**
+ * The renderer wants geometry inside 8..92. Scale each silhouette so its
+ * bounding box fills that square along the long side and centre it, then move
+ * the eyes with it. Every command is absolute and every number alternates x, y.
+ */
 const SAFE_MIN = 8;
 const SAFE_MAX = 92;
 
@@ -110,37 +96,9 @@ interface Fit {
 }
 
 function fitPath(path: string): Fit {
-  const tokens = path.match(/[MLCQZ]|-?\d+(?:\.\d+)?/g) ?? [];
-  const points: Pt[] = [];
-  let cursor = 0;
-  let command = "";
-  let x = 0;
-  let y = 0;
-
-  const read = (): number => Number(tokens[cursor++] ?? 0);
-  while (cursor < tokens.length) {
-    const token = tokens[cursor];
-    if (!token) break;
-    if (/[MLCQZ]/.test(token)) {
-      command = token;
-      cursor += 1;
-      if (command === "Z") continue;
-    }
-    if (command === "M" || command === "L") {
-      x = read();
-      y = read();
-      points.push([x, y]);
-    } else if (command === "Q") {
-      points.push([read(), read()], [read(), read()]);
-      points.push([x, y]);
-    } else if (command === "C") {
-      points.push([read(), read()], [read(), read()], [read(), read()]);
-      points.push([x, y]);
-    }
-  }
-
-  const xs = points.map((p) => p[0]);
-  const ys = points.map((p) => p[1]);
+  const numbers = (path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+  const xs = numbers.filter((_, i) => i % 2 === 0);
+  const ys = numbers.filter((_, i) => i % 2 === 1);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
@@ -150,20 +108,17 @@ function fitPath(path: string): Fit {
   const dx = 50 - ((minX + maxX) / 2) * scale;
   const dy = 50 - ((minY + maxY) / 2) * scale;
 
-  let out = 0;
-  const tx = (value: number) => value * scale;
-  const moved = path.replace(/-?\d+(?:\.\d+)?/g, () => {
-    const value = tx(Number((path.match(/-?\d+(?:\.\d+)?/g) ?? [])[out] ?? 0));
-    const delta = out % 2 === 0 ? dx : dy;
-    out += 1;
-    return (value + delta).toFixed(2);
+  let index = 0;
+  const moved = path.replace(/-?\d+(?:\.\d+)?/g, (match) => {
+    const value = Number(match) * scale + (index % 2 === 0 ? dx : dy);
+    index += 1;
+    return fmt(value);
   });
-
   return { path: moved, scale, dx, dy };
 }
 
 function build(draft: Draft): AvatarShape {
-  const fitted = fitPath(draft.parts.join(" "));
+  const fitted = fitPath(outline(draft.vertices));
   return {
     id: draft.id,
     name: draft.name,
@@ -176,173 +131,109 @@ function build(draft: Draft): AvatarShape {
       eyes: {
         x: draft.eyes.x * fitted.scale + fitted.dx,
         y: draft.eyes.y * fitted.scale + fitted.dy,
-        spacing: draft.eyes.spacing * fitted.scale,
-        scale: draft.eyes.scale * fitted.scale * 1.15,
+        spacing: draft.eyes.spacing,
+        scale: draft.eyes.scale,
       },
     },
   };
 }
 
-const eyes = (x: number, y: number, spacing = 21, scale = 1.55): AvatarDefinition["eyes"] => ({
-  x,
-  y,
-  spacing,
-  scale,
-});
+const eyes = (x: number, y: number, spacing = 12, scale = 1.6): Draft["eyes"] => ({ x, y, spacing, scale });
+
+const shaggy = scallop(50, 50, 45, 36, 7);
+shaggy.splice(7, 1, [43, 92, 4], [57, 92, 4]);
 
 export const SHAPES: readonly AvatarShape[] = [
   build({
     id: "pup",
     name: "Pup",
-    note: "Round head, chin bump, short folded ears",
-    parts: [
-      ellipse(50, 51, 36, 34),
-      ellipse(50, 72, 22, 12),
-      ellipse(16, 34, 10, 15, -24),
-      ellipse(84, 34, 10, 15, 24),
-    ],
-    eyes: eyes(50, 46),
+    note: "Round head, chin bump, short forward-folded ears, small centred snout",
+    vertices: symmetric([[50,12],[64,13,12],[78,18,8],[90,30,10],[92,48,10],[88,58,8],[78,48,2],[80,70,12],[68,90,12],[57,98,6],[50,98]]),
+    eyes: eyes(50, 54),
   }),
   build({
     id: "fold",
     name: "Fold",
-    note: "Long floppy ears past the jaw, short muzzle",
-    parts: [
-      ellipse(50, 48, 34, 37),
-      ellipse(50, 70, 19, 11),
-      ellipse(13, 62, 11, 26, -10),
-      ellipse(87, 62, 11, 26, 10),
-    ],
-    eyes: eyes(50, 44, 22, 1.5),
+    note: "Long floppy ears past the jaw, short muzzle with an underbite",
+    vertices: symmetric([[50,8],[62,8,12],[72,12,8],[88,20,10],[98,44,10],[98,76,10],[92,96,9],[80,94,6],[70,50,2],[72,66,10],[66,80,10],[58,88,8],[50,90]]),
+    eyes: eyes(50, 52),
   }),
   build({
     id: "point",
     name: "Point",
-    note: "Tapered crown, upright ear tips",
-    parts: [
-      ellipse(50, 56, 33, 34),
-      cone([33, 34], [27, 6], 12),
-      cone([67, 34], [73, 6], 12),
-    ],
-    eyes: eyes(50, 52, 22, 1.55),
+    note: "Tapered crown, upright triangular ear tips, flat-bottomed muzzle",
+    vertices: symmetric([[50,24],[60,24,6],[80,2,5],[92,40,8],[96,58,12],[88,78,10],[70,86,6],[64,100,6],[50,100]]),
+    eyes: eyes(50, 60),
   }),
   build({
     id: "flop",
     name: "Flop",
-    note: "One ear up, one folded, muzzle offset",
-    parts: [
-      ellipse(50, 50, 35, 35, -4),
-      cone([34, 32], [25, 8], 12),
-      ellipse(84, 60, 12, 22, 18),
-      ellipse(46, 74, 17, 10, -6),
-    ],
-    eyes: eyes(48, 46, 21, 1.5),
+    note: "One ear up, one folded across, muzzle offset left, head tilted",
+    vertices: rotate([[46,14,12],[58,14,10],[60,16,8],[78,0,5],[90,32,8],[93,54,12],[86,76,12],[68,90,12],[52,92,8],[44,99,6],[32,99,6],[24,88,8],[20,72,12],[22,50,2],[12,62,8],[8,46,10],[12,28,10],[24,18,8],[38,14,12]], 4),
+    eyes: eyes(50, 54),
   }),
   build({
     id: "tuft",
     name: "Tuft",
-    note: "Two upright ears with a fur tuft between",
-    parts: [
-      ellipse(50, 54, 35, 33),
-      cone([34, 32], [30, 8], 11),
-      cone([66, 32], [70, 8], 11),
-      ellipse(50, 22, 7, 10),
-      ellipse(50, 72, 18, 10),
-    ],
-    eyes: eyes(50, 50, 21, 1.5),
+    note: "Two upright ears with a fur tuft between, short muzzle",
+    vertices: symmetric([[50,8,10],[58,22,5],[66,22,5],[80,4,9],[92,36,10],[96,60,12],[88,80,12],[68,90,10],[58,98,6],[50,98]]),
+    eyes: eyes(50, 58),
   }),
   build({
     id: "snout",
     name: "Snout",
-    note: "Long muzzle to one side, ears swept back",
-    parts: [
-      ellipse(44, 50, 33, 33),
-      ellipse(74, 60, 24, 14, 8),
-      ellipse(18, 40, 12, 16, -35),
-      ellipse(26, 66, 11, 14, -25),
-    ],
-    eyes: eyes(42, 46, 20, 1.45),
+    note: "Profile-leaning, ears swept back, long muzzle to the right edge",
+    vertices: [[42,12,14],[60,16,12],[70,36,8],[94,40,6],[100,52,8],[98,68,8],[72,74,6],[62,88,12],[42,94,14],[26,86,12],[20,70,10],[18,52,2],[2,52,7],[6,30,10],[22,16,12]],
+    eyes: eyes(42, 48),
   }),
   build({
     id: "pug",
     name: "Pug",
-    note: "Wide low head with cheek bulges, tiny ears",
-    parts: [
-      ellipse(50, 55, 40, 30),
-      ellipse(22, 60, 10, 11),
-      ellipse(78, 60, 10, 11),
-      ellipse(32, 27, 8, 11, -14),
-      ellipse(68, 27, 8, 11, 14),
-      ellipse(50, 70, 17, 9),
-    ],
-    eyes: eyes(50, 51, 24, 1.5),
+    note: "Wide low head with cheek bulges, small round ears high and close",
+    vertices: symmetric([[50,10],[62,11,10],[68,8,4],[78,2,8],[88,10,8],[92,28,8],[100,54,14],[96,72,10],[80,80,4],[70,88,8],[50,88]]),
+    eyes: eyes(50, 50, 22),
   }),
   build({
     id: "dane",
     name: "Dane",
-    note: "Tall narrow head, long jaw, tall ears",
-    parts: [
-      ellipse(50, 48, 29, 38),
-      cone([36, 26], [33, 4], 10),
-      cone([64, 26], [67, 4], 10),
-      ellipse(50, 80, 16, 14),
-    ],
-    eyes: eyes(50, 45, 19, 1.35),
+    note: "Tall narrow head, tall ears, long jaw",
+    vertices: symmetric([[50,22],[60,24,6],[76,2,5],[88,34,6],[90,54,12],[78,70,8],[74,84,4],[72,100,8],[50,100]]),
+    eyes: eyes(50, 42, 10, 1.4),
   }),
   build({
     id: "bun",
     name: "Bun",
-    note: "Top-knot with ears drooping out from under it",
-    parts: [
-      ellipse(50, 55, 35, 32),
-      ellipse(50, 24, 13, 11),
-      ellipse(19, 52, 9, 19, -18),
-      ellipse(81, 52, 9, 19, 18),
-    ],
-    eyes: eyes(50, 53, 21, 1.5),
+    note: "Top-knot with ears drooping from under it",
+    vertices: symmetric([[50,2,12],[62,6,10],[64,16,6],[68,24,4],[82,30,10],[93,46,10],[92,70,9],[76,56,2],[78,72,12],[66,90,12],[50,96]]),
+    eyes: eyes(50, 58),
   }),
   build({
     id: "shag",
     name: "Shag",
-    note: "Scalloped fur edge, ears lost in the shag",
-    parts: [scallop(50, 52, 33, 32, 7, 5), ellipse(50, 71, 17, 10)],
-    eyes: eyes(50, 48, 20, 1.5),
+    note: "Scalloped fur edge, ears lost in the shag, muzzle barely breaking it",
+    vertices: shaggy,
+    eyes: eyes(50, 50),
   }),
   build({
     id: "squish",
     name: "Squish",
-    note: "Very wide and low, ears out sideways",
-    parts: [
-      ellipse(50, 57, 42, 27),
-      ellipse(10, 50, 9, 17, -60),
-      ellipse(90, 50, 9, 17, 60),
-      ellipse(50, 69, 20, 9),
-    ],
-    eyes: eyes(50, 54, 26, 1.5),
+    note: "Very wide and low, ears out sideways, wide flat muzzle",
+    vertices: symmetric([[50,0],[72,1,18],[86,12,12],[90,24,8],[96,28,6],[100,46,10],[94,60,6],[84,56,2],[86,66,10],[76,74,12],[62,78,8],[50,78]]),
+    eyes: eyes(50, 40, 20),
   }),
   build({
     id: "vulpine",
     name: "Vulpine",
-    note: "Pointed tall head, two sharp ears, tapering muzzle",
-    parts: [
-      ellipse(50, 54, 30, 34),
-      cone([36, 28], [28, 3], 9, 3),
-      cone([64, 28], [72, 3], 9, 3),
-      cone([50, 66], [50, 86], 16, 6),
-    ],
-    eyes: eyes(50, 50, 19, 1.4),
+    note: "Pointed tall head, two sharp ears, muzzle tapering to a point",
+    vertices: symmetric([[50,24],[58,25,4],[82,0,4],[93,38,4],[94,56,10],[74,80,12],[54,100,4],[50,100,4]]),
+    eyes: eyes(50, 56, 11, 1.5),
   }),
   build({
     id: "crown",
     name: "Crown",
-    note: "Flat bottom with a three-point crest",
-    parts: [
-      roundedRect(50, 60, 72, 54, 24),
-      cone([30, 36], [22, 10], 9),
-      cone([50, 34], [50, 4], 10),
-      cone([70, 36], [78, 10], 9),
-    ],
-    eyes: eyes(50, 57, 21, 1.5),
+    note: "Flat bottom with a three-point crest and upright ears at its outer points",
+    vertices: symmetric([[50,10,4],[60,28,4],[78,0,4],[92,40,5],[96,66,10],[90,95,9],[50,95]]),
+    eyes: eyes(50, 64),
   }),
 ] as const;
 
