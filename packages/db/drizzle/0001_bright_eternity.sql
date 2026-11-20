@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "bot_computer_active_idx" ON "bot_computer" USING btree ("bot_id") WHERE "bot_computer"."released_at" is null;

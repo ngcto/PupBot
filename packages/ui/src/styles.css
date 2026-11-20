@@ -1,0 +1,156 @@
+@import "tailwindcss";
+
+/*
+ * Every value below is measured; tokens.json is the machine-readable source.
+ * The bot's avatar colour is the only accent in the product, so it arrives as
+ * a CSS variable (--accent) set per bot rather than as a palette here.
+ */
+@theme {
+  --color-app: #0e0e0e;
+  --color-canvas: #121212;
+  --color-dialog: #121212;
+  --color-dialog-nav: #0a0a0a;
+  --color-raised: #1f1f1f;
+  --color-raised-1: #232323;
+  --color-raised-2: #272727;
+  --color-raised-3: #2b2b2b;
+  --color-hover: #262626;
+  --color-bubble-top: #212121;
+  --color-bubble-bottom: #1b1b1b;
+
+  --color-hairline: #1b1b1b;
+  --color-divider: #1e1e1e;
+  --color-card: #212121;
+  --color-menu: #343434;
+  --color-input: #343434;
+  --color-strong: #4e4e4e;
+  --color-dialog-edge: #323232;
+
+  --color-ink: #f5f5f5;
+  --color-ink-secondary: #ababab;
+  --color-ink-tertiary: #a7a7a7;
+  --color-ink-muted: #8d8d8d;
+  --color-ink-faint: #707070;
+  --color-ink-disabled: #6f6f6f;
+  --color-ink-dim: #b6b6b6;
+
+  --color-success: #00ba69;
+  --color-warning: #e28600;
+  --color-danger: #ff6463;
+  --color-danger-solid: #cf2b35;
+  --color-ring: #4ccce0;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-xs--letter-spacing: 0.02em;
+  --text-sm: 12px;
+  --text-sm--line-height: 16px;
+  --text-base: 13px;
+  --text-base--line-height: 18px;
+  --text-body: 14px;
+  --text-body--line-height: 22px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-lg--letter-spacing: -0.01em;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 22px;
+  --text-2xl--line-height: 28px;
+  --text-2xl--letter-spacing: -0.01em;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-dialog: 14px;
+  --radius-pill: 9999px;
+
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-popover: 0 10px 30px rgba(0, 0, 0, 0.5);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-hairline);
+  }
+
+  html,
+  body {
+    height: 100%;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 22px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--accent, #1884fc) 45%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  [data-slot="menu-item"][data-highlighted],
+  [data-slot="menu-item"]:focus-visible {
+    background: var(--color-raised-3);
+    outline: none;
+  }
+
+  [data-slot="select-item"][data-highlighted] {
+    background: var(--color-raised-3);
+    outline: none;
+  }
+
+  [data-slot="tab"][data-selected] {
+    background: var(--color-raised);
+    color: var(--color-ink);
+  }
+
+  [data-slot="dialog-backdrop"] {
+    background: rgba(0, 0, 0, 0.72);
+  }
+}
+
+/* The measured scrollbar: 6px, #2a2a2a, only visible while scrolling. */
+@layer utilities {
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: #2a2a2a;
+    border-radius: 9999px;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .bubble-fill {
+    background-image: linear-gradient(to bottom, var(--color-bubble-top), var(--color-bubble-bottom));
+    border: 1px solid var(--color-bubble-top);
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

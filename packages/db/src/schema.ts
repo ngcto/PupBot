@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -335,7 +336,12 @@ export const botComputer = pgTable(
     boundAt: timestamp("bound_at", { withTimezone: true }).notNull().defaultNow(),
     releasedAt: timestamp("released_at", { withTimezone: true }),
   },
-  (t) => [index("bot_computer_bot_idx").on(t.botId)],
+  (t) => [
+    index("bot_computer_bot_idx").on(t.botId),
+    uniqueIndex("bot_computer_active_idx")
+      .on(t.botId)
+      .where(sql`${t.releasedAt} is null`),
+  ],
 );
 
 /* ──────────────────────── connectors, skills, routines ─────────────── */

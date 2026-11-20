@@ -1,12 +1,20 @@
 import { serve } from "@hono/node-server";
 import { serverEnv } from "@pupbot/config";
-import { Hono } from "hono";
+import { closeDatabase } from "@pupbot/db";
+import { createApp } from "./app.ts";
 
-const app = new Hono();
-
-app.get("/health", (c) => c.json({ ok: true, service: "pupbot-api" }));
-
+const app = createApp();
 const port = serverEnv().API_PORT;
-serve({ fetch: app.fetch, port }, (info) => {
+
+const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`pupbot api listening on http://localhost:${info.port}`);
 });
+
+const shutdown = async () => {
+  server.close();
+  await closeDatabase();
+  process.exit(0);
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

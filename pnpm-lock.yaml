@@ -205,6 +205,9 @@ importers:
       '@pupbot/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)
       hono:
         specifier: ^4.13.19
         version: 4.13.19
@@ -418,6 +421,9 @@ importers:
 
   packages/config:
     dependencies:
+      dotenv:
+        specifier: ^18.0.10
+        version: 18.0.10
       zod:
         specifier: ^4.1.12
         version: 4.6.7
@@ -446,6 +452,9 @@ importers:
       pg:
         specifier: ^8.16.3
         version: 8.23.1
+      pg-boss:
+        specifier: ^12.38.2
+        version: 12.38.2(@opentelemetry/api@1.10.0)
       uuid:
         specifier: ^13.0.0
         version: 13.0.2
@@ -2242,6 +2251,11 @@ packages:
 
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
+
+  dotenv@18.0.10:
+    resolution: {integrity: sha512-89FAA1xchzK2mxVWdr5F/0rldwiueXs6zJM86rO66EzekR1iBdiXRthyG+m5GvkJaFH3C2LESzamTkgndmLT2A==}
+    engines: {node: '>=12'}
+    hasBin: true
 
   drizzle-kit@0.31.11:
     resolution: {integrity: sha512-YCYqxTLIB2OCqf6w9/Vef13baBVbwQIPcbT4Y56AfO6B9ajZhDhD8Jkveg/hJvT/iuMloKD/IYYkyMMNhr7Kqg==}
@@ -4562,6 +4576,8 @@ snapshots:
   devlop@1.1.0:
     dependencies:
       dequal: 2.0.3
+
+  dotenv@18.0.10: {}
 
   drizzle-kit@0.31.11:
     dependencies:

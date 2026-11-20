@@ -5,3 +5,6 @@ export { auth, createAuth } from "./auth.ts";
 export type { Auth } from "./auth.ts";
 export { newId } from "./ids.ts";
 export { ensureWorkspace, findWorkspace, sectionsFor } from "./workspace.ts";
+export { encryptSecret, decryptSecret, maskSecret } from "./crypto.ts";
+export { createBoss, startBoss, RUN_QUEUE } from "./queue.ts";
+export type { RunJobData } from "./queue.ts";
