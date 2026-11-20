@@ -1,45 +1,60 @@
-/** Shape ids are provisional until HOME-44 publishes `avatars.json`. */
-export type AvatarShapeId = string;
+export type Shape =
+  | { kind: "circle"; cx: number; cy: number; r: number }
+  | { kind: "ellipse"; cx: number; cy: number; rx: number; ry: number }
+  | { kind: "rect"; x: number; y: number; w: number; h: number; r?: number }
+  | { kind: "polygon"; points: Array<[number, number]>; cornerRadius?: number };
+
+export type EyeSlot = { x: number; y: number; w: number; h: number };
+
+export type AvatarShapeId =
+  | "circle"
+  | "squircle"
+  | "drop"
+  | "cloud"
+  | "hexa"
+  | "gear"
+  | "oval"
+  | "triangle"
+  | "shield"
+  | "puff"
+  | "pill"
+  | "diamond"
+  | "arch";
 
 export type AvatarColorId =
-  | "chalk"
-  | "sand"
-  | "tomato"
-  | "ember"
-  | "amber"
-  | "leaf"
+  | "white"
+  | "brown"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "aqua"
   | "teal"
-  | "sky"
-  | "iris"
-  | "bloom"
-  | "slate";
+  | "blue"
+  | "purple"
+  | "pink"
+  | "grey"
+  | "black";
 
-/** The library's definition contract: one silhouette path in a 0 0 100 100 box. */
-export interface AvatarDefinition {
-  version: 1;
-  id: string;
-  name: string;
-  body: { path: string };
-  eyes: { x: number; y: number; spacing: number; scale: number };
-}
+/** Back-compat alias. */
+export type AvatarColor = AvatarColorId;
 
 export interface AvatarShape {
   id: AvatarShapeId;
   name: string;
-  /** What the silhouette reads as, for the create dialog and docs. */
-  note: string;
-  definition: AvatarDefinition;
+  note?: string;
+  eyeY: number;
+  parts: Shape[];
 }
 
-export interface AvatarColor {
-  id: AvatarColorId;
-  name: string;
-  hex: string;
+export interface AvatarDefinition extends AvatarShape {
+  eyes: [EyeSlot, EyeSlot];
 }
 
 export interface AvatarRenderInput {
-  shape: AvatarShapeId;
-  /** A palette id or any `#rgb`/`#rrggbb` value. */
+  shape: AvatarShapeId | string;
   color: AvatarColorId | string;
   size?: number;
+  title?: string;
+  className?: string;
 }

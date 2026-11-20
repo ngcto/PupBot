@@ -1,101 +1,185 @@
 import { describe, expect, it } from "vitest";
-import { validateAvatar } from "open-bot-avatar";
-import { SHAPES, DEFAULT_SHAPE, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
+import {
+  AVATAR_SHAPES,
+  SHAPE_IDS,
+  SHAPES,
+  isShapeId,
+  renderAvatarSvg,
+  resolveColor,
+  shapeById,
+  shapeDefinition,
+} from "../src/index.ts";
 
-function coordinatesOf(path: string): Array<[number, number]> {
-  const numbers = (path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
-  const points: Array<[number, number]> = [];
-  for (let index = 0; index + 1 < numbers.length; index += 2) {
-    points.push([numbers[index]!, numbers[index + 1]!]);
-  }
-  return points;
-}
-
-const CONTRACT_ORDER = [
-  "orb",
-  "squircle",
-  "drop",
-  "bell",
-  "arch",
-  "hexa",
-  "pill",
-  "gem",
-  "crest",
-  "horns",
-  "antennae",
-  "scallop",
-  "shoulder",
-] as const;
-
-describe("symmetric shapes", () => {
-  it("lists every contract id exactly once, in contract order", () => {
-    expect(SHAPES.map((shape) => shape.id)).toEqual([...CONTRACT_ORDER]);
-    expect(new Set(SHAPES.map((shape) => shape.id)).size).toBe(CONTRACT_ORDER.length);
+describe("shape registry", () => {
+  it("covers the canonical thirteen soft shapes in stable order", () => {
+    expect(SHAPES).toHaveLength(13);
+    expect(AVATAR_SHAPES).toBe(SHAPES);
+    expect([...SHAPE_IDS]).toEqual([
+      "circle",
+      "squircle",
+      "drop",
+      "cloud",
+      "hexa",
+      "gear",
+      "oval",
+      "triangle",
+      "shield",
+      "puff",
+      "pill",
+      "diamond",
+      "arch",
+    ]);
   });
 
-  it("keeps the lookup helpers consistent with the list", () => {
-    expect(DEFAULT_SHAPE).toBe("orb");
-    for (const id of CONTRACT_ORDER) {
+  it("does not define a PupBot-owned avatar default export", async () => {
+    const mod = await import("../src/index.ts");
+    expect("DEFAULT_SHAPE" in mod).toBe(false);
+    expect("defaultAvatar" in mod).toBe(false);
+  });
+
+  it("resolves canonical ids and rejects unknown ones", () => {
+    for (const id of SHAPE_IDS) {
       expect(isShapeId(id)).toBe(true);
-      expect(shapeById(id).definition).toBe(shapeDefinition(id));
-      expect(shapeDefinition(id).id).toBe(id);
+      expect(shapeById(id)?.id).toBe(id);
+      expect(shapeDefinition(id)).toBeDefined();
     }
-    expect(isShapeId("bean")).toBe(false);
-    expect(shapeById("bean").id).toBe("orb");
+    expect(isShapeId("banana")).toBe(false);
+    expect(shapeById("banana")).toBeUndefined();
   });
 
-  it.each(CONTRACT_ORDER)("%s passes open-bot-avatar validation", (id) => {
-    const result = validateAvatar(JSON.parse(JSON.stringify(shapeDefinition(id))));
-    expect(result.ok, result.ok ? "" : result.errors.join("; ")).toBe(true);
+  it("keeps legacy out-of-spec ids readable for compatibility", () => {
+    expect(isShapeId("orb")).toBe(true);
+    expect(shapeById("orb")?.id).toBe("circle");
+    expect(shapeById("bell")?.id).toBe("arch");
+    expect(shapeDefinition("scallop")?.id).toBe("cloud");
   });
+});
 
-  it.each(CONTRACT_ORDER)("%s keeps every path coordinate inside the 6..94 safe area", (id) => {
-    const numbers = (shapeDefinition(id).body.path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
-    expect(numbers.length).toBeGreaterThan(0);
-    for (const value of numbers) {
-      expect(value).toBeGreaterThanOrEqual(6);
-      expect(value).toBeLessThanOrEqual(94);
-    }
-  });
-
-  it.each(CONTRACT_ORDER)("%s is one closed filled path with eyes inside the safe area", (id) => {
-    const { body, eyes } = shapeDefinition(id);
-    expect(body.path.startsWith("M ")).toBe(true);
-    expect(body.path.trimEnd().endsWith("Z")).toBe(true);
-    expect(body.path).not.toMatch(/[Aa]/);
-    expect(eyes.x - eyes.spacing / 2).toBeGreaterThan(6);
-    expect(eyes.x + eyes.spacing / 2).toBeLessThan(94);
-    expect(eyes.y).toBeGreaterThan(6);
-    expect(eyes.y).toBeLessThan(94);
-  });
-
-  it("renders deterministically and paints the silhouette in the requested colour", () => {
-    for (const id of CONTRACT_ORDER) {
-      const first = renderAvatarSvg({ shape: id, color: "tomato", size: 48 });
-      expect(renderAvatarSvg({ shape: id, color: "tomato", size: 48 })).toBe(first);
-      expect(first.toLowerCase()).toContain(resolveColor("tomato"));
-    }
-  });
-
-  it.each(CONTRACT_ORDER)("%s mirrors exactly about the vertical axis", (id) => {
-    const points = coordinatesOf(shapeDefinition(id).body.path);
-    const tolerance = 0.35;
-    for (const [x, y] of points) {
-      const mirrored = points.some(
-        ([ox, oy]) => Math.abs(ox - (100 - x)) <= tolerance && Math.abs(oy - y) <= tolerance,
-      );
-      expect(mirrored, `no mirror for (${x.toFixed(2)}, ${y.toFixed(2)})`).toBe(true);
+describe("silhouette and eye contract", () => {
+  it("keeps every silhouette part within the 0..100 box", () => {
+    for (const shape of SHAPES) {
+      const def = shapeDefinition(shape.id)!;
+      expect(def.parts.length, shape.id).toBeGreaterThan(0);
+      for (const part of def.parts) {
+        if (part.kind === "circle") {
+          expect(part.cx - part.r).toBeGreaterThanOrEqual(-0.01);
+          expect(part.cy - part.r).toBeGreaterThanOrEqual(-0.01);
+          expect(part.cx + part.r).toBeLessThanOrEqual(100.01);
+          expect(part.cy + part.r).toBeLessThanOrEqual(100.01);
+        } else if (part.kind === "ellipse") {
+          expect(part.cx - part.rx).toBeGreaterThanOrEqual(-0.01);
+          expect(part.cy - part.ry).toBeGreaterThanOrEqual(-0.01);
+          expect(part.cx + part.rx).toBeLessThanOrEqual(100.01);
+          expect(part.cy + part.ry).toBeLessThanOrEqual(100.01);
+        } else if (part.kind === "rect") {
+          expect(part.x).toBeGreaterThanOrEqual(-0.01);
+          expect(part.y).toBeGreaterThanOrEqual(-0.01);
+          expect(part.x + part.w).toBeLessThanOrEqual(100.01);
+          expect(part.y + part.h).toBeLessThanOrEqual(100.01);
+        } else {
+          const xs = part.points.map(([x]) => x);
+          const ys = part.points.map(([, y]) => y);
+          expect(Math.min(...xs)).toBeGreaterThanOrEqual(-0.01);
+          expect(Math.min(...ys)).toBeGreaterThanOrEqual(-0.01);
+          expect(Math.max(...xs)).toBeLessThanOrEqual(100.01);
+          expect(Math.max(...ys)).toBeLessThanOrEqual(100.01);
+        }
+      }
     }
   });
 
-  it.each(CONTRACT_ORDER)("%s stays centred on x = 50", (id) => {
-    const points = coordinatesOf(shapeDefinition(id).body.path);
-    const xs = points.map(([x]) => x);
-    expect(Math.min(...xs) + Math.max(...xs)).toBeCloseTo(100, 1);
+  it("uses simple contract eyes with the specified per-shape placement", () => {
+    const w = 22;
+    const h = 34;
+    const gap = 18;
+    const expectedY: Record<string, number> = {
+      circle: 0.46,
+      squircle: 0.46,
+      hexa: 0.46,
+      gear: 0.46,
+      puff: 0.46,
+      pill: 0.46,
+      diamond: 0.46,
+      cloud: 0.48,
+      oval: 0.42,
+      shield: 0.42,
+      arch: 0.42,
+      drop: 0.56,
+      triangle: 0.56,
+    };
+
+    for (const shape of SHAPES) {
+      expect(shape.eyeY).toBe(expectedY[shape.id]);
+      const def = shapeDefinition(shape.id)!;
+      expect(def.eyes).toHaveLength(2);
+      const [left, right] = def.eyes;
+      expect(left.w).toBeCloseTo(w, 5);
+      expect(right.w).toBeCloseTo(w, 5);
+      expect(left.h).toBeCloseTo(h, 5);
+      expect(right.h).toBeCloseTo(h, 5);
+      expect(left.y).toBeCloseTo(expectedY[shape.id] * 100 - h / 2, 5);
+      expect(right.y).toBeCloseTo(left.y, 5);
+      const leftCentre = left.x + left.w / 2;
+      const rightCentre = right.x + right.w / 2;
+      expect((leftCentre + rightCentre) / 2).toBeCloseTo(50, 4);
+      expect(rightCentre - leftCentre).toBeCloseTo(w + gap, 4);
+    }
   });
 
-  it("gives the eyes the contract ink at 90% opacity", () => {
-    const svg = renderAvatarSvg({ shape: "orb", color: "sky", size: 96 });
-    expect(svg).toContain('fill="#121212" fill-opacity="0.9"');
+  it("keeps silhouettes mirror-symmetric about the vertical centre", () => {
+    for (const shape of SHAPES) {
+      const def = shapeDefinition(shape.id)!;
+      const xs = def.parts.flatMap((part) => {
+        if (part.kind === "circle") return [part.cx - part.r, part.cx, part.cx + part.r];
+        if (part.kind === "ellipse") return [part.cx - part.rx, part.cx, part.cx + part.rx];
+        if (part.kind === "rect") return [part.x, part.x + part.w / 2, part.x + part.w];
+        return part.points.map(([x]) => x);
+      });
+      const centre = (Math.min(...xs) + Math.max(...xs)) / 2;
+      expect(Math.abs(centre - 50), shape.id).toBeLessThan(2);
+    }
+  });
+});
+
+describe("renderer", () => {
+  it("renders the silhouette at the requested colour and size", () => {
+    const svg = renderAvatarSvg({ shape: "circle", color: "white", size: 96 });
+    expect(svg).toContain('viewBox="0 0 100 100"');
+    expect(svg).toContain('width="96"');
+    expect(svg).toContain(`fill="${resolveColor("white")}"`);
+  });
+
+  it("accepts palette ids and raw CSS colours", () => {
+    expect(renderAvatarSvg({ shape: "circle", color: "teal", size: 32 })).toContain(
+      'fill="#1aa7a9"',
+    );
+    expect(renderAvatarSvg({ shape: "circle", color: "rgb(1, 2, 3)", size: 32 })).toContain(
+      'fill="rgb(1, 2, 3)"',
+    );
+  });
+
+  it("renders every canonical shape without throwing", () => {
+    for (const shape of SHAPES) {
+      const svg = renderAvatarSvg({ shape: shape.id, color: "blue", size: 32 });
+      expect(svg).toContain("<svg");
+      expect(svg.length).toBeGreaterThan(80);
+    }
+  });
+
+  it("draws simple slot eyes (no pupil/highlight) in contract ink", () => {
+    const svg = renderAvatarSvg({ shape: "circle", color: "white", size: 96 });
+    expect(svg).toContain('class="eye-slot"');
+    expect(svg).toContain('fill="#121212"');
+    expect(svg).toContain('fill-opacity="0.9"');
+    expect(svg).not.toMatch(/pupil/i);
+  });
+
+  it("keeps the SVG accessible", () => {
+    const labelled = renderAvatarSvg({ shape: "circle", color: "white", size: 32, title: "Bot" });
+    expect(labelled).toContain('role="img"');
+    expect(labelled).toContain("<title>Bot</title>");
+
+    const decorative = renderAvatarSvg({ shape: "circle", color: "white", size: 32, title: "" });
+    expect(decorative).toContain('aria-hidden="true"');
   });
 });

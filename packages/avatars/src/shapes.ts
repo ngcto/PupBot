@@ -1,378 +1,287 @@
-import type { AvatarDefinition, AvatarShape } from "./types.ts";
+import type { AvatarDefinition, AvatarShape, AvatarShapeId, EyeSlot, Shape } from "./types.ts";
 
 /**
- * Symmetric silhouettes only: every outline mirrors exactly about x = 50.
- * Vertical asymmetry is used on purpose (crests, horns, antennae, scallops,
- * flat bases, wide shoulders); horizontal asymmetry is never allowed. Eyes may
- * sit off-centre vertically; the outline may not sit off-centre horizontally.
- *
- * The ids and their proportions come from `handoffs/spec/avatars.json`. Adding
- * or renaming a shape is one entry in DRAFTS.
+ * Canonical PupBot avatar contract from `handoffs/spec/avatars.json`.
+ * Thirteen soft, mirror-symmetric silhouettes in stable order. One readable
+ * form per head, generous radii, nothing thinner than 0.08 of the box, and
+ * corners no tighter than 0.1. Eyes are identical vertical rounded slots.
  */
+
+const BOX = 100;
 const CENTRE = 50;
-/** The renderer refuses geometry outside 6..94, so a silhouette fills 0.88. */
-const SAFE_MIN = 6;
-const SAFE_MAX = 94;
-const SPAN = SAFE_MAX - SAFE_MIN;
-const STEPS = 96;
+const WIDE = 88; // 0.88 of box at widest
+const COG_REACH = 96; // gear cogs may reach 0.96
 
-type Pt = [number, number];
+const EYE_W = BOX * 0.22;
+const EYE_H = BOX * 0.34;
+const GAP = BOX * 0.18;
 
-/** x = 50 ± rx·|cos|^(2/n), y = cy ± ry·|sin|^(2/n): symmetric by construction. */
-function superellipse(cy: number, rx: number, ry: number, top = 2, bottom = 2): string {
-  const points: string[] = [];
-  for (let index = 0; index < STEPS; index += 1) {
-    const angle = (index / STEPS) * Math.PI * 2 - Math.PI / 2;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const exponent = sin < 0 ? top : bottom;
-    const x = CENTRE + rx * Math.sign(cos) * Math.abs(cos) ** (2 / exponent);
-    const y = cy + ry * Math.sign(sin) * Math.abs(sin) ** (2 / exponent);
-    points.push(fmt([x, y]));
-  }
-  return `M ${points.join(" L ")} Z`;
+function circle(cx: number, cy: number, r: number): Shape {
+  return { kind: "circle", cx, cy, r };
+}
+function ellipse(cx: number, cy: number, rx: number, ry: number): Shape {
+  return { kind: "ellipse", cx, cy, rx, ry };
+}
+function roundedRect(x: number, y: number, w: number, h: number, r: number): Shape {
+  return { kind: "rect", x, y, w, h, r };
+}
+function roundedPolygon(points: Array<[number, number]>, cornerRadius = 0): Shape {
+  return { kind: "polygon", points, cornerRadius };
 }
 
-function circle(cx: number, cy: number, radius: number): string {
-  const points: string[] = [];
-  for (let index = 0; index < STEPS; index += 1) {
-    const angle = (index / STEPS) * Math.PI * 2;
-    points.push(fmt([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]));
-  }
-  return `M ${points.join(" L ")} Z`;
-}
-
-/** A vertical capsule: two half circles joined by straight sides. */
-function capsule(cy: number, width: number, height: number): string {
-  const rx = width / 2;
-  const ry = height / 2;
-  const top = cy - ry;
-  const bottom = cy + ry;
-  const left = CENTRE - rx;
-  const right = CENTRE + rx;
+function eyeSlots(y: number): [EyeSlot, EyeSlot] {
+  const top = BOX * y - EYE_H / 2;
+  const leftX = CENTRE - GAP / 2 - EYE_W;
+  const rightX = CENTRE + GAP / 2;
   return [
-    `M ${left} ${top + rx}`,
-    `Q ${left} ${top} ${left + rx} ${top}`,
-    `L ${right - rx} ${top}`,
-    `Q ${right} ${top} ${right} ${top + rx}`,
-    `L ${right} ${bottom - rx}`,
-    `Q ${right} ${bottom} ${right - rx} ${bottom}`,
-    `L ${left + rx} ${bottom}`,
-    `Q ${left} ${bottom} ${left} ${bottom - rx}`,
-    "Z",
-  ].join(" ");
-}
-
-/** A polygon with uniformly rounded corners; pass the full outline clockwise. */
-function roundedPolygon(points: Pt[], radius: number): string {
-  const commands: string[] = [];
-  const count = points.length;
-
-  for (let index = 0; index < count; index += 1) {
-    const previous = points[(index - 1 + count) % count]!;
-    const current = points[index]!;
-    const next = points[(index + 1) % count]!;
-    commands.push(
-      index === 0 ? `M ${fmt(along(current, previous, radius))}` : `L ${fmt(along(current, previous, radius))}`,
-      `Q ${fmt(current)} ${fmt(along(current, next, radius))}`,
-    );
-  }
-
-  return `${commands.join(" ")} Z`;
-}
-
-function along(from: Pt, toward: Pt, distance: number): Pt {
-  const dx = toward[0] - from[0];
-  const dy = toward[1] - from[1];
-  const length = Math.hypot(dx, dy) || 1;
-  const step = Math.min(distance, length / 2);
-  return [from[0] + (dx / length) * step, from[1] + (dy / length) * step];
-}
-
-/** A tapered feature: wide at the base, rounded at the tip. Mirror its pair. */
-function taper(base: Pt, tip: Pt, halfWidth: number): string {
-  const dx = tip[0] - base[0];
-  const dy = tip[1] - base[1];
-  const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length;
-  const uy = dy / length;
-  const px = -uy;
-  const py = ux;
-  const at = (t: number, side: number, width: number): Pt => [
-    base[0] + dx * t + px * side * width,
-    base[1] + dy * t + py * side * width,
+    { x: leftX, y: top, w: EYE_W, h: EYE_H },
+    { x: rightX, y: top, w: EYE_W, h: EYE_H },
   ];
-  return [
-    `M ${fmt(at(0, 1, halfWidth))}`,
-    `L ${fmt(at(0.9, 1, halfWidth * 0.34))}`,
-    `Q ${fmt(at(1, 0, halfWidth * 0.3))} ${fmt(at(0.9, -1, halfWidth * 0.34))}`,
-    `L ${fmt(at(0, -1, halfWidth))}`,
-    "Z",
-  ].join(" ");
 }
 
-/** A doorway: semicircular top on straight sides, flat base. */
-function arch(width: number, top: number, base: number): string {
-  const radius = width / 2;
-  const arcCentre = top + radius;
-  const points: Pt[] = [[CENTRE - radius, base], [CENTRE - radius, arcCentre]];
+function hexPoints(cx: number, cy: number, rx: number, ry: number): Array<[number, number]> {
+  // Flat-topped hexagon.
+  return [0, 60, 120, 180, 240, 300].map((deg) => {
+    const a = (deg * Math.PI) / 180;
+    return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
+  });
+}
 
-  for (let index = 0; index <= 48; index += 1) {
-    const angle = Math.PI - (index / 48) * Math.PI;
-    points.push([CENTRE + radius * Math.cos(angle), arcCentre - radius * Math.sin(angle)]);
+function superellipsePoints(
+  cx: number,
+  cy: number,
+  a: number,
+  b: number,
+  n = 4.8,
+  steps = 64,
+): Array<[number, number]> {
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * Math.PI * 2;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    const x = Math.sign(cos) * Math.pow(Math.abs(cos), 2 / n);
+    const y = Math.sign(sin) * Math.pow(Math.abs(sin), 2 / n);
+    pts.push([cx + a * x, cy + b * y]);
   }
-
-  points.push([CENTRE + radius, base]);
-  return `M ${points.map(fmt).join(" L ")} Z`;
+  return pts;
 }
 
-function fmt(point: Pt): string {
-  return `${point[0].toFixed(2)} ${point[1].toFixed(2)}`;
-}
-
-interface Draft {
-  id: string;
-  name: string;
-  note: string;
-  parts: string[];
-  eyes: { x: number; y: number; spacing: number; scale: number };
-}
-
-const eyes = (y: number, spacing = 20, scale = 1.36): Draft["eyes"] => ({
-  x: CENTRE,
-  y,
-  spacing,
-  scale,
-});
-
-function orb(cy = 50, radius = SPAN / 2): string {
-  return circle(CENTRE, cy, radius);
-}
-
-const DRAFTS: Draft[] = [
+const SHAPE_DEFS: AvatarShape[] = [
   {
-    id: "orb",
-    name: "Orb",
-    note: "A perfect circle",
-    parts: [orb()],
-    eyes: eyes(46),
+    id: "circle",
+    name: "Circle",
+    note: "Perfect circle, the plainest head",
+    eyeY: 0.46,
+    parts: [circle(CENTRE, CENTRE, WIDE / 2)],
   },
   {
     id: "squircle",
     name: "Squircle",
-    note: "Rounded square, 0.28 corners",
-    parts: [
-      roundedPolygon(
-        [
-          [SAFE_MIN, SAFE_MIN],
-          [SAFE_MAX, SAFE_MIN],
-          [SAFE_MAX, SAFE_MAX],
-          [SAFE_MIN, SAFE_MAX],
-        ],
-        SPAN * 0.28,
-      ),
-    ],
-    eyes: eyes(50),
+    note: "Superellipse (Apple-icon)",
+    eyeY: 0.46,
+    parts: [roundedPolygon(superellipsePoints(CENTRE, CENTRE, WIDE / 2, WIDE / 2, 4.8, 72), 0)],
   },
   {
     id: "drop",
     name: "Drop",
-    note: "Teardrop, point up, widest at 0.42",
-    parts: [superellipse(50, SPAN * 0.46, SPAN / 2, 1.22, 2.3)],
-    eyes: eyes(50),
-  },
-  {
-    id: "bell",
-    name: "Bell",
-    note: "Narrow rounded top flaring to a wide base",
+    note: "Circle base rising to a soft top point",
+    eyeY: 0.56,
     parts: [
-      superellipse(38, 30, 34, 2.5, 2.5),
       roundedPolygon(
         [
-          [12, 52],
-          [88, 52],
-          [94, SAFE_MAX],
-          [SAFE_MIN, SAFE_MAX],
+          [CENTRE, 8],
+          [62, 15],
+          [74, 28],
+          [83, 46],
+          [84, 62],
+          [74, 78],
+          [CENTRE, 92],
+          [26, 78],
+          [16, 62],
+          [17, 46],
+          [26, 28],
+          [38, 15],
         ],
-        12,
+        20,
       ),
     ],
-    eyes: eyes(38, 19, 1.3),
   },
   {
-    id: "arch",
-    name: "Arch",
-    note: "Semicircular top on straight sides, flat base",
-    parts: [arch(SPAN, 6, SAFE_MAX)],
-    eyes: eyes(50),
+    id: "cloud",
+    name: "Cloud",
+    note: "Three equal soft lobes on a flat-ish base",
+    eyeY: 0.48,
+    parts: [
+      circle(30, 44, 18),
+      circle(CENTRE, 36, 20),
+      circle(70, 44, 18),
+      roundedRect(14, 46, 72, 34, 17),
+    ],
   },
   {
     id: "hexa",
     name: "Hexa",
-    note: "Soft hexagon, flat top and bottom",
+    note: "Rounded hexagon, flat top and bottom",
+    eyeY: 0.46,
+    parts: [roundedPolygon(hexPoints(CENTRE, CENTRE, 46, 43), 14)],
+  },
+  {
+    id: "gear",
+    name: "Gear",
+    note: "Circle with 6 soft rounded cogs, cogs reach 0.96",
+    eyeY: 0.46,
+    parts: (() => {
+      const coreR = 33;
+      const cogR = 11;
+      const orbit = COG_REACH - cogR; // 85, cog outer edge reaches 96
+      const cogs = Array.from({ length: 6 }, (_, i) => {
+        const a = ((-90 + i * 60) * Math.PI) / 180;
+        return circle(CENTRE + Math.cos(a) * orbit, CENTRE + Math.sin(a) * orbit, cogR);
+      });
+      return [circle(CENTRE, CENTRE, coreR), ...cogs];
+    })(),
+  },
+  {
+    id: "oval",
+    name: "Oval",
+    note: "Tall ellipse",
+    eyeY: 0.42,
+    parts: [ellipse(CENTRE, CENTRE, 34, 44)],
+  },
+  {
+    id: "triangle",
+    name: "Triangle",
+    note: "Upward rounded triangle",
+    eyeY: 0.56,
     parts: [
       roundedPolygon(
         [
-          [26, SAFE_MIN],
-          [74, SAFE_MIN],
-          [SAFE_MAX, 50],
-          [74, SAFE_MAX],
-          [26, SAFE_MAX],
-          [SAFE_MIN, 50],
+          [CENTRE, 10],
+          [90, 88],
+          [10, 88],
         ],
-        SPAN * 0.18,
+        22,
       ),
     ],
-    eyes: eyes(52),
+  },
+  {
+    id: "shield",
+    name: "Shield",
+    note: "Flat top, sides curving to a base point",
+    eyeY: 0.42,
+    parts: [
+      roundedPolygon(
+        [
+          [14, 10],
+          [86, 10],
+          [86, 46],
+          [74, 72],
+          [CENTRE, 92],
+          [26, 72],
+          [14, 46],
+        ],
+        14,
+      ),
+    ],
+  },
+  {
+    id: "puff",
+    name: "Puff",
+    note: "Soft four-lobed clover",
+    eyeY: 0.46,
+    parts: [
+      circle(CENTRE, 26, 20),
+      circle(74, CENTRE, 20),
+      circle(CENTRE, 74, 20),
+      circle(26, CENTRE, 20),
+      circle(CENTRE, CENTRE, 18),
+    ],
   },
   {
     id: "pill",
     name: "Pill",
-    note: "Vertical capsule, 0.78:1",
-    parts: [capsule(50, SPAN * 0.78, SPAN)],
-    eyes: eyes(45),
+    note: "Tall stadium (full capsule)",
+    eyeY: 0.46,
+    parts: [roundedRect(16, 6, 68, 88, 34)],
   },
   {
-    id: "gem",
-    name: "Gem",
-    note: "Faceted: flat table, chamfered crown, flat base",
+    id: "diamond",
+    name: "Diamond",
+    note: "Rounded diamond, point up and down",
+    eyeY: 0.46,
     parts: [
       roundedPolygon(
         [
-          [32, 22],
-          [68, 22],
-          [SAFE_MAX, 44],
-          [70, 82],
-          [30, 82],
-          [SAFE_MIN, 44],
+          [CENTRE, 6],
+          [88, CENTRE],
+          [CENTRE, 94],
+          [12, CENTRE],
         ],
-        5,
+        18,
       ),
     ],
-    eyes: eyes(44, 18, 1.28),
   },
   {
-    id: "crest",
-    name: "Crest",
-    note: "Orb with one centred crest ridge",
-    parts: [orb(56, 37), roundedPolygon([[35, 26], [65, 26], [61, 12], [39, 12]], 5)],
-    eyes: eyes(58, 19, 1.3),
-  },
-  {
-    id: "horns",
-    name: "Horns",
-    note: "Orb with two horn nubs at 11 and 1",
-    parts: [orb(56, 37), taper([33, 32], [27, 9], 7), taper([67, 32], [73, 9], 7)],
-    eyes: eyes(58, 19, 1.3),
-  },
-  {
-    id: "antennae",
-    name: "Antennae",
-    note: "Orb with two stalks and round tips",
-    parts: [
-      orb(58, 35),
-      taper([37, 34], [31, 15], 2.6),
-      taper([63, 34], [69, 15], 2.6),
-      circle(31, 13, 4),
-      circle(69, 13, 4),
-    ],
-    eyes: eyes(60, 18, 1.28),
-  },
-  {
-    id: "scallop",
-    name: "Scallop",
-    note: "Squircle with a crown of three bumps",
+    id: "arch",
+    name: "Arch",
+    note: "Semicircle top on straight-ish sides to a flat base",
+    eyeY: 0.42,
     parts: [
       roundedPolygon(
         [
-          [SAFE_MIN, 26],
-          [SAFE_MAX, 26],
-          [SAFE_MAX, SAFE_MAX],
-          [SAFE_MIN, SAFE_MAX],
+          [14, 92],
+          [14, 44],
+          [20, 26],
+          [34, 12],
+          [CENTRE, 8],
+          [66, 12],
+          [80, 26],
+          [86, 44],
+          [86, 92],
         ],
-        SPAN * 0.26,
+        12,
       ),
-      circle(50, 18, 12),
-      circle(27, 24, 9),
-      circle(73, 24, 9),
     ],
-    eyes: eyes(56, 19, 1.3),
-  },
-  {
-    id: "shoulder",
-    name: "Shoulder",
-    note: "Wide shoulders narrowing to a rounded top",
-    parts: [superellipse(50, SPAN / 2, SPAN / 2, 3.2, 4.6)],
-    eyes: eyes(48),
   },
 ];
 
-/** Fits a composed silhouette into the safe area, keeping it symmetric. */
-function fit(path: string): { path: string; scale: number; dx: number; dy: number } {
-  const numbers = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let index = 0; index + 1 < numbers.length; index += 2) {
-    xs.push(numbers[index]!);
-    ys.push(numbers[index + 1]!);
-  }
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const scale = Math.min(SPAN / (maxX - minX || 1), SPAN / (maxY - minY || 1));
-  const dx = CENTRE - ((minX + maxX) / 2) * scale;
-  const dy = CENTRE - ((minY + maxY) / 2) * scale;
+export const SHAPES: readonly AvatarShape[] = SHAPE_DEFS;
+export const AVATAR_SHAPES = SHAPES;
 
-  let cursor = 0;
-  const fitted = path.replace(/-?\d+(?:\.\d+)?/g, (token) => {
-    const value = Number(token) * scale + (cursor % 2 === 0 ? dx : dy);
-    cursor += 1;
-    return value.toFixed(2);
-  });
+export const SHAPE_IDS = SHAPES.map((shape) => shape.id) as readonly AvatarShapeId[];
 
-  return { path: fitted, scale, dx, dy };
+const byId = new Map<AvatarShapeId, AvatarShape>(SHAPE_DEFS.map((shape) => [shape.id, shape]));
+
+// Legacy out-of-spec ids kept readable by mapping to the closest canonical shape.
+const LEGACY_TO_CANONICAL: Record<string, AvatarShapeId> = {
+  orb: "circle",
+  bell: "arch",
+  gem: "diamond",
+  crest: "puff",
+  horns: "triangle",
+  antennae: "gear",
+  scallop: "cloud",
+  shoulder: "shield",
+};
+
+function resolveId(id: string): AvatarShapeId | undefined {
+  if (byId.has(id as AvatarShapeId)) return id as AvatarShapeId;
+  return LEGACY_TO_CANONICAL[id];
 }
 
-function build(draft: Draft): AvatarShape {
-  const fitted = fit(draft.parts.join(" "));
-  return {
-    id: draft.id,
-    name: draft.name,
-    note: draft.note,
-    definition: {
-      version: 1,
-      id: draft.id,
-      name: draft.name,
-      body: { path: fitted.path },
-      eyes: {
-        x: draft.eyes.x * fitted.scale + fitted.dx,
-        y: draft.eyes.y * fitted.scale + fitted.dy,
-        spacing: draft.eyes.spacing * fitted.scale,
-        scale: draft.eyes.scale * fitted.scale * 1.2,
-      },
-    } satisfies AvatarDefinition,
-  };
+export function isShapeId(id: string): id is AvatarShapeId {
+  return resolveId(id) !== undefined;
 }
 
-export const SHAPES: readonly AvatarShape[] = DRAFTS.map(build);
-
-export const SHAPE_IDS = SHAPES.map((shape) => shape.id);
-
-export const DEFAULT_SHAPE = "orb";
-
-const byId = new Map(SHAPES.map((shape) => [shape.id, shape]));
-
-export function isShapeId(value: string): boolean {
-  return byId.has(value);
+export function shapeById(id: AvatarShapeId | string): AvatarShape | undefined {
+  const resolved = resolveId(id);
+  return resolved ? byId.get(resolved) : undefined;
 }
 
-export function shapeDefinition(id: string): AvatarDefinition {
-  const shape = byId.get(id) ?? byId.get(DEFAULT_SHAPE);
-  if (!shape) throw new Error("no avatar shapes are registered");
-  return shape.definition;
-}
-
-export function shapeById(id: string): AvatarShape {
-  return byId.get(id) ?? byId.get(DEFAULT_SHAPE)!;
+/** Full definition with two identical rounded-slot eyes placed per shape. */
+export function shapeDefinition(id: AvatarShapeId | string): AvatarDefinition | undefined {
+  const shape = shapeById(id);
+  if (!shape) return undefined;
+  return { ...shape, eyes: eyeSlots(shape.eyeY) };
 }
