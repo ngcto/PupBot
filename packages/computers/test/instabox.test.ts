@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InstaboxProvider, ProviderError, providerErrorFrom } from "../src/index.ts";
+import { InstaboxClient, InstaboxProvider, ProviderError, providerErrorFrom } from "../src/index.ts";
 import type { InstaboxMachine } from "../src/index.ts";
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: string | undefined };
@@ -190,5 +190,66 @@ describe("instabox provider against a stubbed API", () => {
     await expect(provider.start({ provider: "instabox", account: "acct-1", id: "box-1" })).rejects.toMatchObject({
       code: "quota",
     });
+  });
+});
+
+describe("instabox provider after review hardening", () => {
+  it("parses a CRLF exec stream, even when the stream splits a CRLF pair", async () => {
+    const chunks = [
+      'event: stdout\r\ndata: {"data":"hel"}\r\n\r',
+      '\nevent: stdout\r\ndata: {"data":"lo"}\r\n\r\n',
+      'event: exit\r\ndata: {"stdout":"hello","stderr":"","exitCode":0,"timedOut":false,"truncated":false}\r\n\r\n',
+    ];
+    const impl = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      )) as unknown as typeof fetch;
+
+    const provider = new InstaboxProvider({ account: "acct-1", apiKey: "ibk_test", fetch: impl });
+    const seen: string[] = [];
+    const result = await provider.exec(
+      { provider: "instabox", account: "acct-1", id: "box-1" },
+      "echo hello",
+      { onOutput: (chunk) => seen.push(chunk.text) },
+    );
+
+    expect(seen.join("")).toBe("hello");
+    expect(result.stdout).toBe("hello");
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("sends a caller-supplied idempotency key instead of minting one per attempt", async () => {
+    const { impl, calls } = stubFetch(() => ({ status: 202, body: operation("queued") }));
+    const client = new InstaboxClient({ apiKey: "ibk_test", account: "acct-1", fetch: impl });
+
+    await client.createMachine({}, { idempotencyKey: "retry-same-key" });
+
+    expect(calls[0]?.headers["Idempotency-Key"]).toBe("retry-same-key");
+  });
+
+  it("waits for an in-flight operation before retrying a busy delete", async () => {
+    let deletes = 0;
+    const { impl, calls } = stubFetch((call) => {
+      if (call.url.includes("/v1/machines/box-1") && call.method === "DELETE") {
+        deletes += 1;
+        return deletes === 1
+          ? { status: 409, body: { error: { code: "operation_conflict", message: "an operation is running" } } }
+          : { status: 202, body: operation("succeeded") };
+      }
+      if (call.url.includes("/v1/operations/op-1")) return { status: 200, body: operation("succeeded") };
+      return { status: 200, body: machine({ state: "running", runtime: { ready: true } }) };
+    });
+
+    const provider = new InstaboxProvider({ account: "acct-1", apiKey: "ibk_test", fetch: impl });
+    await provider.destroy({ provider: "instabox", account: "acct-1", id: "box-1" });
+
+    expect(deletes).toBe(2);
+    expect(calls.filter((call) => call.method === "GET").length).toBeGreaterThan(0);
   });
 });

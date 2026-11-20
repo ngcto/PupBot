@@ -1,5 +1,5 @@
 import { decryptSecret } from "@pupbot/db";
-import { ProviderError } from "./contract.ts";
+import { CredentialConfigError, ProviderError } from "./contract.ts";
 import type { ProviderFactory } from "./allocator/types.ts";
 import { FakeComputerProvider } from "./fake.ts";
 import { InstaboxProvider } from "./instabox/provider.ts";
@@ -36,7 +36,14 @@ export function createProviderFactory(options: ProviderRegistryOptions = {}): Pr
       try {
         apiKey = decryptSecret(account.encryptedCredential);
       } catch (error) {
-        throw new ProviderError("auth", `the Instabox key for ${account.label} cannot be decrypted: ${(error as Error).message}`, {
+        const message = error instanceof Error ? error.message : String(error);
+        // A missing or wrong-length CREDENTIAL_ENCRYPTION_KEY fails the same way
+        // for every account. Treat the deployment as misconfigured, not each
+        // credential as revoked, so the pool does not drain itself to `error`.
+        if (/CREDENTIAL_ENCRYPTION_KEY/.test(message)) {
+          throw new CredentialConfigError(`the Instabox key for ${account.label} cannot be decrypted: ${message}`);
+        }
+        throw new ProviderError("auth", `the Instabox key for ${account.label} cannot be decrypted: ${message}`, {
           providerCode: "bad_credential",
         });
       }

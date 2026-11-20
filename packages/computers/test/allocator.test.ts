@@ -367,3 +367,44 @@ describe("allocator — reconcile", () => {
     expect((await fake("a").listComputers()).length).toBe(1);
   });
 });
+
+describe("allocator — capacity, account health and wake auth", () => {
+  it("provisions once when two bots allocate at the same moment on a capacity-1 account", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addBot("bot-2");
+    store.addAccount({ id: "a", label: "a", capacity: 1 });
+
+    const [one, two] = await Promise.all([allocator.allocateForBot("bot-1"), allocator.allocateForBot("bot-2")]);
+
+    expect([one.state, two.state].sort()).toEqual(["blocked", "ready"]);
+    expect(fake("a").calls.provision).toBe(1);
+  });
+
+  it("restores a drained account once the provider answers again", async () => {
+    const { store, allocator } = harness();
+    store.addAccount({ id: "a", label: "a", capacity: 5, status: "error" });
+
+    const summary = await allocator.reconcile();
+
+    expect(summary.accounts).toBe(1);
+    expect((await store.listAccounts()).find((account) => account.id === "a")?.status).toBe("active");
+  });
+
+  it("drains the account when a wake is rejected for bad credentials", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", capacity: 5 });
+    await allocator.ensureReady("bot-1");
+    const computer = (await store.botBinding("bot-1"))!.computer!;
+    await fake("a").sleep({ provider: "fake", account: "a", id: computer.externalId });
+    await store.updateComputer(computer.id, { status: "asleep" });
+    fake("a").fail("start", new ProviderError("auth", "key revoked"));
+
+    const result = await allocator.ensureReady("bot-1");
+
+    expect(result.ok).toBe(false);
+    expect(result.blocked).toBe(true);
+    expect((await store.listAccounts()).find((account) => account.id === "a")?.status).toBe("error");
+  });
+});

@@ -95,7 +95,7 @@ async function seed() {
     .insert(computerAccount)
     .values({
       id: newId(),
-      provider: "stub",
+      provider: "fake",
       label: "Stub pool",
       encryptedCredential: encryptSecret("stub-account-credential"),
       status: "active",
@@ -108,7 +108,7 @@ async function seed() {
     .values({
       id: newId(),
       accountId: account?.id,
-      provider: "stub",
+      provider: "fake",
       externalId: "stub-seeded-box",
       status: "awake",
       specs: { vcpus: 4, memMiB: 8192 },

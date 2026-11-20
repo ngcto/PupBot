@@ -35,7 +35,7 @@ const DEFAULT_TEMPLATE = "agent-browser";
 const DEFAULT_TTL_SECONDS = 3 * 60 * 60;
 const DEFAULT_PROVISION_TIMEOUT_MS = 180_000;
 const DEFAULT_START_TIMEOUT_MS = 90_000;
-const DEFAULT_SCREENSHOT_TIMEOUT_MS = 30_000;
+const DEFAULT_SCREENSHOT_TIMEOUT_MS = 90_000;
 /** A uniform 1280x800 frame compresses to ~3 KB; a painted desktop is ~100 KB. */
 const PAINTED_PNG_BYTES = 8 * 1024;
 const SHOT_PATH = "/tmp/pupbot-shot.png";
@@ -170,8 +170,9 @@ export class InstaboxProvider implements ComputerProvider {
       if (providerError.code === "not_found") return;
       if (providerError.code === "busy") {
         // Another operation is in flight; the provider cancels a queued one, so
-        // one retry after it settles is enough.
-        await this.client.getMachine(ref.id).catch(() => undefined);
+        // one retry after it settles is enough. Poll it out rather than reading
+        // status once: a delete sent mid-operation is `busy` again.
+        await this.#waitSettled(ref.id, Date.now() + 120_000).catch(() => undefined);
         const retry = await this.client.deleteMachine(ref.id).catch((next: unknown) => {
           const code = asProviderError(next).code;
           if (code === "not_found") return undefined;
@@ -239,15 +240,22 @@ export class InstaboxProvider implements ComputerProvider {
   }
 
   async screenshot(ref: ComputerRef): Promise<Screenshot> {
+    // The first desktop start on a fresh box installs the Xfce session (~30 s)
+    // and then spends seconds painting, so the default budget covers the
+    // install and the capture; every request gets only what is left of it.
     const deadline = Date.now() + this.#screenshotTimeoutMs;
     let desktopStarted = false;
 
     while (Date.now() < deadline) {
       if (!desktopStarted) {
-        const desktop = await this.client.desktop(ref.id, { action: "start", width: 1280, height: 800 });
+        const desktop = await this.client.desktop(
+          ref.id,
+          { action: "start", width: 1280, height: 800 },
+          { timeoutMs: remaining(deadline) },
+        );
         if (!desktop.installed) {
           // Not installed: ask for the install and come back; it takes ~30 s.
-          await this.client.desktop(ref.id, { action: "install" });
+          await this.client.desktop(ref.id, { action: "install" }, { timeoutMs: remaining(deadline) });
           await sleep(1500);
           continue;
         }
@@ -261,7 +269,7 @@ export class InstaboxProvider implements ComputerProvider {
       const capture = await this.client.exec(
         ref.id,
         { cmd: CAPTURE_SCRIPT, timeoutSeconds: 60 },
-        { timeoutMs: 120_000 },
+        { timeoutMs: remaining(deadline) },
       );
       if (capture.exitCode === 0) {
         const png = await this.client.readFile(ref.id, SHOT_PATH);

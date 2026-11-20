@@ -94,7 +94,7 @@ export class FakeComputerProvider implements ComputerProvider {
   };
 
   #boxes = new Map<string, FakeBox>();
-  #counter = 0;
+  #destroyed = new Set<string>();
   #failures: FakeFailure[];
   #latency: Partial<Record<FakeOperation, number>>;
   #adoptUnknownIds: boolean;
@@ -129,8 +129,13 @@ export class FakeComputerProvider implements ComputerProvider {
 
   async provision(options: ProvisionOptions = {}): Promise<ComputerRef> {
     await this.#enter("provision");
-    this.#counter += 1;
-    const ref: ComputerRef = { provider: this.name, account: this.account, id: `${this.account}-box-${this.#counter}` };
+    // A counter resets with the process and collides with ids the other process
+    // adopted; a random suffix cannot.
+    const ref: ComputerRef = {
+      provider: this.name,
+      account: this.account,
+      id: `${this.account}-box-${crypto.randomUUID()}`,
+    };
     if (options.signal?.aborted) throw new ProviderError("timeout", "provision aborted");
     this.#boxes.set(ref.id, {
       ref,
@@ -143,7 +148,6 @@ export class FakeComputerProvider implements ComputerProvider {
     });
     return ref;
   }
-
   async start(ref: ComputerRef, options: { timeoutMs?: number } = {}): Promise<ComputerStatus> {
     await this.#enter("start");
     const box = this.#require(ref);
@@ -166,8 +170,11 @@ export class FakeComputerProvider implements ComputerProvider {
   async destroy(ref: ComputerRef): Promise<void> {
     await this.#enter("destroy");
     const box = this.#boxes.get(ref.id);
-    if (!box) return;
-    box.state = "destroyed";
+    if (box) box.state = "destroyed";
+    // Remember the id: with adoption on, a later status would otherwise
+    // recreate the box as running and hide the `not_found` that tells the
+    // allocator to replace it.
+    this.#destroyed.add(ref.id);
     this.#boxes.delete(ref.id);
   }
 
@@ -286,6 +293,7 @@ export class FakeComputerProvider implements ComputerProvider {
   #require(ref: ComputerRef): FakeBox {
     const box = this.#boxes.get(ref.id);
     if (box) return box;
+    if (this.#destroyed.has(ref.id)) throw new ProviderError("not_found", `no computer ${ref.id}`);
     if (!this.#adoptUnknownIds) throw new ProviderError("not_found", `no computer ${ref.id}`);
     const adopted: FakeBox = {
       ref,

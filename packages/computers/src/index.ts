@@ -1,4 +1,4 @@
-export { ProviderError } from "./contract.ts";
+export { CredentialConfigError, ProviderError } from "./contract.ts";
 export type {
   ActivityLease,
   ComputerProvider,

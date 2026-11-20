@@ -1,4 +1,4 @@
-import { ProviderError } from "../contract.ts";
+import { CredentialConfigError, ProviderError } from "../contract.ts";
 import type { ComputerProvider, ComputerRef, ComputerStatus, ProviderErrorCode } from "../contract.ts";
 import type {
   AccountRecord,
@@ -34,7 +34,9 @@ export interface AllocatorConfig {
 export const ALLOCATOR_DEFAULTS: AllocatorConfig = {
   idleSeconds: 600,
   leaseTtlSeconds: 120,
-  leaseRenewLeadSeconds: 45,
+  // Must exceed the maintenance interval (60 s), or a lease created just after
+  // a tick is never inside the renew window and expires on the next one.
+  leaseRenewLeadSeconds: 90,
   provisionNoCapacityRetries: 2,
   retryBudgetMs: 45_000,
   bootTimeoutMs: 90_000,
@@ -76,6 +78,7 @@ export class ComputerAllocator {
   readonly #providerCache = new Map<string, ComputerProvider>();
   readonly #botLocks = new Map<string, Promise<unknown>>();
   readonly #boxLocks = new Map<string, Promise<unknown>>();
+  readonly #accountLocks = new Map<string, Promise<unknown>>();
   readonly #wakes = new Map<string, Promise<WakeOutcome>>();
 
   constructor(options: AllocatorOptions) {
@@ -125,44 +128,57 @@ export class ComputerAllocator {
       const failures: Array<{ code: ProviderErrorCode; message: string }> = [];
 
       for (const account of ordered) {
-        if (account.parkedUntil && Date.parse(account.parkedUntil) > this.#now().getTime()) {
-          failures.push({ code: "rate_limited", message: `parked until ${account.parkedUntil}` });
-          continue;
-        }
-        if ((used.get(account.id) ?? 0) >= account.capacity) {
-          failures.push({ code: "quota", message: `${account.label} is at capacity` });
-          continue;
-        }
-
-        let provider: ComputerProvider;
-        try {
-          provider = this.#provider(account);
-        } catch (error) {
-          const providerError = asProviderError(error);
-          await this.#markAccountBroken(account, providerError);
-          failures.push({ code: providerError.code, message: providerError.message });
-          continue;
-        }
-
-        const attempt = await this.#provision(account, provider, botId);
-        if (!attempt.ok) {
-          failures.push({ code: attempt.code, message: attempt.message });
-          continue;
-        }
-
-        const computer = await this.store.createComputer({
-          accountId: account.id,
-          provider: provider.name,
-          externalId: attempt.ref.id,
-          status: "awake",
-          metadata: { botId },
-          lastUsedAt: this.#now().toISOString(),
-        });
-        await this.store.bindComputer(botId, computer);
-        return { state: "ready", computerId: computer.id };
+        const reservation = await this.#reserveAndProvision(account, botId);
+        if (reservation.ok) return { state: "ready", computerId: reservation.computerId };
+        failures.push({ code: reservation.code, message: reservation.message });
       }
 
       return this.#block(botId, describeFailures(failures));
+    });
+  }
+
+  /**
+   * Count this account's boxes and provision under one per-account lock. The
+   * capacity read above is a snapshot used for ordering; only this count, taken
+   * with no other allocation in flight for the account, can be trusted.
+   */
+  async #reserveAndProvision(
+    account: AccountRecord,
+    botId: string,
+  ): Promise<{ ok: true; computerId: string } | { ok: false; code: ProviderErrorCode; message: string }> {
+    return this.#withAccountLock(account.id, async () => {
+      if (account.parkedUntil && Date.parse(account.parkedUntil) > this.#now().getTime()) {
+        return { ok: false as const, code: "rate_limited" as const, message: `parked until ${account.parkedUntil}` };
+      }
+      const computers = await this.store.listComputers();
+      const used = computers.filter(
+        (computer) => computer.accountId === account.id && computer.status !== "deleted",
+      ).length;
+      if (used >= account.capacity) {
+        return { ok: false as const, code: "quota" as const, message: `${account.label} is at capacity` };
+      }
+
+      let provider: ComputerProvider;
+      try {
+        provider = this.#provider(account);
+      } catch (error) {
+        const failure = await this.#providerBuildFailure(account, error);
+        return { ok: false as const, code: failure.code, message: failure.message };
+      }
+
+      const attempt = await this.#provision(account, provider, botId);
+      if (!attempt.ok) return attempt;
+
+      const computer = await this.store.createComputer({
+        accountId: account.id,
+        provider: provider.name,
+        externalId: attempt.ref.id,
+        status: "awake",
+        metadata: { botId },
+        lastUsedAt: this.#now().toISOString(),
+      });
+      await this.store.bindComputer(botId, computer);
+      return { ok: true as const, computerId: computer.id };
     });
   }
 
@@ -196,9 +212,15 @@ export class ComputerAllocator {
     try {
       provider = this.#provider(account);
     } catch (error) {
-      const providerError = asProviderError(error);
-      await this.#markAccountBroken(account, providerError);
-      return { ok: false, reason: "The computer account's credentials were rejected.", blocked: true };
+      const failure = await this.#providerBuildFailure(account, error);
+      return {
+        ok: false,
+        reason:
+          failure.code === "auth"
+            ? "The computer account's credentials were rejected."
+            : "The computer service is misconfigured; try again later.",
+        blocked: failure.code === "auth",
+      };
     }
 
     let status: ComputerStatus;
@@ -265,7 +287,6 @@ export class ComputerAllocator {
   async sweepIdle(): Promise<SweepSummary> {
     const nowMs = this.#now().getTime();
     const computers = await this.store.listComputers();
-    const leases = await this.store.listLeases();
     const accounts = await this.store.listAccounts();
     let slept = 0;
     let destroyed = 0;
@@ -281,21 +302,30 @@ export class ComputerAllocator {
       }
 
       if (computer.status !== "awake" && computer.status !== "waking") continue;
-      const active = leases.some(
-        (lease) => lease.computerId === computer.id && Date.parse(lease.expiresAt) > nowMs,
-      );
-      if (active) continue;
-      const lastUsed = Date.parse(computer.lastUsedAt ?? computer.createdAt);
-      if (nowMs - lastUsed < this.config.idleSeconds * 1000) continue;
-
       const account = accounts.find((entry) => entry.id === computer.accountId);
       if (!account) continue;
+
       try {
         const provider = this.#provider(account);
-        await this.#withBoxLock(computer.id, () => provider.sleep(toRef(computer)));
-        await this.store.updateComputer(computer.id, { status: "asleep" });
-        await this.store.deleteLeasesForComputer(computer.id);
-        slept += 1;
+        // The lease list and the last-use stamp are read again inside the box
+        // lock, and taking a lease happens under the same lock, so a run cannot
+        // slip a lease in between this decision and the suspend.
+        const sleptThisOne = await this.#withBoxLock(computer.id, async () => {
+          const leases = await this.store.listLeases();
+          const live = leases.some(
+            (lease) => lease.computerId === computer.id && Date.parse(lease.expiresAt) > nowMs,
+          );
+          if (live) return false;
+          const fresh = await this.store.getComputer(computer.id);
+          if (!fresh) return false;
+          const lastUsed = Date.parse(fresh.lastUsedAt ?? fresh.createdAt);
+          if (nowMs - lastUsed < this.config.idleSeconds * 1000) return false;
+          await provider.sleep(toRef(computer));
+          await this.store.updateComputer(computer.id, { status: "asleep" });
+          await this.store.deleteLeasesForComputer(computer.id);
+          return true;
+        });
+        if (sleptThisOne) slept += 1;
       } catch (error) {
         const providerError = asProviderError(error);
         if (providerError.code === "not_found") {
@@ -394,7 +424,7 @@ export class ComputerAllocator {
       try {
         provider = this.#provider(account);
       } catch (error) {
-        await this.#markAccountBroken(account, asProviderError(error));
+        await this.#providerBuildFailure(account, error);
         summary.failed += 1;
         continue;
       }
@@ -406,6 +436,13 @@ export class ComputerAllocator {
         this.#log(`reconcile ${account.label}: ${asProviderError(error).code}`);
         summary.failed += 1;
         continue;
+      }
+
+      // A successful round trip proves the account works again: nothing else
+      // restores a drained account, and an operator fixing the key or the
+      // credential should not have to reset rows by hand.
+      if (account.status === "error") {
+        await this.store.updateAccount(account.id, { status: "active", lastError: null });
       }
 
       const rows = computers.filter((computer) => computer.accountId === account.id);
@@ -615,7 +652,7 @@ export class ComputerAllocator {
   async #handleWakeFailure(
     botId: string,
     computer: ComputerRecord,
-    _account: AccountRecord,
+    account: AccountRecord,
     wake: Extract<WakeOutcome, { ok: false }>,
     options: EnsureReadyOptions,
     depth: number,
@@ -635,6 +672,7 @@ export class ComputerAllocator {
       return { ok: false, reason: "Every computer account is busy right now.", blocked: true };
     }
     if (wake.code === "auth") {
+      await this.#markAccountBroken(account, new ProviderError("auth", wake.message));
       return { ok: false, reason: "The computer account's credentials were rejected.", blocked: true };
     }
     await this.store.updateComputer(computer.id, { status: "awake" });
@@ -704,7 +742,9 @@ export class ComputerAllocator {
   ): Promise<LeaseRecord | null> {
     const id = leaseId && LEASE_ID_PATTERN.test(leaseId) ? leaseId : `task_${crypto.randomUUID().replace(/-/g, "")}`;
     try {
-      const lease = await provider.lease(toRef(computer), id, this.config.leaseTtlSeconds);
+      // Under the box lock so the idle sweep cannot decide to sleep this box
+      // between the provider lease and the row that records it.
+      const lease = await this.#withBoxLock(computer.id, () => provider.lease(toRef(computer), id, this.config.leaseTtlSeconds));
       const record: LeaseRecord = { id, computerId: computer.id, expiresAt: lease.expiresAt };
       await this.store.putLease(record);
       return record;
@@ -719,6 +759,27 @@ export class ComputerAllocator {
   async #markAccountBroken(account: AccountRecord, error: ProviderError): Promise<void> {
     await this.store.updateAccount(account.id, { status: "error", lastError: `${error.code}: ${error.message}` });
     this.#providerCache.delete(account.id);
+    this.#log(`account ${account.label} drained: ${error.code}: ${error.message}`);
+  }
+
+  /**
+   * Turn a provider-build failure into the allocator's own vocabulary. A
+   * deployment-wide credential problem is reported but never drains an account;
+   * anything else (a key that no longer decrypts, an unknown provider kind) is
+   * the account's problem and takes it out of the pool until reconcile proves
+   * it works again.
+   */
+  async #providerBuildFailure(
+    account: AccountRecord,
+    error: unknown,
+  ): Promise<{ code: ProviderErrorCode; message: string }> {
+    if (error instanceof CredentialConfigError) {
+      this.#log(`account ${account.label} paused until the credential key is fixed: ${error.message}`);
+      return { code: "unavailable", message: error.message };
+    }
+    const providerError = asProviderError(error);
+    await this.#markAccountBroken(account, providerError);
+    return { code: providerError.code, message: providerError.message };
   }
 
   async #block(botId: string, reason: string): Promise<AllocateResult> {
@@ -753,6 +814,20 @@ export class ComputerAllocator {
     const next = previous.then(fn, fn);
     this.#botLocks.set(
       botId,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
+  }
+
+  /** One capacity count-and-provision at a time per account. */
+  async #withAccountLock<T>(accountId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.#accountLocks.get(accountId) ?? Promise.resolve();
+    const next = previous.then(fn, fn);
+    this.#accountLocks.set(
+      accountId,
       next.then(
         () => undefined,
         () => undefined,

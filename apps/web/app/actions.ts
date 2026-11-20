@@ -217,6 +217,14 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
   const { workspace, db } = await context();
   await ownedBot(workspace.id, botId);
 
+  // Mark the bot before publishing the job: the worker can finish the whole
+  // allocation first, and a "binding" write after that would erase a ready or
+  // blocked result the worker already committed.
+  await db
+    .update(botTable)
+    .set({ computerState: "binding", computerReason: null, updatedAt: new Date() })
+    .where(eq(botTable.id, botId));
+
   try {
     await ensureComputerPool();
     await enqueueComputerProvision(botId);
@@ -230,10 +238,6 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
     throw new Error(`${reason} (${error instanceof Error ? error.message : String(error)})`);
   }
 
-  await db
-    .update(botTable)
-    .set({ computerState: "binding", computerReason: null, updatedAt: new Date() })
-    .where(eq(botTable.id, botId));
   revalidatePath("/", "layout");
   return { state: "binding", reason: null };
 }

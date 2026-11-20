@@ -122,6 +122,18 @@ export type ProviderErrorCode =
   | 'bad_request'
   | 'unknown';
 
+/**
+ * The deployment's own credential key is missing or malformed, so no stored
+ * credential can be decrypted. This is not the account's fault: the allocator
+ * surfaces it and keeps the account usable instead of draining it.
+ */
+export class CredentialConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CredentialConfigError";
+  }
+}
+
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly retryable: boolean;

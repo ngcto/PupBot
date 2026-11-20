@@ -251,7 +251,11 @@ export class InstaboxClient {
   }
 
   async createMachine(body: Record<string, unknown>, options: RequestOptions = {}): Promise<InstaboxOperation> {
-    return this.#json("POST", "/v1/machines", operationSchema, { body, idempotent: true, ...options });
+    return this.#json("POST", "/v1/machines", operationSchema, {
+      idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
+      ...options,
+      body,
+    });
   }
 
   async getMachine(id: string, options: RequestOptions = {}): Promise<InstaboxMachine> {
@@ -394,6 +398,9 @@ export class InstaboxClient {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
+        // SSE permits CRLF and bare CR line endings; normalise before looking
+        // for the blank-line boundary so a CRLF stream is not swallowed whole.
+        buffer = buffer.replace(/\r\n?/g, "\n");
         let split: number;
         while ((split = buffer.indexOf("\n\n")) !== -1) {
           const raw = buffer.slice(0, split);
@@ -499,7 +506,8 @@ export class InstaboxClient {
         body = JSON.stringify(options.body);
       }
     }
-    if (options.idempotent) headers["Idempotency-Key"] = crypto.randomUUID();
+    if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+    else if (options.idempotent) headers["Idempotency-Key"] = crypto.randomUUID();
 
     const timeoutMs = options.timeoutMs ?? 40_000;
     const timeout = AbortSignal.timeout(timeoutMs);
@@ -541,5 +549,10 @@ export interface RequestOptions {
   timeoutMs?: number;
   headers?: Record<string, string>;
   idempotent?: boolean;
+  /**
+   * A key to send as `Idempotency-Key` instead of minting one per request, so a
+   * retried write is the same write to the server. Reuse it across attempts.
+   */
+  idempotencyKey?: string;
   contentType?: string;
 }
