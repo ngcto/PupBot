@@ -1,13 +1,25 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL",
+    "API_URL",
+    "NEXT_PUBLIC_API_URL",
+    "API_PORT",
+    "STUB_PROVIDER",
+    "CI",
+    "PLAYWRIGHT_BROWSERS_PATH"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "typecheck": { "dependsOn": ["^typecheck"] },
-    "test": { "outputs": [] },
+    "test": { "dependsOn": ["^build"] },
+    "lint": {},
     "dev": { "cache": false, "persistent": true },
-    "lint": {}
+    "e2e": { "dependsOn": ["^build"], "cache": false }
   }
 }
