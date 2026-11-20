@@ -5,3 +5,12 @@ export { auth, createAuth } from "./auth.ts";
 export type { Auth } from "./auth.ts";
 export { newId } from "./ids.ts";
 export { ensureWorkspace, findWorkspace, sectionsFor } from "./workspace.ts";
+export {
+  CatalogSchemaError,
+  catalogRowsFrom,
+  findCatalogMatch,
+  modelsDevPayloadSchema,
+  parseModelsDevPayload,
+  syncModelCatalog,
+} from "./catalog.ts";
+export type { CatalogRow, ModelCatalogRow, ModelsDevPayload } from "./catalog.ts";
