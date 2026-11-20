@@ -8,3 +8,12 @@ export { ensureWorkspace, findWorkspace, sectionsFor } from "./workspace.ts";
 export { encryptSecret, decryptSecret, maskSecret } from "./crypto.ts";
 export { createBoss, startBoss, RUN_QUEUE } from "./queue.ts";
 export type { RunJobData } from "./queue.ts";
+export {
+  CatalogSchemaError,
+  catalogRowsFrom,
+  findCatalogMatch,
+  modelsDevPayloadSchema,
+  parseModelsDevPayload,
+  syncModelCatalog,
+} from "./catalog.ts";
+export type { CatalogRow, ModelCatalogRow, ModelsDevPayload } from "./catalog.ts";
