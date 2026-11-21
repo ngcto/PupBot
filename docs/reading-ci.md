@@ -91,8 +91,9 @@ change, and never "fix" it in a pull request.
 
 ## When a result looks wrong, ask whether the thing you measured would do that
 
-The pattern from four defects in one benchmark, three found by asking why a *number* looked wrong and
-the fourth by asking why a *behaviour* looked wrong:
+The pattern from five defects in one benchmark, three found by asking why a *number* looked wrong,
+one by asking why a *behaviour* looked wrong, and one — the largest — by trying to reproduce the
+defect before fixing it:
 
 - A token column read `input_tokens: 0`. Suspicious, so I checked — an adapter was dropping the field,
   and every row would have been a lie.
@@ -108,6 +109,31 @@ produce identical output.
 Corollary worth keeping: if a fix would have looked like an improvement on re-test, that is a reason
 to distrust it, not to ship it. A prompt change made to solve a defect nobody demonstrated will
 "work" the second time, for the same wrong reason.
+
+## "Only X is available to me" is a report about the harness, not about the model
+
+The fifth defect in that benchmark, and the one that invalidated the most: a tool named `codemode`
+swallowed an arm that was already `codemode`, because the registry that holds tools is keyed by name.
+Two tools with one name merge into one, and nobody notices a tool list that got *shorter*.
+
+The models said so, plainly, in three separate runs:
+
+> "in this runtime only `codemode` is available to me"
+
+> "the available tools in this environment don't include `listWindows`/`observeWindow`"
+
+Those lines were sitting in the dataset as **evidence** — quoted in a filed issue, read as a model
+rationalising a failure — while being a correct description of the harness. The sandbox had already
+answered every honest tool name with `there is no tool called "listWindows"`.
+
+**The tell: when a model reports that its capabilities are emptier than you know they are, believe
+the report and go and check the tool list you assembled. It is cheap to check and it is almost never
+the model.** A model inventing a limitation and a harness failing to offer a capability produce the
+same sentence, and only one of them is worth debugging in the prompt.
+
+This is the same mistake as the `403` at the top of this file: a report of a problem, taken as the
+problem. The model's message is a *client's* description of what it received — exactly like an HTTP
+error is a client's description of the response — and the instrument to check it is on our side.
 
 ## What a green board does and does not mean
 
