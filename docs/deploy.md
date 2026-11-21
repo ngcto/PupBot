@@ -1,12 +1,13 @@
-# Deploying PupBot
+# Deploying Terabot
 
 The hosted shape is one Vercel project: Next.js serves the UI and mounts the Hono API at
-`/api/pupbot`, so there is one origin, one first-party session cookie, and no cross-site CORS.
+`/api/terabot`, so there is one origin, one first-party session cookie, and no cross-site CORS.
 Postgres is Supabase. There is no separate worker, no queue, and no second service.
 
 - **App**: <https://terabot-six.vercel.app> — deployed from `b3a3f76` (`p3/deploy`),
   deployment `dpl_9FBj2cHTnMadoqbZc67qA7ivhRsu`, 2026-11-21 05:09 UTC
-- **Database**: Supabase project `pupbot` (`glhuwrobszgnrguareic`, `ap-southeast-1`)
+- **Database**: Supabase project `glhuwrobszgnrguareic` (`ap-southeast-1`). Its display name still
+  carries the pre-rename product name; only the identifier in `DATABASE_URL` matters to the app
 - **Runs**: `RUN_MODE=inline` — a run executes inside the POST that started it and finishes in
   `waitUntil`, bounded by `maxDuration = 300` on the route
 - **Attachments**: Postgres `attachment_blob` by default; Supabase Storage (S3) when all four
@@ -23,7 +24,7 @@ Set these on the Vercel project (Production and Preview). Only `DATABASE_URL`,
 | `BETTER_AUTH_SECRET` | `openssl rand -base64 32` |
 | `CREDENTIAL_ENCRYPTION_KEY` | `openssl rand -base64 32` — encrypts provider keys at rest |
 | `BETTER_AUTH_URL` | the deployment origin, `https://terabot-six.vercel.app` |
-| `API_URL` | the same origin **plus the mount path**: `https://terabot-six.vercel.app/api/pupbot` |
+| `API_URL` | the same origin **plus the mount path**: `https://terabot-six.vercel.app/api/terabot` |
 | `NEXT_PUBLIC_API_URL` | same as `API_URL` |
 | `RUN_MODE` | `inline` |
 | `DATABASE_POOL_MAX` | `3` — one Fluid instance per concurrent request, and the free tier caps connections |
@@ -62,7 +63,7 @@ session pooler (port 5432) or the direct connection when the transaction pooler 
 ## Verification
 
 ```bash
-curl -s https://terabot-six.vercel.app/api/pupbot/health   # {"ok":true,"service":"pupbot-api"}
+curl -s https://terabot-six.vercel.app/api/terabot/health   # {"ok":true,"service":"terabot-api"}
 BASE_URL=https://terabot-six.vercel.app pnpm e2e           # deployed.spec.ts
 pnpm typecheck && pnpm test                                # local, against docker Postgres
 ```
@@ -71,23 +72,28 @@ pnpm typecheck && pnpm test                                # local, against dock
 `smoke.spec.ts`; `deployed.spec.ts` signs up, creates a bot, binds a computer, sends a message,
 waits for the finished assistant bubble, reloads, and asserts the reply is still there.
 
-The local suite needs the Docker database: `pnpm db:up`, `DATABASE_URL=postgres://pupbot:pupbot@localhost:5432/pupbot pnpm db:migrate`, then
-`DATABASE_URL=postgres://pupbot:pupbot@localhost:5432/pupbot pnpm test`. Pointing it at the hosted
+The local suite needs the Docker database: `pnpm db:up`, `DATABASE_URL=postgres://terabot:terabot@localhost:5432/terabot pnpm db:migrate`, then
+`DATABASE_URL=postgres://terabot:terabot@localhost:5432/terabot pnpm test`. Pointing it at the hosted
 database works for reads but the integration tests time out on the round trip.
 
-## What that build does not contain
+## What that build is behind on
 
-The deployment above predates the open pull requests, so the live URL is behind `main` by
-design until it is redeployed:
+That deployment predates everything merged into `main` since, so **the live URL still serves the
+product under its pre-rename name**: no real computers (#2), no avatar set from main (#3), no
+desktop shell (#5), no mobile client (#6), no marketing site (#7), and not the rename (#4).
+Marketing is a separate app by design and does not belong in this deployment either way.
 
-- no provider split in Settings and no real computers (#1, #2) — chat still works, but the
-  computer is the stub
-- no leaning avatars (#3)
-- no desktop shell (#5) — the URL is the web product the shell will load
-- no mobile client (#6), no marketing site (#7); marketing is a separate app by design
+The most visible consequence is the API mount. The live build answers on a mount path this branch
+no longer serves — `curl` the health line in [Verification](#verification) at each path to see
+which one is live — while this branch mounts the API at `/api/terabot`.
+`API_URL` and `NEXT_PUBLIC_API_URL` therefore have to move with the redeploy: a build of this
+branch left on the old value 404s every API call.
 
-Anything merged into `main` after `b3a3f76` is absent from the URL until a redeploy. Compare with
-`git log b3a3f76..origin/main -- . ':(exclude)docs'` to see whether a redeploy would change the app.
+Compare before redeploying:
+
+```bash
+git log b3a3f76..origin/main --stat -- . ':(exclude)docs'
+```
 
 ## Redeploying
 
@@ -132,8 +138,8 @@ users, workspaces, attachments — into the hosted database unless you override 
 
 ```bash
 pnpm db:up                                     # Docker Postgres on 127.0.0.1:5432
-DATABASE_URL=postgres://pupbot:pupbot@127.0.0.1:5432/pupbot pnpm db:migrate
-DATABASE_URL=postgres://pupbot:pupbot@127.0.0.1:5432/pupbot pnpm test
+DATABASE_URL=postgres://terabot:terabot@127.0.0.1:5432/terabot pnpm db:migrate
+DATABASE_URL=postgres://terabot:terabot@127.0.0.1:5432/terabot pnpm test
 ```
 
 The tests clean up after themselves, but they are several times slower through the pooler

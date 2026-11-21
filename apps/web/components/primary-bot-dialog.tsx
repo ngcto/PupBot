@@ -1,7 +1,7 @@
 "use client";
 
-import { Avatar } from "@pupbot/avatars/react";
-import { Button, DialogClose, DialogContent, DialogRoot, DialogTitle, Input, cn } from "@pupbot/ui";
+import { Avatar } from "@terabot/avatars/react";
+import { Button, DialogClose, DialogContent, DialogRoot, DialogTitle, Input, cn } from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { setPrimaryBot } from "../app/actions.ts";

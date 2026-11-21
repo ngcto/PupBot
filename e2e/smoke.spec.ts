@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 test("sign up, create a bot, stream a reply, and block an unbound bot", async ({ page }) => {
-  const email = `e2e-${Date.now()}@pupbot.dev`;
+  const email = `e2e-${Date.now()}@terabot.dev`;
 
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("E2E Tester");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("pupbot-e2e-password");
+  await page.getByLabel("Password").fill("terabot-e2e-password");
   await page.getByRole("button", { name: "Create account" }).click();
 
   // A brand-new account lands with no bots, so the create dialog is already open.
@@ -30,10 +30,10 @@ test("sign up, create a bot, stream a reply, and block an unbound bot", async ({
 
   const composer = page.getByLabel("Message Scout");
   await expect(composer).toBeVisible();
-  await composer.fill("hello pup");
+  await composer.fill("hello tera");
   await page.getByTestId("send").click();
 
-  await expect(page.getByText("hello pup")).toBeVisible();
+  await expect(page.getByText("hello tera")).toBeVisible();
 
   // Streaming: the visible text grows while the run is in flight.
   const streaming = page.getByTestId("streaming-text");

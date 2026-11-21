@@ -1,5 +1,5 @@
 {
-  "name": "@pupbot/agent",
+  "name": "@terabot/agent",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@pupbot/config": "workspace:*",
-    "@pupbot/db": "workspace:*",
-    "@pupbot/providers": "workspace:*",
+    "@terabot/config": "workspace:*",
+    "@terabot/db": "workspace:*",
+    "@terabot/providers": "workspace:*",
     "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {

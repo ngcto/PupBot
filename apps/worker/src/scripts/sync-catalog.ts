@@ -1,5 +1,5 @@
-import { loadEnv } from "@pupbot/config/load-env";
-import { closeDatabase, database, syncModelCatalog } from "@pupbot/db";
+import { loadEnv } from "@terabot/config/load-env";
+import { closeDatabase, database, syncModelCatalog } from "@terabot/db";
 
 loadEnv();
 

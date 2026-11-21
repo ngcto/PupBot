@@ -1,5 +1,5 @@
-import { serverEnv } from "@pupbot/config";
-import type { ServerEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
+import type { ServerEnv } from "@terabot/config";
 import { createPostgresStore } from "./postgres.ts";
 import { createS3Store } from "./s3.ts";
 

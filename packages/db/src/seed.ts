@@ -1,5 +1,5 @@
-import { serverEnv } from "@pupbot/config";
-import { loadEnv } from "@pupbot/config/load-env";
+import { serverEnv } from "@terabot/config";
+import { loadEnv } from "@terabot/config/load-env";
 import { and, eq } from "drizzle-orm";
 import { auth } from "./auth.ts";
 import { closeDatabase, database } from "./client.ts";
@@ -18,8 +18,8 @@ import {
 } from "./schema.ts";
 import { ensureWorkspace } from "./workspace.ts";
 
-const DEMO_EMAIL = "demo@pupbot.dev";
-const DEMO_PASSWORD = "pupbot-demo";
+const DEMO_EMAIL = "demo@terabot.dev";
+const DEMO_PASSWORD = "terabot-demo";
 const DEMO_NAME = "Ng";
 
 const STUB_BASE_URL = () => (process.env.API_URL ?? "http://localhost:8787").replace(/\/+$/, "") + "/dev/stub/v1";
@@ -56,9 +56,9 @@ async function seed() {
     .insert(modelCatalog)
     .values({
       id: newId(),
-      provider: "pupbot",
-      modelId: "pup-stub",
-      name: "Pup stub (dev)",
+      provider: "terabot",
+      modelId: "tera-stub",
+      name: "Tera stub (dev)",
       contextWindow: 100_000,
       maxOutput: 8_192,
       pricing: { input: 0, output: 0 },
@@ -68,7 +68,7 @@ async function seed() {
     })
     .onConflictDoUpdate({
       target: [modelCatalog.provider, modelCatalog.modelId],
-      set: { name: "Pup stub (dev)" },
+      set: { name: "Tera stub (dev)" },
     })
     .returning();
 
@@ -80,7 +80,7 @@ async function seed() {
       await db
         .select({ id: modelEndpoint.id })
         .from(modelEndpoint)
-        .where(and(eq(modelEndpoint.workspaceId, workspace.id), eq(modelEndpoint.modelId, "pup-stub")))
+        .where(and(eq(modelEndpoint.workspaceId, workspace.id), eq(modelEndpoint.modelId, "tera-stub")))
         .limit(1)
     )[0]?.id ??
     (
@@ -92,7 +92,7 @@ async function seed() {
           kind: "openai-chat",
           label: "Local stub endpoint",
           baseUrl: STUB_BASE_URL(),
-          modelId: "pup-stub",
+          modelId: "tera-stub",
           modelCatalogId: catalog?.id,
           catalogMatch: "matched",
           contextWindow: 100_000,
@@ -143,7 +143,7 @@ async function seed() {
 
   const seeds = [
     {
-      name: "Pup",
+      name: "Tera",
       shape: "mug",
       color: "amber",
       accent: "#f69412",
@@ -151,11 +151,11 @@ async function seed() {
       hidden: false,
       bound: true,
       instructions:
-        "You are Pup, a cheerful bot with your own computer. Keep answers short, concrete and friendly.",
+        "You are Tera, a cheerful bot with your own computer. Keep answers short, concrete and friendly.",
       history: [
         {
           role: "user" as const,
-          text: "Hey Pup, can you take a look at the repo and tell me where the streaming code lives?",
+          text: "Hey Tera, can you take a look at the repo and tell me where the streaming code lives?",
         },
         {
           role: "assistant" as const,
@@ -208,7 +208,7 @@ async function seed() {
       accentColor: seedBot.accent,
       instructions: seedBot.instructions,
       modelEndpointId: endpointId,
-      modelId: "pup-stub",
+      modelId: "tera-stub",
       pinned: index === 0,
       hidden: seedBot.hidden,
       position: index,

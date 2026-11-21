@@ -1,4 +1,4 @@
-import { colorHex, deriveAccent, isColorId, isShapeId } from "@pupbot/avatars";
+import { colorHex, deriveAccent, isColorId, isShapeId } from "@terabot/avatars";
 import {
   auth,
   bot as botTable,
@@ -10,7 +10,7 @@ import {
   message,
   modelEndpoint,
   run,
-} from "@pupbot/db";
+} from "@terabot/db";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";

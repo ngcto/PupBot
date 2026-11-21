@@ -1,21 +1,21 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: pupbot-postgres
+    container_name: terabot-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: pupbot
-      POSTGRES_PASSWORD: pupbot
-      POSTGRES_DB: pupbot
+      POSTGRES_USER: terabot
+      POSTGRES_PASSWORD: terabot
+      POSTGRES_DB: terabot
     ports:
       - "5432:5432"
     volumes:
-      - pupbot-pgdata:/var/lib/postgresql/data
+      - terabot-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pupbot -d pupbot"]
+      test: ["CMD-SHELL", "pg_isready -U terabot -d terabot"]
       interval: 3s
       timeout: 3s
       retries: 20
 
 volumes:
-  pupbot-pgdata:
+  terabot-pgdata:

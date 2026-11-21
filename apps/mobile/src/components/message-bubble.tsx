@@ -1,6 +1,6 @@
-import { messageQuote, messageText } from "@pupbot/api-client";
-import type { ChatMessage } from "@pupbot/api-client";
-import { deriveAccent } from "@pupbot/avatars";
+import { messageQuote, messageText } from "@terabot/api-client";
+import type { ChatMessage } from "@terabot/api-client";
+import { deriveAccent } from "@terabot/avatars";
 import { StyleSheet, Text, View } from "react-native";
 import { color, radius, space, type } from "../theme.ts";
 

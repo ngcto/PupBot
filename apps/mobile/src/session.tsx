@@ -1,4 +1,4 @@
-import type { SessionUser } from "@pupbot/api-client";
+import type { SessionUser } from "@terabot/api-client";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api, onUnauthorized } from "./api.ts";

@@ -8,7 +8,7 @@ import {
   message,
   modelEndpoint,
   run,
-} from "@pupbot/db";
+} from "@terabot/db";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { BotView, EndpointView, MessageView, ShellData, ShellUser, SectionView } from "./types.ts";
 

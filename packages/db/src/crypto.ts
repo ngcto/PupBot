@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { serverEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
 
 const ALGORITHM = "aes-256-gcm";
 const VERSION = "v1";

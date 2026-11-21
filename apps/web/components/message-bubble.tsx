@@ -7,7 +7,7 @@ import {
   File02Icon,
   MoreHorizontalCircle01Icon,
 } from "@hugeicons/core-free-icons";
-import { deriveAccent } from "@pupbot/avatars";
+import { deriveAccent } from "@terabot/avatars";
 import {
   MenuItem,
   MenuPopup,
@@ -16,8 +16,8 @@ import {
   Tooltip,
   cn,
   toast,
-} from "@pupbot/ui";
-import type { MessagePart } from "@pupbot/db";
+} from "@terabot/ui";
+import type { MessagePart } from "@terabot/db";
 import { formatFileSize } from "../lib/format.ts";
 import type { MessageView } from "../lib/types.ts";
 import { Markdown } from "./markdown.tsx";

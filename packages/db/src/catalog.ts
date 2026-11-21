@@ -1,4 +1,4 @@
-import { serverEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "./client.ts";

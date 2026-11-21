@@ -1,5 +1,5 @@
 {
-  "name": "@pupbot/providers",
+  "name": "@terabot/providers",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@pupbot/config": "workspace:*",
+    "@terabot/config": "workspace:*",
     "zod": "^4.1.12"
   },
   "devDependencies": {

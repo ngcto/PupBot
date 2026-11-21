@@ -1,5 +1,5 @@
-import { createApp } from "@pupbot/api";
-import { setRequestOidcToken } from "@pupbot/config";
+import { createApp } from "@terabot/api";
+import { setRequestOidcToken } from "@terabot/config";
 import { Hono } from "hono";
 import { after } from "next/server";
 
@@ -20,7 +20,7 @@ let app: App | undefined;
  * environment and opens the Postgres pool, and a build machine has neither.
  */
 function hono(): App {
-  app ??= new Hono().route("/api/pupbot", createApp());
+  app ??= new Hono().route("/api/terabot", createApp());
   return app;
 }
 

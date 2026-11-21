@@ -1,6 +1,6 @@
-import { loadEnv } from "@pupbot/config/load-env";
+import { loadEnv } from "@terabot/config/load-env";
 import { createApp } from "../src/app.ts";
-import { executeRun } from "@pupbot/agent";
+import { executeRun } from "@terabot/agent";
 import {
   auth,
   bot,
@@ -14,8 +14,8 @@ import {
   run,
   runEvent,
   user,
-} from "@pupbot/db";
-import type { ModelGateway } from "@pupbot/providers";
+} from "@terabot/db";
+import type { ModelGateway } from "@terabot/providers";
 import { and, asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -39,7 +39,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 describe("conversation run protocol", () => {
   const app = createApp({ enqueue: async () => {} });
   const db = database();
-  const email = `stream-${Date.now()}@pupbot.dev`;
+  const email = `stream-${Date.now()}@terabot.dev`;
   let cookie = "";
   let conversationId = "";
   let botId = "";
@@ -69,8 +69,8 @@ describe("conversation run protocol", () => {
     await db.insert(bot).values({
       id: botId,
       workspaceId: space.id,
-      name: "Test Pup",
-      avatar: { shape: "pup", color: "amber" },
+      name: "Test Tera",
+      avatar: { shape: "tera", color: "amber" },
       accentColor: "#f69412",
       instructions: "Test bot.",
       modelEndpointId: endpointId,

@@ -1,4 +1,4 @@
-import { loadEnv } from "@pupbot/config/load-env";
+import { loadEnv } from "@terabot/config/load-env";
 import type { NextConfig } from "next";
 
 // The workspace keeps one `.env` at the repo root; Next would otherwise only
@@ -6,7 +6,7 @@ import type { NextConfig } from "next";
 loadEnv();
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@pupbot/ui"],
+  transpilePackages: ["@terabot/ui"],
   experimental: { externalDir: true },
   devIndicators: false,
 };

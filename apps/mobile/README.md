@@ -1,8 +1,8 @@
 # apps/mobile — Terabot for iOS and Android
 
 An Expo (SDK 58) client with expo-router. Native screens against the same API the
-web app uses — no webview. Every HTTP call goes through `@pupbot/api-client`, and
-every avatar is drawn by `@pupbot/avatars`, so the phone cannot drift from the
+web app uses — no webview. Every HTTP call goes through `@terabot/api-client`, and
+every avatar is drawn by `@terabot/avatars`, so the phone cannot drift from the
 product's contracts.
 
 ## Screens
@@ -23,28 +23,28 @@ pnpm install
 
 # the API and worker the phone talks to
 docker compose up -d postgres && pnpm db:migrate && pnpm db:seed
-pnpm --filter @pupbot/api dev
-pnpm --filter @pupbot/worker dev
+pnpm --filter @terabot/api dev
+pnpm --filter @terabot/worker dev
 
 # the app
-pnpm --filter @pupbot/mobile start
+pnpm --filter @terabot/mobile start
 ```
 
 A phone cannot reach `localhost`. Point the app at your machine's LAN address
 before bundling:
 
 ```bash
-EXPO_PUBLIC_API_URL=http://192.168.1.20:8787 pnpm --filter @pupbot/mobile start
+EXPO_PUBLIC_API_URL=http://192.168.1.20:8787 pnpm --filter @terabot/mobile start
 ```
 
-Sign in with the seeded account (`demo@pupbot.dev` / `pupbot-demo`) or your own.
+Sign in with the seeded account (`demo@terabot.dev` / `terabot-demo`) or your own.
 
 ## Checks
 
 ```bash
-pnpm --filter @pupbot/mobile typecheck
-pnpm --filter @pupbot/mobile export:ios      # bundles with Metro, writes dist/
-pnpm --filter @pupbot/mobile export:android
+pnpm --filter @terabot/mobile typecheck
+pnpm --filter @terabot/mobile export:ios      # bundles with Metro, writes dist/
+pnpm --filter @terabot/mobile export:android
 npx expo-doctor
 ```
 

@@ -1,6 +1,6 @@
-import { executeRun } from "@pupbot/agent";
-import { database } from "@pupbot/db";
-import { createGateway } from "@pupbot/providers";
+import { executeRun } from "@terabot/agent";
+import { database } from "@terabot/db";
+import { createGateway } from "@terabot/providers";
 import type { EnqueueRun } from "./routes/conversations.ts";
 
 let gateway: ReturnType<typeof createGateway> | undefined;

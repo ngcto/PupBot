@@ -1,5 +1,5 @@
-import { attachment, bot, conversation, database, findWorkspace, message, newId } from "@pupbot/db";
-import { StorageBackendUnavailable, attachmentStore, storageKeyFor } from "@pupbot/storage";
+import { attachment, bot, conversation, database, findWorkspace, message, newId } from "@terabot/db";
+import { StorageBackendUnavailable, attachmentStore, storageKeyFor } from "@terabot/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv } from "../types.ts";

@@ -1,4 +1,4 @@
-import { auth } from "@pupbot/db";
+import { auth } from "@terabot/db";
 
 export function GET(request: Request) {
   return auth().handler(request);

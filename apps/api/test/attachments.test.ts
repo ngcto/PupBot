@@ -1,4 +1,4 @@
-import { loadEnv } from "@pupbot/config/load-env";
+import { loadEnv } from "@terabot/config/load-env";
 import { createApp } from "../src/app.ts";
 import {
   auth,
@@ -10,7 +10,7 @@ import {
   modelEndpoint,
   newId,
   user,
-} from "@pupbot/db";
+} from "@terabot/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -29,7 +29,7 @@ describe("attachments", () => {
 
   /** A user with an endpoint, a bot and one conversation, ready to send. */
   async function signUp(label: string): Promise<Person> {
-    const email = `attach-${label}-${stamp}@pupbot.dev`;
+    const email = `attach-${label}-${stamp}@terabot.dev`;
     const signUpResult = await auth().api.signUpEmail({
       body: { email, password: "attachment-test-password", name: label },
       returnHeaders: true,
@@ -58,7 +58,7 @@ describe("attachments", () => {
         id: botId,
         workspaceId: space.id,
         name: `${label} bot`,
-        avatar: { shape: "pup", color: "amber" },
+        avatar: { shape: "tera", color: "amber" },
         accentColor: "#f69412",
         instructions: "Test bot.",
         modelEndpointId: endpointId,

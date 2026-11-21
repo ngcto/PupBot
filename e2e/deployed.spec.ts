@@ -4,12 +4,12 @@ import { expect, test } from "@playwright/test";
 test.skip(!process.env.BASE_URL, "set BASE_URL to verify a live deployment");
 
 test("sign up, create a bot, stream a reply, and keep it after reload", async ({ page }) => {
-  const email = `deploy-${Date.now()}@pupbot.dev`;
+  const email = `deploy-${Date.now()}@terabot.dev`;
 
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Deploy Tester");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("pupbot-deploy-password");
+  await page.getByLabel("Password").fill("terabot-deploy-password");
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page.getByTestId("create-bot-dialog")).toBeVisible({ timeout: 60_000 });

@@ -1,4 +1,4 @@
-import { attachmentBlob, database } from "@pupbot/db";
+import { attachmentBlob, database } from "@terabot/db";
 import { eq } from "drizzle-orm";
 import type { AttachmentStore } from "./index.ts";
 

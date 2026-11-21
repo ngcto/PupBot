@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * The wire shapes the API returns to a native client, validated where they
- * cross the process boundary. They mirror `@pupbot/db` rows but stay
+ * cross the process boundary. They mirror `@terabot/db` rows but stay
  * independent: the client never imports server code, so a Metro or Hermes
  * bundle cannot pull in Drizzle or `pg`.
  */
@@ -129,7 +129,7 @@ export const sendMessageResponseSchema = z.object({
 });
 export type SendMessageResponse = z.infer<typeof sendMessageResponseSchema>;
 
-/** Event types the worker appends to a run log (`@pupbot/agent/src/events.ts`). */
+/** Event types the worker appends to a run log (`@terabot/agent/src/events.ts`). */
 export type RunEventType =
   | "run.started"
   | "step"

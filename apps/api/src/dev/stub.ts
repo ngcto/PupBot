@@ -47,7 +47,7 @@ export const devStubRoutes = new Hono()
   .get("/v1/models", (c) =>
     c.json({
       object: "list",
-      data: [{ id: "pup-stub", object: "model", owned_by: "pupbot" }],
+      data: [{ id: "tera-stub", object: "model", owned_by: "terabot" }],
     }),
   )
   .post("/v1/chat/completions", async (c) => {
@@ -57,7 +57,7 @@ export const devStubRoutes = new Hono()
       stream?: boolean;
     };
 
-    const model = body.model ?? "pup-stub";
+    const model = body.model ?? "tera-stub";
     const text = replyFor(body.messages ?? [], model);
     const id = `chatcmpl-stub-${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);

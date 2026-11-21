@@ -9,10 +9,10 @@ import {
   run as runTable,
   runEvent,
   usageEvent,
-} from "@pupbot/db";
-import type { Database, MessagePart } from "@pupbot/db";
-import { gatewayCredential, serverEnv } from "@pupbot/config";
-import type { ModelEndpointConfig, ModelGateway } from "@pupbot/providers";
+} from "@terabot/db";
+import type { Database, MessagePart } from "@terabot/db";
+import { gatewayCredential, serverEnv } from "@terabot/config";
+import type { ModelEndpointConfig, ModelGateway } from "@terabot/providers";
 import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";

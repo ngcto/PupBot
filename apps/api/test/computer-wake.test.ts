@@ -1,6 +1,6 @@
-import { loadEnv } from "@pupbot/config/load-env";
-import { executeRun } from "@pupbot/agent";
-import type { RunComputer } from "@pupbot/agent";
+import { loadEnv } from "@terabot/config/load-env";
+import { executeRun } from "@terabot/agent";
+import type { RunComputer } from "@terabot/agent";
 import {
   auth,
   bot,
@@ -13,8 +13,8 @@ import {
   newId,
   run,
   runEvent,
-} from "@pupbot/db";
-import type { ModelGateway } from "@pupbot/providers";
+} from "@terabot/db";
+import type { ModelGateway } from "@terabot/providers";
 import { asc, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -23,7 +23,7 @@ loadEnv();
 const db = database();
 
 async function fixture(name: string) {
-  const email = `${name}-${Date.now()}-${Math.random().toString(16).slice(2)}@pupbot.dev`;
+  const email = `${name}-${Date.now()}-${Math.random().toString(16).slice(2)}@terabot.dev`;
   const signUp = await auth().api.signUpEmail({
     body: { email, password: "wake-test-password", name: "Wake Test" },
     returnHeaders: true,
@@ -47,8 +47,8 @@ async function fixture(name: string) {
   await db.insert(bot).values({
     id: botId,
     workspaceId: space.id,
-    name: "Wake Pup",
-    avatar: { shape: "pup", color: "amber" },
+    name: "Wake Tera",
+    avatar: { shape: "tera", color: "amber" },
     accentColor: "#f69412",
     instructions: "Test bot.",
     modelEndpointId: endpointId,

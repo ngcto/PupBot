@@ -1,6 +1,6 @@
-import { COMPUTER_PROVISION_QUEUE } from "@pupbot/db";
-import type { ComputerProvisionJobData } from "@pupbot/db";
-import type { ComputerAllocator } from "@pupbot/computers";
+import { COMPUTER_PROVISION_QUEUE } from "@terabot/db";
+import type { ComputerProvisionJobData } from "@terabot/db";
+import type { ComputerAllocator } from "@terabot/computers";
 import type { PgBoss } from "pg-boss";
 
 export const COMPUTER_MAINTENANCE_QUEUE = "computer-maintenance";

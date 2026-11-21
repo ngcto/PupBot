@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@pupbot/avatars>react': 19.3.0
+  '@terabot/avatars>react': 19.3.0
 
 importers:
 
@@ -193,25 +193,25 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.9
         version: 2.1.9(hono@4.13.19)
-      '@pupbot/agent':
+      '@terabot/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@pupbot/avatars':
+      '@terabot/avatars':
         specifier: workspace:*
         version: link:../../packages/avatars
-      '@pupbot/computers':
+      '@terabot/computers':
         specifier: workspace:*
         version: link:../../packages/computers
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@pupbot/db':
+      '@terabot/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@pupbot/providers':
+      '@terabot/providers':
         specifier: workspace:*
         version: link:../../packages/providers
-      '@pupbot/storage':
+      '@terabot/storage':
         specifier: workspace:*
         version: link:../../packages/storage
       drizzle-orm:
@@ -288,10 +288,10 @@ importers:
       '@hugeicons/react':
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.1)
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@pupbot/ui':
+      '@terabot/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       next:
@@ -337,10 +337,10 @@ importers:
       '@hugeicons/react-native':
         specifier: ^1.0.17
         version: 1.0.17(react-native-svg@15.16.0(react-native@0.88.1(@babel/core@7.29.13(supports-color@7.2.0))(@react-native/metro-config@0.88.1(@babel/core@7.29.13(supports-color@7.2.0))(supports-color@7.2.0))(@types/react@19.3.0)(react@19.3.0)(supports-color@7.2.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13(supports-color@7.2.0))(@react-native/metro-config@0.88.1(@babel/core@7.29.13(supports-color@7.2.0))(supports-color@7.2.0))(@types/react@19.3.0)(react@19.3.0)(supports-color@7.2.0))(react@19.3.0)
-      '@pupbot/api-client':
+      '@terabot/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
-      '@pupbot/avatars':
+      '@terabot/avatars':
         specifier: workspace:*
         version: link:../../packages/avatars
       expo:
@@ -395,28 +395,28 @@ importers:
       '@hugeicons/react':
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.1)
-      '@pupbot/api':
+      '@terabot/api':
         specifier: workspace:*
         version: link:../api
-      '@pupbot/avatars':
+      '@terabot/avatars':
         specifier: workspace:*
         version: link:../../packages/avatars
-      '@pupbot/computers':
+      '@terabot/computers':
         specifier: workspace:*
         version: link:../../packages/computers
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@pupbot/db':
+      '@terabot/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@pupbot/providers':
+      '@terabot/providers':
         specifier: workspace:*
         version: link:../../packages/providers
-      '@pupbot/storage':
+      '@terabot/storage':
         specifier: workspace:*
         version: link:../../packages/storage
-      '@pupbot/ui':
+      '@terabot/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       better-auth:
@@ -498,19 +498,19 @@ importers:
 
   apps/worker:
     dependencies:
-      '@pupbot/agent':
+      '@terabot/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@pupbot/computers':
+      '@terabot/computers':
         specifier: workspace:*
         version: link:../../packages/computers
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@pupbot/db':
+      '@terabot/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@pupbot/providers':
+      '@terabot/providers':
         specifier: workspace:*
         version: link:../../packages/providers
       pg-boss:
@@ -535,13 +535,13 @@ importers:
 
   packages/agent:
     dependencies:
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../config
-      '@pupbot/db':
+      '@terabot/db':
         specifier: workspace:*
         version: link:../db
-      '@pupbot/providers':
+      '@terabot/providers':
         specifier: workspace:*
         version: link:../providers
       drizzle-orm:
@@ -598,7 +598,7 @@ importers:
 
   packages/computers:
     dependencies:
-      '@pupbot/db':
+      '@terabot/db':
         specifier: workspace:*
         version: link:../db
       drizzle-orm:
@@ -642,7 +642,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../config
       better-auth:
@@ -691,7 +691,7 @@ importers:
 
   packages/providers:
     dependencies:
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../config
       zod:
@@ -713,10 +713,10 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.700.0
         version: 3.1173.0
-      '@pupbot/config':
+      '@terabot/config':
         specifier: workspace:*
         version: link:../config
-      '@pupbot/db':
+      '@terabot/db':
         specifier: workspace:*
         version: link:../db
       drizzle-orm:
