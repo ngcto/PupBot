@@ -40,10 +40,16 @@ export async function runProgram(
   const startedAt = Date.now();
   const wasm = await loadEngine();
   const controller = new AbortController();
+  let settleAbort: (() => void) | undefined;
   const onAbort = (): void => {
     controller.abort();
     worker.postMessage({ type: "abort" } satisfies WorkerOut);
     void worker.terminate();
+    // Resolve here rather than waiting for the worker's exit event: a terminated
+    // worker reports asynchronously, and an abort that waits on it is an abort that
+    // arrives late. A run that errors out does so later and is ignored, because the
+    // promise is already settled.
+    settleAbort?.();
   };
   options.signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -65,10 +71,23 @@ export async function runProgram(
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
 
   const result = await new Promise<SandboxResult>((resolve) => {
+    let settled = false;
     const finish = (value: SandboxResult): void => {
+      if (settled) return;
+      settled = true;
       options.signal?.removeEventListener("abort", onAbort);
       void worker.terminate();
       resolve(value);
+    };
+
+    settleAbort = () => {
+      finish({
+        ok: false,
+        error: { kind: "aborted", message: "the run was cancelled" },
+        output: [],
+        calls: [],
+        ms: Date.now() - startedAt,
+      });
     };
 
     worker.on("message", (message: WorkerOut) => {
