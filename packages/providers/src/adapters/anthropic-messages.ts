@@ -245,9 +245,14 @@ export const anthropicMessagesAdapter: StreamAdapter = async function* (request)
           if (payload.delta?.stop_reason) stopReason = payload.delta.stop_reason;
           const usage = payload.usage;
           if (usage) {
+            // `input_tokens` is carried here as well as on `message_start`, and on some
+            // endpoints it is *only* populated here — `message_start` reports zero and
+            // the final count arrives on the delta. Dropping it made a caller that sums
+            // usage events record zero prompt tokens for every turn.
             yield {
               type: "usage",
               outputTokens: usage.output_tokens,
+              ...(usage.input_tokens ? { inputTokens: usage.input_tokens } : {}),
               ...(usage.cache_read_input_tokens ? { cacheReadTokens: usage.cache_read_input_tokens } : {}),
               ...(usage.cache_creation_input_tokens
                 ? { cacheWriteTokens: usage.cache_creation_input_tokens }
