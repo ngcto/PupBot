@@ -8,6 +8,22 @@ const MIN_SIZE = 16;
 const INK = "#151515";
 
 /**
+ * How far the drawn body leans, in degrees, negative being counter-clockwise:
+ * the reference set leans to the left. Measured two ways that agree — Ng's
+ * screenshot traced and rotation-matched against its levelled revision gives 12°
+ * (median of the clean-edged shapes, 11.6°), and at matched optical size, comparing
+ * every glyph's silhouette against the closest reference cell gives a plateau from
+ * −12° to −16° (IoU 0.7101 at −12, 0.7106 at −14, 0.7100 at −16) that beats level
+ * (0.6856) and the old clockwise turn (0.6733). The plateau's peak is inside its own
+ * noise, so the measured 12° stands.
+ *
+ * Only the body turns. The eye pair is drawn after this, upright and in the same
+ * place, so the pair keeps the screen orientation it was fitted with; the body leans
+ * under it.
+ */
+export const GLYPH_LEAN_DEG = -12;
+
+/**
  * One frame, one string. The server and the browser call exactly this, so the
  * markup is identical; `time` is pinned and motion frozen. Colour, depth and body
  * are the package's own; the eye pair is ours.
@@ -22,7 +38,7 @@ export function renderAvatarSvg({ shape, color, size = 96 }: AvatarRenderInput):
     reducedMotion: true,
   });
 
-  return drawEyes(replaceEyes(rendered, definition), definition);
+  return drawEyes(leanGlyph(replaceEyes(rendered, definition)), definition);
 }
 
 /**
@@ -45,6 +61,22 @@ function replaceEyes(svg: string, definition: { id: string }): { body: string; m
     throw new Error(`open-bot-avatar changed its eye markup for "${definition.id}"; the eye layer cannot replace it`);
   }
   return { body, matrix };
+}
+
+/**
+ * Turns the drawn body inside its frame. Everything after the definitions rotates
+ * about the middle of the 0..100 box; the definitions themselves stay as written, so
+ * a re-vendor is still mechanical. The eye layer is added afterwards and does not turn.
+ */
+function leanGlyph({ body, matrix }: { body: string; matrix: string | null }): { body: string; matrix: string | null } {
+  const closed = body.indexOf("</defs>");
+  const end = body.lastIndexOf("</svg>");
+  if (closed === -1 || end === -1) {
+    throw new Error("open-bot-avatar markup changed shape; the glyph lean cannot be applied");
+  }
+  const start = closed + "</defs>".length;
+  const turned = `${body.slice(0, start)}<g transform="rotate(${GLYPH_LEAN_DEG} 50 50)">${body.slice(start, end)}</g>${body.slice(end)}`;
+  return { body: turned, matrix };
 }
 
 /** Appends our pair, under the same matrix the package drew the eyes beneath the body transform. */

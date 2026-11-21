@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { validateAvatar } from "open-bot-avatar";
-import { SHAPES, DEFAULT_SHAPE, EYE_FIT, eyeCapsules, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
+import { SHAPES, DEFAULT_SHAPE, EYE_FIT, GLYPH_LEAN_DEG, eyeCapsules, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
+
+/** The markup inside the lean group, by walking its depth. */
+function leanGroup(svg: string): string {
+  const start = svg.indexOf('<g transform="rotate(');
+  if (start === -1) return "";
+  let depth = 0;
+  let i = start;
+  while (i < svg.length) {
+    if (svg.startsWith("<g ", i)) {
+      depth += 1;
+      i += 3;
+    } else if (svg.startsWith("</g>", i)) {
+      depth -= 1;
+      i += 4;
+      if (depth === 0) return svg.slice(start, i);
+    } else {
+      i += 1;
+    }
+  }
+  return "";
+}
 
 const CONTRACT_ORDER = [
   "mug",
@@ -106,12 +127,20 @@ describe("avatar registry", () => {
     }
   });
 
-  it("turns no glyph as a whole: the lean lives in the eyes", () => {
+  it("leans the body counter-clockwise, once, about the middle of the frame", () => {
     for (const id of CONTRACT_ORDER) {
       const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
-      expect(svg, id).not.toContain("rotate(12 50 50)");
-      expect(svg, id).not.toContain("rotate(-12 50 50)");
-      expect(svg, id).not.toContain("rotate(0 50 50)");
+      expect(svg, id).toContain(`<g transform="rotate(${GLYPH_LEAN_DEG} 50 50)">`);
+      expect(svg.match(/rotate\(-?\d+ 50 50\)/g) ?? [], id).toHaveLength(1);
+    }
+    expect(GLYPH_LEAN_DEG).toBe(-12);
+  });
+
+  it("draws the eye pair outside the lean, so the pair keeps its screen angle", () => {
+    for (const id of CONTRACT_ORDER) {
+      const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
+      expect(leanGroup(svg), id).not.toContain('fill="#151515"');
+      expect(svg.indexOf('fill="#151515"'), id).toBeGreaterThan(svg.indexOf("</defs>"));
     }
   });
 
@@ -139,7 +168,7 @@ describe("avatar registry", () => {
   });
 
   it("keeps the fit table to glyphs that need it", () => {
-    expect(Object.keys(EYE_FIT).sort()).toEqual(["rocket", "witch-hat"]);
+    expect(Object.keys(EYE_FIT).sort()).toEqual(["rocket", "star", "witch-hat"]);
   });
 
   it("leaves eye colour and depth to the package", () => {

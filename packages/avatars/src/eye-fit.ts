@@ -25,6 +25,7 @@ export const EYE_LAYOUT = {
  * rendering the glyph at 256 px and requiring no eye ink to leave the silhouette.
  */
 export const EYE_FIT: Record<string, { scale: number; dx?: number; dy?: number }> = {
-  rocket: { scale: 1, dx: -0.16 },
-  "witch-hat": { scale: 1, dx: -0.16 },
+  rocket: { scale: 1, dx: -0.18 },
+  star: { scale: 1, dx: -0.06 },
+  "witch-hat": { scale: 1, dx: -0.12 },
 };
