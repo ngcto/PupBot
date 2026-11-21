@@ -55,6 +55,7 @@ interface SidebarProps {
   onOpenSettings: (botId: string) => void;
   onOpenAccount: () => void;
   onOpenSettingsDialog: () => void;
+  onOpenApps: () => void;
 }
 
 export function Sidebar({
@@ -68,6 +69,7 @@ export function Sidebar({
   onChoosePrimary,
   onOpenSettings,
   onOpenSettingsDialog,
+  onOpenApps,
 }: SidebarProps) {
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const visible = bots.filter((bot) => !bot.hidden);
@@ -197,7 +199,9 @@ export function Sidebar({
 
         <button
           type="button"
-          onClick={() => toast("The app marketplace arrives in P3.")}
+          onClick={onOpenApps}
+          aria-label="Connect apps"
+          data-testid="connect-apps"
           className="flex h-[34px] flex-1 items-center gap-2 rounded-pill bg-raised px-2.5 text-base text-ink hover:bg-raised-2"
         >
           <span>Connect apps</span>

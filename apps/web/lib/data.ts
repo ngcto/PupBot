@@ -1,5 +1,6 @@
 import {
   bot as botTable,
+  botApp,
   botComputer,
   botSection,
   computer,
@@ -10,7 +11,16 @@ import {
   run,
 } from "@pupbot/db";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
-import type { BotView, EndpointView, MessageView, ShellData, ShellUser, SectionView } from "./types.ts";
+import { listConnectionsFor } from "./apps.ts";
+import type {
+  BotView,
+  ConnectedApp,
+  EndpointView,
+  MessageView,
+  ShellData,
+  ShellUser,
+  SectionView,
+} from "./types.ts";
 
 function botQuery(workspaceId: string) {
   const db = database();
@@ -75,6 +85,7 @@ function toBotView(row: BotRow): BotView {
       reason: row.computerReason,
     },
     endpointId: row.modelEndpointId,
+    appIds: [],
   };
 }
 
@@ -142,6 +153,14 @@ export async function loadShellData(input: {
     .where(eq(modelEndpoint.workspaceId, input.workspaceId))
     .orderBy(asc(modelEndpoint.createdAt));
 
+  // One bot's allow-list is enough to drive the settings surface; it is filled
+  // after a bot is picked so a long bot list costs one query, not N.
+  if (activeBot) {
+    activeBot.appIds = await botAppIdsFor(activeBot.id);
+  }
+
+  const connections: ConnectedApp[] = await listConnectionsFor(input.user.id);
+
   return {
     user: input.user,
     apiUrl: input.apiUrl,
@@ -151,5 +170,14 @@ export async function loadShellData(input: {
     messages,
     activeRunId,
     endpoints,
+    connections,
   };
+}
+
+async function botAppIdsFor(botId: string): Promise<string[]> {
+  const rows = await database()
+    .select({ connectionId: botApp.connectionId })
+    .from(botApp)
+    .where(eq(botApp.botId, botId));
+  return rows.map((row) => row.connectionId);
 }

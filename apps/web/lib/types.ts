@@ -32,6 +32,54 @@ export interface BotView {
   isPrimary: boolean;
   computer: ComputerView;
   endpointId: string | null;
+  /** Connected apps this bot may use. Nothing reads it in a run yet. */
+  appIds: string[];
+}
+
+/** A connected app as the UI receives it: a name and a state, never a credential. */
+export interface AppConnectionView {
+  id: string;
+  toolkit: string;
+  name: string;
+  status: "pending" | "active" | "error";
+  createdAt: string;
+}
+
+export interface ConnectedApp extends AppConnectionView {
+  /** A bot may use it. Nothing reads this during a run yet. */
+  botEnabled: boolean;
+}
+
+export type AppSupport = "managed" | "user-key" | "needs-setup";
+export type AppState = "available" | "pending" | "connected" | "failed";
+
+/**
+ * One app row as the browser sees it. Declared here, beside the other view types,
+ * so a client component never imports the server module that holds the API key.
+ */
+export interface AppCard {
+  slug: string;
+  name: string;
+  description: string;
+  logoUrl: string;
+  appUrl: string | null;
+  categories: string[];
+  toolsCount: number;
+  support: AppSupport;
+  authConfigId: string | null;
+  authConfigManaged: boolean | null;
+  state: AppState;
+  connectionId: string | null;
+  statusDetail: string | null;
+  lastError: string | null;
+}
+
+export interface AppList {
+  items: AppCard[];
+  nextCursor: string | null;
+  categories: string[];
+  configured: boolean;
+  error: string | null;
 }
 
 export interface SectionView {
@@ -72,4 +120,5 @@ export interface ShellData {
   messages: MessageView[];
   activeRunId: string | null;
   endpoints: EndpointView[];
+  connections: ConnectedApp[];
 }

@@ -12,7 +12,10 @@ const PID_FILE = join(process.cwd(), "e2e", ".worker.pid");
 export default async function globalSetup() {
   const child = spawn("pnpm", ["--filter", "@pupbot/worker", "dev"], {
     cwd: process.cwd(),
-    env: process.env,
+    // The suite's computers come from the fake pool: a live provider key in the
+    // developer's environment would spend real quota and its capacity limit would
+    // make the smoke test flaky.
+    env: { ...process.env, INSTABOX_API_KEY: "" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
