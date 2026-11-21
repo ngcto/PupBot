@@ -48,6 +48,31 @@ function streamResponse(chunks: string[]): ResponseLike {
   };
 }
 
+function brokenStreamResponse(chunks: string[]): ResponseLike {
+  let index = 0;
+  const body: ByteStream = {
+    getReader() {
+      return {
+        async read() {
+          if (index < chunks.length) {
+            const value = chunks[index];
+            index += 1;
+            return { done: false, value };
+          }
+          throw new TypeError("network connection was lost");
+        },
+      };
+    },
+  };
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    text: async () => "",
+    body,
+  };
+}
+
 function fakeFetch(responses: ResponseLike[]): { fetch: FetchLike; calls: Call[] } {
   const calls: Call[] = [];
   let index = 0;
@@ -294,6 +319,67 @@ describe("streaming a run", () => {
     expect(calls[1]?.url).toBe("http://api.test/runs/run-1/events?after=2");
   });
 
+  it("resumes after the socket errors mid-reply", async () => {
+    const dropped = ["event: open\ndata: {}\n\n", frame("text_delta", { text: "Hel" }, 1)];
+    const resumed = [frame("text_delta", { text: "lo" }, 2), 'event: done\ndata: {"status":"done"}\n\n'];
+    const { fetch, calls } = fakeFetch([brokenStreamResponse(dropped), streamResponse(resumed)]);
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      session: createMemorySessionStore("c=1"),
+      fetch,
+    });
+
+    const text: string[] = [];
+    const result = await client.streamRun("run-1", {
+      onEvent: (event) => {
+        if (event.type === "text_delta") text.push(String(event.payload.text));
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(text.join("")).toBe("Hello");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.url).toBe("http://api.test/runs/run-1/events?after=1");
+  });
+
+  it("keeps resuming while each connection delivers new events", async () => {
+    const first = [frame("text_delta", { text: "a" }, 1)];
+    const second = [frame("text_delta", { text: "b" }, 2)];
+    const third = [frame("text_delta", { text: "c" }, 3)];
+    const fourth = [frame("run.completed", { status: "done" }, 4)];
+    const { fetch, calls } = fakeFetch([
+      streamResponse(first),
+      streamResponse(second),
+      streamResponse(third),
+      streamResponse(fourth),
+    ]);
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      session: createMemorySessionStore("c=1"),
+      fetch,
+    });
+
+    await expect(client.streamRun("run-1", { onEvent: () => {} })).resolves.toEqual({ status: "done" });
+    expect(calls).toHaveLength(4);
+    expect(calls[3]?.url).toBe("http://api.test/runs/run-1/events?after=3");
+  });
+
+  it("does not retry when the caller aborted", async () => {
+    const controller = { aborted: true };
+    const chunks = ["event: open\ndata: {}\n\n"];
+    const { fetch, calls } = fakeFetch([brokenStreamResponse(chunks), streamResponse([])]);
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      session: createMemorySessionStore("c=1"),
+      fetch,
+    });
+
+    await expect(client.streamRun("run-1", { onEvent: () => {}, signal: controller })).rejects.toThrow(
+      "network connection was lost",
+    );
+    expect(calls).toHaveLength(1);
+  });
+
   it("reports a stream that never finishes instead of a truncated reply", async () => {
     const truncated = [frame("text_delta", { text: "half" })];
     const { fetch, calls } = fakeFetch([streamResponse(truncated)]);
@@ -306,7 +392,8 @@ describe("streaming a run", () => {
     await expect(client.streamRun("run-1", { onEvent: () => {} })).rejects.toMatchObject({
       code: "stream_incomplete",
     });
-    expect(calls).toHaveLength(3);
+    // One attempt made progress (seq 1), then three idle drops exhaust the budget.
+    expect(calls).toHaveLength(4);
   });
 
   it("treats a terminal run event as the end even without a done frame", async () => {
