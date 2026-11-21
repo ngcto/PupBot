@@ -22,6 +22,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `edited` re-runs pr-hygiene when a rejected title is corrected; the default
+    # set does not include it, which left CI red until an unrelated push.
+    types: [opened, synchronize, reopened, edited]
   schedule:
     # Monday 03:17 UTC: drift in `main` and in the dependency tree surfaces
     # without anyone opening a PR.
@@ -117,7 +120,7 @@ jobs:
             # one of them moved, a package-level filter would under-test the PR,
             # so the whole suite runs.
             if git diff --name-only "origin/$base...HEAD" \
-               | grep -qE '^(pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|package\.json|tsconfig\.base\.json|\.npmrc|eslint\.config\.js|playwright\.config\.ts|\.env\.example|\.github/)'; then
+               | grep -qE '^(\.nvmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|package\.json|tsconfig\.base\.json|\.npmrc|eslint\.config\.js|playwright\.config\.ts|\.env\.example|\.github/)'; then
               full=true
               reason="full: the PR changes a root file that affects every package"
             fi

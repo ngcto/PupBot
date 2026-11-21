@@ -41,12 +41,14 @@ The shape of the bug. Two branches each record migrations while both are open:
 
 | | branch `main` | branch `feature` |
 | --- | --- | --- |
-| records | `0003`…`0005`, `when` = T3, T4, T5 | `0006`, `when` = T6, where T3 < T6 < T4 |
+| records | `0003`…`0005`, `when` = T3, T4, T5 | `0006`, `when` = T6, where T3 < T4 < T6 < T5 |
 
-`T6` sits **between** main's T3 and T4. A database that applies `feature` records `created_at = T6`.
+`T6` sits **between** main's T4 and T5. A database that applies `feature` records `created_at = T6`.
 When it later pulls `main`, the migrator takes the newest row (`T6`) and applies a migration only
-when its `when` is greater than that. Main's `0004` and `0005` (`T4`, `T5`) are *less* than `T6`, so
-they are never applied — silently, with no error, and never revisited.
+when its `when` is greater than that. Main's `0005` (`T5`) is greater, so it runs — but main's `0004`
+(`T4`) is *less* than `T6`, so it is never applied: silently, with no error, and never revisited. The
+migration that lands in the gap is the one that gets dropped, which is why the timestamps in a
+single branch must always keep increasing.
 
 This is not hypothetical. `drizzle/0007_model_gateway_backfill.sql` is the repair for exactly that
 occurrence: a database that ran the hosting branch before main's model-gateway work landed skipped

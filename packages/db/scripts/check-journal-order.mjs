@@ -114,11 +114,25 @@ const snapshots = new Set(
     }
   })(),
 );
+const tags = new Set(entries.map((entry) => entry.tag).filter((tag) => typeof tag === "string"));
 for (const entry of entries) {
   if (typeof entry.tag !== "string") continue;
   if (!files.has(`${entry.tag}.sql`)) problems.push(`missing ${entry.tag}.sql`);
   if (!snapshots.has(`${entry.tag.slice(0, 4)}_snapshot.json`)) {
     problems.push(`missing meta/${entry.tag.slice(0, 4)}_snapshot.json`);
+  }
+}
+
+// 4. And the reverse: a .sql on disk with no journal entry is never applied, and
+//    the check above cannot see it because it only walks entries. A conflict
+//    resolved by keeping both sides' files and one side's journal lands here.
+for (const file of files) {
+  if (!file.endsWith(".sql")) continue;
+  const tag = file.slice(0, -".sql".length);
+  if (!tags.has(tag)) {
+    problems.push(
+      `${file} exists but no journal entry lists it, so drizzle would never run it — the journal and the migration files disagree`,
+    );
   }
 }
 
