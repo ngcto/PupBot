@@ -345,7 +345,8 @@ equivalent loop.
 #### Q2 — Where does the sandbox actually run?
 
 **Default: in our process, in a worker thread. For a run whose tool set is the bot's computer,
-the same VM runs on the bot's box, next to the driver daemon.**
+the same VM runs on the bot's box, next to the driver daemon.** §7.0 states the scope of the
+argument that justifies this, and its limits. Read that first.
 
 The number that decides this is TERA-74's, measured on a live box: **an in-box call costs
 ~10 ms; an exec round trip costs ~0.5 s.** The daemon owns the session, so a call is local
@@ -500,6 +501,34 @@ Code mode is not free. From Claude Code's own limitations list plus our shape:
 ---
 
 ## 7. Proposed architecture
+
+### 7.0 Placement: the box is justified by computer tools alone
+
+Read this before quoting any latency number at someone: **the case for running a program on the
+bot's box is the CUA call rate, and nothing else.** It is not a general-purpose fast path, and a
+task that is mostly vault fills is *not* the task the box placement wins.
+
+The number, and its exact scope:
+
+- In-box CUA call ≈ **10 ms**; the same call over exec ≈ **0.5 s** (TERA-74, measured on a live
+  box). A program making ~20 observation and click calls is therefore **~0.2 s** in the box
+  against **~10 s** from our process. That is the whole argument, and it applies only to tools
+  that live on the box.
+- A **vault fill is two crossings** from a box-side program — box→host for the request, then
+  host→box to drive the driver to type — against **one** exec if the program runs host-side. The
+  fill has to be applied by whatever holds the credential, so it cannot be local to the box.
+- Every host-side tool (storage, messages, our own data) is a crossing *or* a refusal when the
+  program is in the box, depending on whether that tool is allowed to be reached.
+
+So the rule is stated as a rule, not as an optimisation: **the sandbox goes where the tools are.**
+A computer task's tool set is the CUA functions, so the VM goes to the box. A task whose tools are
+ours stays in our process. If the tool set is mixed, in-process is the default and the box is
+chosen only when the CUA calls dominate — which is measurable per task with the call counts the
+sandbox already returns.
+
+An earlier revision of this report described a box-side fill as "one crossing" and let the
+0.2 s-versus-10 s figure imply general placement advice. Both were wrong. If this page is ever
+cited to justify running everything on the box, it is being cited against itself.
 
 ### 7.1 Shape
 
