@@ -606,7 +606,9 @@ jobs:
             const tag = ${{ toJSON(needs.meta.outputs.tag) }};
             const version = process.env.VERSION;
             const body = fs.readFileSync(process.env.NOTES_PATH, "utf8");
-            const octokit = github;
+            // `github-script` already binds `octokit` in this scope; redeclaring it
+            // is a SyntaxError before a single line runs, which is what failed the
+            // first real release rather than any permission.
 
             const attempt = async (label, fn) => {
               try {
@@ -622,16 +624,16 @@ jobs:
 
             let existing = null;
             try {
-              existing = (await octokit.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              existing = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
             } catch (error) {
               if (error.status !== 404) throw error;
             }
 
             const release = existing
-              ? (await attempt("PATCH /releases", () => octokit.rest.repos.updateRelease({
+              ? (await attempt("PATCH /releases", () => github.rest.repos.updateRelease({
                   owner, repo, release_id: existing.id, tag_name: tag, name: `Terabot ${version}`, body,
                 }))).data
-              : (await attempt("POST /releases", () => octokit.rest.repos.createRelease({
+              : (await attempt("POST /releases", () => github.rest.repos.createRelease({
                   owner, repo, tag_name: tag, target_commitish: process.env.SHA,
                   name: `Terabot ${version}`, body,
                   prerelease: process.env.PRERELEASE === "true",
@@ -640,15 +642,11 @@ jobs:
             core.setOutput("release_id", String(release.id));
             core.info(`release ${release.id} at ${release.html_url}`);
 
-            const uploadUrl = release.upload_url.replace(/\{.*$/, "");
             for (const name of fs.readdirSync("assets")) {
-              const path = `assets/${name}`;
-              const data = fs.readFileSync(path);
-              await attempt(`POST upload ${name}`, () => octokit.request(`POST ${uploadUrl}`, {
+              const data = fs.readFileSync(`assets/${name}`);
+              await attempt(`POST upload ${name}`, () => github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: release.id, name, data,
                 headers: { "content-type": "application/octet-stream", "content-length": data.length },
-                data,
-                name,
-                label: name,
               }));
             }
 
