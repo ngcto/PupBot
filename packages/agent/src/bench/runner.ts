@@ -28,8 +28,23 @@ export interface ArmRun {
   answer: string;
   /** Model calls made — one `stream` per turn. */
   turns: number;
+  /**
+   * Prompt tokens that missed the provider's cache. Not the prompt: on a served cache
+   * this is a handful of tokens and the rest is in `cacheReadTokens`.
+   */
   inputTokens: number;
   outputTokens: number;
+  /** Prompt tokens served from the provider's cache, and written to it. Both are billed. */
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /**
+   * Every prompt token the provider charged for: uncached + cache read + cache write.
+   *
+   * This is the column the surface question turns on, because the two arms cache very
+   * differently — arm B repeats a 26-schema block every turn and arm C sends one tool —
+   * so `inputTokens` alone compares their *uncached remainder* and not their cost.
+   */
+  promptTokens: number;
   /** Time inside model calls only, including the tool work they triggered. */
   wallMsModel: number;
   /** From before the first model call to after the loop returns. */
@@ -43,7 +58,25 @@ export interface ArmRun {
  * Counting lives here rather than in each arm so an arm cannot opt out of it, and so
  * the two wall-clock readings come from the same monotonic clock in the same process.
  */
-export function countingGateway(gateway: ModelGateway, into: { turns: number; input: number; output: number; modelMs: number }): ModelGateway {
+export interface TurnCounters {
+  turns: number;
+  input: number;
+  output: number;
+  modelMs: number;
+  /**
+   * Prompt tokens the provider served from or wrote to its cache.
+   *
+   * `input_tokens` is the *uncached* remainder, not the prompt. A surface that fits in
+   * a cache entry reports a prompt of 3,786 tokens as `input_tokens: 4`, so a counter
+   * that reads only `input_tokens` reports four tokens for a four-thousand-token prompt
+   * and the column reads `in=6` for a run whose turns each carried a 98-token system
+   * message. Both are prompt tokens and both are billed, so both are counted here.
+   */
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export function countingGateway(gateway: ModelGateway, into: TurnCounters): ModelGateway {
   return {
     async *stream(request: StreamRequest) {
       into.turns += 1;
@@ -53,6 +86,8 @@ export function countingGateway(gateway: ModelGateway, into: { turns: number; in
           if (event.type === "usage") {
             into.input += event.inputTokens ?? 0;
             into.output += event.outputTokens ?? 0;
+            into.cacheRead += event.cacheReadTokens ?? 0;
+            into.cacheWrite += event.cacheWriteTokens ?? 0;
           }
           yield event;
         }
@@ -80,7 +115,7 @@ export async function runTask(input: {
 }): Promise<ArmRun> {
   const { task, build, db, runId, gateway } = input;
   const startedAt = performance.now();
-  const counters = { turns: 0, input: 0, output: 0, modelMs: 0 };
+  const counters: TurnCounters = { turns: 0, input: 0, output: 0, modelMs: 0, cacheRead: 0, cacheWrite: 0 };
 
   if (!task.attemptable(build.arm)) {
     return {
@@ -93,6 +128,9 @@ export async function runTask(input: {
       turns: 0,
       inputTokens: 0,
       outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      promptTokens: 0,
       wallMsModel: 0,
       wallMsInclusive: Math.round(performance.now() - startedAt),
     };
@@ -125,6 +163,9 @@ export async function runTask(input: {
     turns: counters.turns,
     inputTokens: counters.input,
     outputTokens: counters.output,
+    cacheReadTokens: counters.cacheRead,
+    cacheWriteTokens: counters.cacheWrite,
+    promptTokens: counters.input + counters.cacheRead + counters.cacheWrite,
     wallMsModel: Math.round(counters.modelMs),
     wallMsInclusive: Math.round(performance.now() - startedAt),
     ...(error ? { error } : {}),
@@ -181,6 +222,9 @@ interface Cell {
   turns: number;
   input: number;
   output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  prompt: number;
   model: number;
   inclusive: number;
   why: string;
@@ -211,6 +255,9 @@ function cellRowsFor(runs: ArmRun[]): Cell[] {
         turns: median(group.map((r) => r.turns)),
         input: median(group.map((r) => r.inputTokens)),
         output: median(group.map((r) => r.outputTokens)),
+        cacheRead: median(group.map((r) => r.cacheReadTokens)),
+        cacheWrite: median(group.map((r) => r.cacheWriteTokens)),
+        prompt: median(group.map((r) => r.promptTokens)),
         model: median(group.map((r) => r.wallMsModel)),
         inclusive: median(group.map((r) => r.wallMsInclusive)),
         why: witness.why,
@@ -229,8 +276,8 @@ function cellRowsFor(runs: ArmRun[]): Cell[] {
  */
 export function renderTable(runs: ArmRun[], reps = 1): string {
   const header =
-    "| Arm | Task | OK | Turns (model round trips) | In tokens | Out tokens | Wall (model ms) | Wall (inclusive ms) | Why |";
-  const rule = "|---|---|---|---|---|---|---|---|---|";
+    "| Arm | Task | OK | Turns | Prompt tokens (all, billed) | of which uncached | of which cached | Out tokens | Wall (model ms) | Why |";
+  const rule = "|---|---|---|---|---|---|---|---|---|---|";
   // Rows are the cells, each already reduced to its median, so nothing in the table
   // is a single lucky or unlucky rep. `runs` is kept for the JSON, where the spread
   // belongs.
@@ -241,11 +288,11 @@ export function renderTable(runs: ArmRun[], reps = 1): string {
     if (!r.attemptable) unattemptable.set(`${r.arm}:${r.taskId}`, r);
   }
   const rows = [...unattemptable.values()].map(
-    (r) => `| ${r.arm.toUpperCase()} | ${r.taskId} | n/a | 0 | 0 | 0 | 0 | 0 | ${r.why} |`,
+    (r) => `| ${r.arm.toUpperCase()} | ${r.taskId} | n/a | 0 | 0 | 0 | 0 | 0 | 0 | ${r.why} |`,
   );
   const cellRows = cellRowsFor(runs).map(
     (c) =>
-      `| ${c.arm.toUpperCase()} | ${c.taskId} | ${c.ok ? "pass" : "fail"} (${c.passed}/${c.reps}) | ${c.turns} | ${c.input} | ${c.output} | ${c.model} | ${c.inclusive} | ${c.why} |`,
+      `| ${c.arm.toUpperCase()} | ${c.taskId} | ${c.ok ? "pass" : "fail"} (${c.passed}/${c.reps}) | ${c.turns} | ${c.prompt} | ${c.input} | ${c.cacheRead + c.cacheWrite} | ${c.output} | ${c.model} | ${c.why} |`,
   );
   // One median per (arm, task) cell, then summed across tasks, so a noisy single rep
   // cannot move an arm's total.
@@ -253,8 +300,8 @@ export function renderTable(runs: ArmRun[], reps = 1): string {
 
   const summary = (["a", "b", "c", "d", "e"] as const).map((arm) => {
     const forArm = medians.filter((m) => m.arm === arm);
-    if (forArm.length === 0) return `| ${arm.toUpperCase()} | all | 0/0 | 0 | 0 | 0 | 0 | 0 | not attempted |`;
-    return `| ${arm.toUpperCase()} | all (median of ${reps} rep${reps === 1 ? "" : "s"} per cell) | ${forArm.filter((m) => m.ok).length}/${forArm.length} | ${forArm.reduce((n, m) => n + m.turns, 0)} | ${forArm.reduce((n, m) => n + m.input, 0)} | ${forArm.reduce((n, m) => n + m.output, 0)} | ${forArm.reduce((n, m) => n + m.model, 0)} | ${forArm.reduce((n, m) => n + m.inclusive, 0)} | |`;
+    if (forArm.length === 0) return `| ${arm.toUpperCase()} | all | 0/0 | 0 | 0 | 0 | 0 | 0 | 0 | not attempted |`;
+    return `| ${arm.toUpperCase()} | all (median of ${reps} rep${reps === 1 ? "" : "s"} per cell) | ${forArm.filter((m) => m.ok).length}/${forArm.length} | ${forArm.reduce((n, m) => n + m.turns, 0)} | ${forArm.reduce((n, m) => n + m.prompt, 0)} | ${forArm.reduce((n, m) => n + m.input, 0)} | ${forArm.reduce((n, m) => n + m.cacheRead + m.cacheWrite, 0)} | ${forArm.reduce((n, m) => n + m.output, 0)} | ${forArm.reduce((n, m) => n + m.model, 0)} | |`;
   });
   return [header, rule, ...rows, ...cellRows, rule, ...summary].join("\n");
 }

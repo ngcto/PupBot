@@ -224,21 +224,67 @@ describe("the table", () => {
   it("reports the median of the reps, not the fastest", () => {
     // Three reps where one is an outlier: the fastest would flatter whichever arm
     // varies most, and code mode is the arm most likely to.
-    const base = { attemptable: true, ok: true, why: "", answer: "", outputTokens: 0, wallMsModel: 0 };
+    const base = {
+      attemptable: true,
+      ok: true,
+      why: "",
+      answer: "",
+      outputTokens: 0,
+      wallMsModel: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
     const table = renderTable(
       [
-        { ...base, arm: "c", taskId: 1, turns: 10, inputTokens: 1000, wallMsInclusive: 100 },
-        { ...base, arm: "c", taskId: 1, turns: 4, inputTokens: 400, wallMsInclusive: 40 },
-        { ...base, arm: "c", taskId: 1, turns: 6, inputTokens: 600, wallMsInclusive: 60 },
+        { ...base, arm: "c", taskId: 1, turns: 10, inputTokens: 1000, promptTokens: 1000, wallMsInclusive: 100 },
+        { ...base, arm: "c", taskId: 1, turns: 4, inputTokens: 400, promptTokens: 400, wallMsInclusive: 40 },
+        { ...base, arm: "c", taskId: 1, turns: 6, inputTokens: 600, promptTokens: 600, wallMsInclusive: 60 },
       ],
       3,
     );
+    // The median row's uncached column, between the prompt total and the output count.
     expect(table).toContain("| 6 | 600 |");
     expect(table).not.toContain("| 4 | 400 |");
   });
 
   it("names the turn unit, so nobody reads it as tool calls", () => {
-    expect(renderTable([], 1)).toContain("Turns (model round trips)");
+    expect(renderTable([], 1)).toContain("| Turns |");
+    expect(renderTable([], 1)).not.toContain("Turns (tool calls)");
+  });
+
+  /**
+   * The column that decides the surface question.
+   *
+   * `inputTokens` is the uncached remainder, so a run whose prompt is served from the
+   * provider's cache reports a handful of tokens for a four-thousand-token prompt. The
+   * table has to show all of it, or it compares two arms' cache misses and calls that
+   * their cost — which is what it did, reading `in=6` and `in=10` for turns that each
+   * carried a 98-token system prompt.
+   */
+  it("shows every billed prompt token, not just the uncached remainder", () => {
+    const table = renderTable(
+      [
+        {
+          attemptable: true,
+          ok: true,
+          why: "",
+          answer: "",
+          arm: "b",
+          taskId: 1,
+          turns: 2,
+          inputTokens: 6,
+          outputTokens: 50,
+          cacheReadTokens: 3900,
+          cacheWriteTokens: 100,
+          promptTokens: 4006,
+          wallMsModel: 0,
+          wallMsInclusive: 60,
+        },
+      ],
+      1,
+    );
+    expect(table).toContain("Prompt tokens (all, billed)");
+    expect(table).toContain("| 4006 | 6 | 4000 |");
   });
 });
 
