@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "bench": "tsx scripts/bench.ts"
   },
   "dependencies": {
     "@terabot/config": "workspace:*",
