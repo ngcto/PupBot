@@ -104,6 +104,31 @@ describe("detection", () => {
     expect(detection.signals[0]?.advisory).toBe(true);
   });
 
+  it("keeps a host on the authority instead of matching it anywhere", () => {
+    // A host name in a query string or a look-alike domain is not that host.
+    // Matching either one reports a clean page as a challenge, which is the
+    // worst thing this module can do.
+    const smuggled = detectCaptcha({
+      frameUrls: ["https://evil.example/?next=https://hcaptcha.com/captcha/v1/abc"],
+    });
+    expect(smuggled.gated).toBe(false);
+    expect(smuggled.signals).toEqual([]);
+
+    // A subdomain of someone else's domain that merely *starts with* the real
+    // host is not that host.
+    const lookAlike = detectCaptcha({
+      frameUrls: ["https://hcaptcha.com.attacker.example/assets/widget.js"],
+    });
+    expect(lookAlike.gated).toBe(false);
+    expect(lookAlike.signals).toEqual([]);
+
+    // The real host, and its real subdomain, still match.
+    expect(detectCaptcha({ frameUrls: ["https://hcaptcha.com/captcha"] }).gated).toBe(true);
+    expect(
+      detectCaptcha({ frameUrls: ["https://newassets.hcaptcha.com/captcha/v1/abc"] }).gated,
+    ).toBe(true);
+  });
+
   it("says a clean page is clean", () => {
     const detection = detectCaptcha({ frameUrls: ["https://app.example.com/#main"], title: "Dashboard", text: "Hello" });
     expect(detection.gated).toBe(false);

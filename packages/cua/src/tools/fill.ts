@@ -281,7 +281,7 @@ async function fillPage(
  * is the normal case for a Vault fill, so "does the field hold the value" has to
  * handle it or every password fill reports a false negative.
  */
-const MASK_CHARS = /^[•●*·\u2022\u25cf]+$/u;
+const MASK_CHARS = /^[\u2022\u25cf*\u00b7]+$/u;
 
 /**
  * Did the field take the value?

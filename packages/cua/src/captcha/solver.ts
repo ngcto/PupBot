@@ -40,6 +40,13 @@ import type { CaptchaDetection, CaptchaKind, CaptchaSignal } from "../types.ts";
 /** Which solver API shape to speak. One implemented; the rest are the seam. */
 export type SolverProvider = "2captcha";
 
+/** Drop trailing `/` characters from a base URL, in linear time. */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
 export interface SolverConfig {
   provider: SolverProvider;
   apiKey: string;
@@ -177,7 +184,10 @@ export function createSolver(config: SolverConfig | null, fetchImpl: typeof fetc
     };
   }
 
-  const base = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  // Trim trailing slashes without a regex: CodeQL is right that `/\/+$/` over a
+  // caller-supplied URL is quadratic on a long run of slashes, and the endpoint
+  // is exactly the kind of library input an operator types by hand.
+  const base = trimTrailingSlashes(config.baseUrl ?? DEFAULT_BASE_URL);
   const timeoutSeconds = config.timeoutSeconds ?? 180;
 
   return {

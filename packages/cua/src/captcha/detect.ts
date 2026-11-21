@@ -45,19 +45,36 @@ interface Signature {
  * Ordered most-specific first: reCAPTCHA Enterprise serves from the same host as
  * v3, so the enterprise markers are tested before the plain v3 one.
  */
+/**
+ * A host pattern anchored to the URL's authority.
+ *
+ * CodeQL flagged this file hard and it is right: `hcaptcha.com/captcha` tested
+ * against a whole page haystack also matches
+ * `https://evil.example/?next=hcaptcha.com/captcha`, and `hcaptcha.com` matches
+ * `https://hcaptcha.com.attacker.example/`. Either one reports a clean page as a
+ * challenge, which is the worst failure this module has.
+ *
+ * Matching `//` + optional subdomains + the exact host keeps the name on the
+ * authority. Patterns that are already anchored to a rendered attribute
+ * (`class="cf-turnstile"`) do not go through this.
+ */
+function url(host: string, rest: string): RegExp {
+  return new RegExp(`^(?:[a-z0-9-]+\\.)*${host}[/?#]${rest}`, "i");
+}
+
 const SIGNATURES: Signature[] = [
   {
     kind: "recaptcha_enterprise",
-    gate: /recaptcha\/(?:enterprise|api2\/enterprise)\/(?:anchor|bframe)/i,
-    loader: /recaptcha\/(?:enterprise|api2\/enterprise)\.js/i,
+    gate: url("google\\.com", String.raw`recaptcha\/(?:enterprise|api2\/enterprise)\/(?:anchor|bframe)`),
+    loader: url("google\\.com", String.raw`recaptcha\/(?:enterprise|api2\/enterprise)\.js`),
     confidence: "high",
   },
   {
     kind: "recaptcha_v2_checkbox",
-    gate: /google\.com\/recaptcha\/(?:api2\/)?anchor/i,
+    gate: url("google\\.com", String.raw`recaptcha\/(?:api2\/)?anchor`),
     // The v2 widget's own loader is the anchor/b-frame pair; a bare `api.js` is
     // the generic or v3 loader and must not be read as a checkbox.
-    loader: /recaptcha\/(?:api2\/)?anchor/i,
+    loader: url("google\\.com", String.raw`recaptcha\/(?:api2\/)?anchor`),
     confidence: "high",
   },
   {
@@ -71,30 +88,46 @@ const SIGNATURES: Signature[] = [
     // v3 renders no widget: it is a score returned by `execute`. The only
     // honest signal is the call together with the page's response field.
     gate: /grecaptcha\.(?:execute|ready)\(/i,
-    loader: /google\.com\/recaptcha\/api\.js|recaptcha\/api\.js/i,
+    loader: url("google\\.com", String.raw`recaptcha\/api\.js`),
     confidence: "medium",
   },
   {
     kind: "hcaptcha",
-    gate: /hcaptcha\.com\/captcha|newassets\.hcaptcha\.com\/captcha/i,
-    loader: /hcaptcha\.com\/(?:1\/api\.js|checksiteconfig)/i,
+    gate: url("hcaptcha\\.com", String.raw`captcha`),
+    loader: url("hcaptcha\\.com", String.raw`(?:1\/api\.js|checksiteconfig)`),
     confidence: "high",
   },
   {
     kind: "turnstile",
-    gate: /challenges\.cloudflare\.com\/turnstile\/v\d+\/(?:bframe|a\/)|class=["'][^"']*cf-turnstile/i,
-    loader: /challenges\.cloudflare\.com\/turnstile\/v\d+\/api\.js|cf-turnstile/i,
+    gate: new RegExp(
+      `${url("cloudflare\\.com", String.raw`turnstile\/v\d+\/(?:bframe|a\/)`).source}` +
+        String.raw`|class=["'][^"']*cf-turnstile`,
+      "i",
+    ),
+    loader: new RegExp(
+      `${url("cloudflare\\.com", String.raw`turnstile\/v\d+\/api\.js`).source}` +
+        String.raw`|cf-turnstile`,
+      "i",
+    ),
     confidence: "high",
   },
   {
     kind: "arkose",
-    gate: /arkoselabs\.com\/fc\/(?:api|gc)\/|funcaptcha\.(?:com|net)/i,
-    loader: /arkoselabs\.com|funcaptcha/i,
+    gate: new RegExp(
+      `${url("arkoselabs\\.com", String.raw`fc\/(?:api|gc)\/`).source}` +
+        String.raw`|//(?:[a-z0-9-]+\.)*funcaptcha\.(?:com|net)/`,
+      "i",
+    ),
+    loader: new RegExp(
+      `${url("arkoselabs\\.com", String.raw``).source}` +
+        String.raw`|//(?:[a-z0-9-]+\.)*funcaptcha\.(?:com|net)/`,
+      "i",
+    ),
     confidence: "high",
   },
   {
     kind: "aws_waf",
-    gate: /captcha\.awswaf\.com\/captcha/i,
+    gate: url("awswaf\\.com", String.raw`captcha`),
     loader: /awswaf/i,
     confidence: "high",
   },
@@ -116,13 +149,45 @@ const BLOCKING_MARKERS = [
   /name=["']cf-turnstile-response["']/i,
 ];
 
-/** The whole URL a regex matched inside, so a query string is not lost. */
-function enclosingUrl(haystack: string, index: number): string | undefined {
-  const start = haystack.lastIndexOf("http", index);
-  if (start < 0) return undefined;
-  const rest = haystack.slice(start);
-  const end = rest.search(/[\s"'<>]/);
-  return end < 0 ? rest : rest.slice(0, end);
+/** The path segments of a URL; empty when it does not parse. */
+function pathSegments(url: string): string[] {
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `host/path` for a URL, with the query and fragment dropped.
+ *
+ * The path is what names the widget (`/recaptcha/api2/anchor`); the query is
+ * where any string at all can be planted, so it never takes part in matching.
+ * The site key is read from the whole URL separately.
+ */
+function hostAndPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname.toLowerCase()}${parsed.pathname}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The URL a match sits in, when it landed in the address section.
+ *
+ * A match on markup (`class="cf-turnstile"`) belongs to no URL, and answers
+ * `undefined`; a match on an address answers that frame's original URL, so the
+ * caller still sees the query string the site key lives in.
+ */
+function enclosingUrl(table: Array<{ start: number; url: string }>, index: number): string | undefined {
+  let found: string | undefined;
+  for (const entry of table) {
+    if (entry.start > index) break;
+    found = entry.url;
+  }
+  return found;
 }
 
 /**
@@ -179,7 +244,20 @@ export interface PageSignals {
  */
 export function detectCaptcha(page: PageSignals): CaptchaDetection {
   const urls = page.frameUrls ?? [];
-  const haystack = [urls.join(" "), page.html ?? "", page.text ?? "", page.title ?? ""].join("\n");
+  // Frame URLs are reduced to their authority before anything matches on them.
+  // A path or a query string can carry any text, including another site's host
+  // name, so a pattern that reads the raw URL is a pattern an attacker picks the
+  // answer to. Hosts come from the parser; everything else is markup and text.
+  // One line per URL, and a table back to the original so a match can still
+  // hand back the whole URL (the public site key lives in its query string).
+  const addresses = urls.map(hostAndPath);
+  const urlAt: Array<{ start: number; url: string }> = [];
+  let offset = 0;
+  for (const [index, address] of addresses.entries()) {
+    urlAt.push({ start: offset, url: urls[index]! });
+    offset += address.length + 1;
+  }
+  const haystack = [addresses.join("\n"), page.html ?? "", page.text ?? "", page.title ?? ""].join("\n");
   const signals: CaptchaSignal[] = [];
   /** Something on this page proves a challenge is rendered, not just loaded. */
   const blocking = BLOCKING_MARKERS.some((marker) => marker.test(haystack));
@@ -193,7 +271,7 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
     const match = gateMatch ?? loaderMatch!;
     // Keep the *whole* URL the match sits in: a regex match can end before the
     // query string, which is where the public site key lives.
-    const source = enclosingUrl(haystack, match.index) ?? match[0];
+    const source = enclosingUrl(urlAt, match.index) ?? match[0];
     const loaderOnly = gateMatch === null;
     // A loader with no challenge furniture anywhere on the page is advisory. A
     // loader with furniture is a real gate (the widget is rendered, the loader
@@ -240,7 +318,13 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
     // while it loads — so it is advisory unless a challenge frame backs it up.
     const title = page.title ?? "";
     const titleMatch = INTERSTITIAL_TITLES.find((pattern) => pattern.test(title));
-    const frameChallenge = urls.find((url) => /captcha|challenge/i.test(url));
+    // A whole path *segment* that says "challenge" or "captcha", not a
+    // substring: `hcaptcha.com.attacker.example/assets/widget.js` is someone
+    // else's site whose name merely contains the word, while
+    // `verify.example.com/challenge/main` is a challenge frame.
+    const frameChallenge = urls.find((candidate) =>
+      pathSegments(candidate).some((segment) => /^(?:captcha|challenge)/i.test(segment)),
+    );
     if (frameChallenge) {
       signals.push({
         kind: "unknown_challenge",
