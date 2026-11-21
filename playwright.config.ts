@@ -9,6 +9,16 @@ const baseURL = deployed ?? "http://localhost:3000";
 // on the key already in the environment; every other run uses the local stub, which
 // is on its own fake key so the suite never spends the project's quota.
 const live = process.env.COMPOSIO_LIVE === "1";
+/*
+ * The suite's Owner. `OWNER_EMAILS` matches by exact address, so this is one
+ * address rather than a domain, unique per run so a second run does not collide
+ * with the account the first one left behind. It travels in the environment
+ * because this file is evaluated more than once per run — in the runner and in
+ * each worker — and a spec that re-derived the address would name a different
+ * one than the server was given.
+ */
+const OWNER_EMAIL = process.env.E2E_OWNER_EMAIL ?? `owner-${Date.now()}@terabot.dev`;
+process.env.E2E_OWNER_EMAIL = OWNER_EMAIL;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -67,6 +77,13 @@ export default defineConfig({
                 }),
             // Same reason as the api server: the suite's pool is the fake provider.
             INSTABOX_API_KEY: "",
+            /*
+             * Owner is established by email, so the suite names one: the computer
+             * specs sign up as this address to configure a provider, and every other
+             * spec signs up as anyone else and is therefore a member. Two roles, one
+             * run, no way for a test account to promote itself.
+             */
+            OWNER_EMAILS: OWNER_EMAIL,
           },
         },
       ],

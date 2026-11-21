@@ -4,8 +4,10 @@ The hosted shape is one Vercel project: Next.js serves the UI and mounts the Hon
 `/api/terabot`, so there is one origin, one first-party session cookie, and no cross-site CORS.
 Postgres is Supabase. There is no separate worker, no queue, and no second service.
 
-- **App**: <https://terabot-six.vercel.app> — deployed from `b3a3f76` (`p3/deploy`),
-  deployment `dpl_9FBj2cHTnMadoqbZc67qA7ivhRsu`, 2026-11-21 05:09 UTC
+- **App**: <https://terabot-six.vercel.app> — production deployment tracks `main`
+  (`dpl_FBEhndNmNt93EA3NQkQYPM6ykfZpz`, `158ac97`, 2026-11-21 08:38 UTC at the last check). Git
+  push-to-deploy is connected, so `main` is what the URL serves; verify with the curl below rather
+  than trusting this line.
 - **Database**: Supabase project `glhuwrobszgnrguareic` (`ap-southeast-1`). Its display name still
   carries the pre-rename product name; only the identifier in `DATABASE_URL` matters to the app
 - **Runs**: `RUN_MODE=inline` — a run executes inside the POST that started it and finishes in
@@ -77,6 +79,27 @@ waits for the finished assistant bubble, reloads, and asserts the reply is still
 The local suite needs the Docker database: `pnpm db:up`, `DATABASE_URL=postgres://terabot:terabot@localhost:5432/terabot pnpm db:migrate`, then
 `DATABASE_URL=postgres://terabot:terabot@localhost:5432/terabot pnpm test`. Pointing it at the hosted
 database works for reads but the integration tests time out on the round trip.
+
+## Owner and billing
+
+Set these too, and they are the only two this product needs to know about money:
+
+| variable | value |
+| --- | --- |
+| `OWNER_EMAILS` | comma-separated emails that are the Owner. The Owner never pays and is the only account that may configure computers. **Set this**, or every account is a member and nobody can configure the deployment |
+| `POLAR_ACCESS_TOKEN` | Polar → Settings → Developers |
+| `POLAR_WEBHOOK_SECRET` | Polar → Settings → Webhooks → the endpoint's signing secret |
+| `POLAR_SERVER` | `production`, or `sandbox` for test payments |
+| `POLAR_PLANS` | JSON, e.g. `[{"id":"pro","label":"Pro","productId":"<polar product id>"}]`. Prices live on the Polar product, never in this repo |
+
+The webhook endpoint to register in Polar is
+`https://<origin>/api/billing/webhook`, subscribed to at least `subscription.*` (the handler ignores
+everything else and answers 2xx so Polar does not disable the endpoint).
+
+**Billing is off unless Polar is fully configured *and* a paid computer provider key
+(`INSTABOX_API_KEY` or `BOAT_API_KEY`) is set.** With either half missing, nothing is charged and
+nothing is blocked. `pnpm db:migrate` reconciles `OWNER_EMAILS` into `user.role`, so the Owner is
+established by the first migrate after that variable is set.
 
 ## What that build is behind on
 
