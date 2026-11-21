@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   availableIndex,
+  computerRequiresFor,
   declarationsFor,
   namesOf,
   renderIndex,
   searchIndex,
 } from "../src/index.ts";
-import type { ToolEntry } from "../src/index.ts";
+import type { ToolEntry, ToolNeed } from "../src/index.ts";
 
 function entry(name: string, extra: Partial<ToolEntry> = {}): ToolEntry {
   return {
@@ -141,3 +142,49 @@ describe("names", () => {
     expect(namesOf([entry("a"), entry("b")])).toEqual(["a", "b"]);
   });
 });
+
+describe("box needs a tool places on its computer", () => {
+  it("keeps an entry with no stated need compatible with every box", () => {
+    expect(computerRequiresFor([entry("read_window"), entry("vault_fill")])).toEqual([]);
+  });
+
+  it("collects the needs of the tools actually offered, deduplicated", () => {
+    // Two tools that read the screen are one requirement, not two: the allocator
+    // asks "can this box show a screen", which is a yes or no.
+    const tools = [
+      entry("screenshot", { needs: ["screen"] }),
+      entry("click_at", { needs: ["screen"] }),
+      entry("read_window"),
+    ];
+    expect(computerRequiresFor(tools)).toEqual(["screen"]);
+  });
+
+  it("does not read a need from a tool the caller is not offering", () => {
+    // The requirement comes from the tools a run is actually given, so removing
+    // the screen tool removes the requirement rather than leaving it behind.
+    const offered = [entry("read_window")];
+    const inTheCatalogue = [entry("screenshot", { needs: ["screen"] })];
+    expect(computerRequiresFor(offered)).toEqual([]);
+    expect(computerRequiresFor(inTheCatalogue)).toEqual(["screen"]);
+  });
+
+  it("keeps every stated need in the allocator's vocabulary", () => {
+    // The drift guard. `anyNeeds()` lives in the test, not the source, because a
+    // list of all needs in the package would be a second place to update; here it
+    // is checked against the union type, so adding `ToolNeed` without teaching
+    // the loop's mapping about it fails this test.
+    const needs = anyNeeds();
+    expect(needs).toEqual(["screen"]);
+  });
+});
+
+/**
+ * Every need the type allows, as data. A `Record<ToolNeed, true>` cannot be
+ * written without listing each member, so adding one to the union fails to
+ * compile here — which is the point: the failure lands on whoever adds the need,
+ * not on a runtime path months later.
+ */
+function anyNeeds(): ToolNeed[] {
+  const all: Record<ToolNeed, true> = { screen: true };
+  return Object.keys(all) as ToolNeed[];
+}

@@ -38,6 +38,13 @@ export type ToolCategory = "observe" | "act" | "browser" | "challenge" | "vault"
  */
 export type ToolPlacement = "host" | "box" | "anywhere";
 
+/**
+ * A requirement a tool places on the box, in the vocabulary the computer contract
+ * understands. `screen` is the one that exists today: a screenshot or desktop
+ * tool cannot work on a provider that serves no framebuffer.
+ */
+export type ToolNeed = "screen";
+
 export interface ToolEntry {
   /** The identifier a program calls: `tools.<name>(args)`. */
   name: string;
@@ -51,6 +58,16 @@ export interface ToolEntry {
   resultNote?: string;
   /** Where it can run. Defaults to `"anywhere"`. */
   placement?: ToolPlacement;
+  /**
+   * What the box a program runs on must provide beyond running the program.
+   *
+   * Placement already answers "can this tool run here at all". This answers the
+   * different question the machine has to satisfy: `screen` means the tool reads
+   * the box's screen, so a provider with no framebuffer cannot serve a run that
+   * offers it. Stated on the tool because the tool is the only thing that knows
+   * what it does with a computer; the allocator reads it as `requires`.
+   */
+  needs?: ToolNeed[];
   /**
    * The TypeScript signature, rendered by whoever owns the tool. Kept as data so
    * the index never needs to import the implementation — and so a declaration is
@@ -155,6 +172,23 @@ export function searchIndex<T extends ToolEntry>(entries: T[], query: string): T
 export function namesOf(entries: ToolEntry[]): string[] {
   return entries.map((entry) => entry.name);
 }
+
+/**
+ * The needs a set of offered tools places on the box, deduplicated.
+ *
+ * This is not yet the allocator's `requires`: that function lives in the loop,
+ * which owns the translation, because `@terabot/tools` does not depend on
+ * `@terabot/computers` and should not start to for one string. What it removes is
+ * the part that decays — walking the tools and collecting their needs — so the
+ * loop's adapter is a mapping over a short list rather than a second place that
+ * knows how tools describe themselves.
+ */
+export function computerRequiresFor(entries: ToolEntry[]): ToolNeed[] {
+  const needs = new Set<ToolNeed>();
+  for (const entry of entries) for (const need of entry.needs ?? []) needs.add(need);
+  return [...needs];
+}
+
 
 export {
   codemodeSchema,
