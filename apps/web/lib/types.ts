@@ -1,5 +1,20 @@
 import type { MessagePart } from "@pupbot/db";
 
+export type ComputerBinding = "unbound" | "binding" | "ready" | "blocked";
+
+export type ComputerRowStatus = "provisioning" | "awake" | "asleep" | "waking" | "error" | "deleted";
+
+/** What the computer card and the composer read: truthful state, never a spinner forever. */
+export interface ComputerView {
+  id: string | null;
+  /** The provider's own box id, shown only behind Advanced. */
+  externalId: string | null;
+  provider: string | null;
+  status: ComputerRowStatus | null;
+  binding: ComputerBinding;
+  reason: string | null;
+}
+
 export interface BotView {
   id: string;
   name: string;
@@ -15,7 +30,7 @@ export interface BotView {
   conversationId: string;
   lastMessagePreview: string | null;
   isPrimary: boolean;
-  computer: { id: string; provider: string; status: string } | null;
+  computer: ComputerView;
   endpointId: string | null;
 }
 

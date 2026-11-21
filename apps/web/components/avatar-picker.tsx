@@ -4,6 +4,9 @@ import { COLORS, SHAPES, type AvatarColorId, type AvatarShapeId } from "@pupbot/
 import { Avatar } from "@pupbot/avatars/react";
 import { cn } from "@pupbot/ui";
 
+/** Six 30px avatars and their 22px gaps fit the 438px dialog on one line. */
+const PER_ROW = 6;
+
 export function AvatarPicker({
   shape,
   color,
@@ -15,7 +18,8 @@ export function AvatarPicker({
   onShape: (shape: AvatarShapeId) => void;
   onColor: (color: AvatarColorId) => void;
 }) {
-  const rows = [SHAPES.slice(0, 5), SHAPES.slice(5, 10), SHAPES.slice(10)];
+  const rows = [];
+  for (let index = 0; index < SHAPES.length; index += PER_ROW) rows.push(SHAPES.slice(index, index + PER_ROW));
 
   return (
     <div className="flex flex-col items-center gap-6">

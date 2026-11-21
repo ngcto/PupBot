@@ -7,6 +7,7 @@ import { devStubRoutes } from "./dev/stub.ts";
 import { attachmentRoutes } from "./routes/attachments.ts";
 import { createConversationRoutes } from "./routes/conversations.ts";
 import type { EnqueueRun } from "./routes/conversations.ts";
+import { mobileRoutes } from "./routes/mobile.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { createInlineEnqueue } from "./run-inline.ts";
 import type { AppEnv } from "./types.ts";
@@ -66,6 +67,7 @@ export function createApp(options: AppOptions = {}) {
   app.route("/", createConversationRoutes({ enqueue }));
   app.route("/", runRoutes);
   app.route("/", attachmentRoutes);
+  app.route("/", mobileRoutes);
 
   // Dev-only OpenAI-compatible endpoint: the whole chat path works with no key.
   if (env.STUB_PROVIDER && env.NODE_ENV !== "production") {

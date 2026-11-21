@@ -22,8 +22,11 @@ test("sign up, create a bot, stream a reply, and block an unbound bot", async ({
   const blocked = page.getByTestId("composer-blocked");
   await expect(blocked).toBeVisible();
   await expect(blocked).toContainText("doesn't have a computer yet");
-  await page.getByRole("button", { name: "Give it a computer" }).click();
-  await expect(blocked).toBeHidden({ timeout: 30_000 });
+  // The one action provisions through the allocator and the fake pool (a
+  // worker job), not a synchronous stub: the card becomes Awake.
+  await page.getByRole("button", { name: "Connect a computer" }).click();
+  await expect(blocked).toBeHidden({ timeout: 45_000 });
+  await expect(page.getByTestId("computer-status")).toHaveText("Awake", { timeout: 45_000 });
 
   const composer = page.getByLabel("Message Scout");
   await expect(composer).toBeVisible();

@@ -2,6 +2,15 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  # esbuild ships its binary per platform but its install script verifies it.
+  esbuild: true
+  # Only Squirrel installers need it; apps/desktop uses NSIS.
+  electron-winstaller: false
+
+overrides:
+  '@pupbot/avatars>react': 19.3.0
+
 minimumReleaseAgeExclude:
   - "@better-auth/core@1.7.27"
   - "@better-auth/drizzle-adapter@1.7.27"
@@ -11,6 +20,7 @@ minimumReleaseAgeExclude:
   - "@better-auth/prisma-adapter@1.7.27"
   - "@better-auth/telemetry@1.7.27"
   - better-auth@1.7.27
+  - open-bot-avatar@0.3.0
 
 onlyBuiltDependencies:
   - esbuild

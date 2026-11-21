@@ -1,5 +1,5 @@
 {
-  "id": "d756d728-74dc-475a-a75a-e1b1d11e4111",
+  "id": "a7204317-a539-457e-ad2e-e483fca5b4cf",
   "prevId": "f8f1890a-ed54-41c3-bbf3-7063779df6fc",
   "version": "7",
   "dialect": "postgresql",
@@ -213,52 +213,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.attachment_blob": {
-      "name": "attachment_blob",
-      "schema": "",
-      "columns": {
-        "attachment_id": {
-          "name": "attachment_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "attachment_blob_attachment_id_attachment_id_fk": {
-          "name": "attachment_blob_attachment_id_attachment_id_fk",
-          "tableFrom": "attachment_blob",
-          "tableTo": "attachment",
-          "columnsFrom": [
-            "attachment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.bot": {
       "name": "bot",
       "schema": "",
@@ -345,6 +299,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'active'"
+        },
+        "computer_state": {
+          "name": "computer_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unbound'"
+        },
+        "computer_reason": {
+          "name": "computer_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "position": {
           "name": "position",
@@ -678,6 +645,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -767,6 +746,18 @@
           "notNull": true,
           "default": 1
         },
+        "parked_until": {
+          "name": "parked_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "usage": {
           "name": "usage",
           "type": "jsonb",
@@ -783,6 +774,80 @@
       },
       "indexes": {},
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.computer_lease": {
+      "name": "computer_lease",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "computer_id": {
+          "name": "computer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "computer_lease_computer_idx": {
+          "name": "computer_lease_computer_idx",
+          "columns": [
+            {
+              "expression": "computer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "computer_lease_computer_id_computer_id_fk": {
+          "name": "computer_lease_computer_id_computer_id_fk",
+          "tableFrom": "computer_lease",
+          "tableTo": "computer",
+          "columnsFrom": [
+            "computer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -2400,6 +2465,7 @@
         "provisioning",
         "awake",
         "asleep",
+        "waking",
         "error",
         "deleted"
       ]

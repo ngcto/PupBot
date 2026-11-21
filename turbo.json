@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalEnv": [
+  "globalPassThroughEnv": [
     "NODE_ENV",
     "DATABASE_URL",
     "MIGRATE_DATABASE_URL",
@@ -8,6 +8,7 @@
     "BETTER_AUTH_URL",
     "API_URL",
     "API_PORT",
+    "NEXT_PUBLIC_API_URL",
     "RUN_MODE",
     "DATABASE_POOL_MAX",
     "STUB_PROVIDER",
@@ -27,7 +28,9 @@
     "AI_GATEWAY_API_KEY",
     "VERCEL",
     "VERCEL_OIDC_TOKEN",
-    "NEXT_PUBLIC_API_URL"
+    "EXPO_PUBLIC_API_URL",
+    "CI",
+    "PLAYWRIGHT_BROWSERS_PATH"
   ],
   "tasks": {
     "build": {
@@ -35,8 +38,9 @@
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "typecheck": { "dependsOn": ["^typecheck"] },
-    "test": { "outputs": [] },
+    "test": { "dependsOn": ["^build"] },
+    "lint": {},
     "dev": { "cache": false, "persistent": true },
-    "lint": {}
+    "e2e": { "dependsOn": ["^build"], "cache": false }
   }
 }

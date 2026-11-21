@@ -18,9 +18,11 @@ const serverSchema = z.object({
   RUN_MODE: z.enum(["queue", "inline"]).default("queue"),
   /** Postgres pool ceiling per process. Serverless needs this to stay small. */
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+  // Opt-in, and never in production: a deployment that forgets NODE_ENV must not
+  // mount the unauthenticated /dev/stub endpoint.
   STUB_PROVIDER: z
     .enum(["true", "false"])
-    .default("true")
+    .default("false")
     .transform((v) => v === "true"),
   CREDENTIAL_ENCRYPTION_KEY: optionalSecret,
   S3_ENDPOINT: optionalUrl,
@@ -28,6 +30,8 @@ const serverSchema = z.object({
   S3_ACCESS_KEY: optionalSecret,
   S3_SECRET_KEY: optionalSecret,
   INSTABOX_API_KEY: optionalSecret,
+  /** How many boxes the Instabox account's plan allows (free: 1, grandfathered accounts: 5). */
+  INSTABOX_CAPACITY: z.coerce.number().int().positive().default(1),
   BOAT_API_KEY: optionalSecret,
   COMPOSIO_API_KEY: optionalSecret,
   OPENAI_API_KEY: optionalSecret,
