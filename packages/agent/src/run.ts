@@ -20,6 +20,7 @@ import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
 import { createToolRegistry, schemasOf, summariseToolError } from "./tools.ts";
+import { codemodeTool } from "./codemode-tool.ts";
 import type { RunTool, ToolContext } from "./tools.ts";
 import { parseToolArguments } from "@terabot/providers";
 import type { ChatMessage } from "@terabot/providers";
@@ -312,7 +313,14 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   // The conversation the loop grows: system prompt and transcript, then each
   // assistant tool-call turn and its results.
   const conversation: ChatMessage[] = [...context];
-  const registry = createToolRegistry(options.tools ?? []);
+  // Code mode is the harness's own tool, so it is added here rather than passed in by
+  // every caller: it wraps whatever `options.tools` holds, so a surface registered
+  // later (the Cua Driver's, when its package lands) appears in the index with no
+  // change at the call sites. `codemodeTool` returns null for a run with nothing worth
+  // wrapping, so a tools-less run stays exactly as it was.
+  const runTools = options.tools ?? [];
+  const code = codemodeTool(runTools);
+  const registry = createToolRegistry(code ? [...runTools, code] : runTools);
 
   const controller = new AbortController();
   const onExternalAbort = () => controller.abort();

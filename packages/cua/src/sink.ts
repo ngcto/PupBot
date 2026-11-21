@@ -1,5 +1,6 @@
+import type { ComputerProvider, ComputerRef } from "@terabot/computers";
 import type { FillEffect, VaultFillOutcome, VaultFillSink } from "@terabot/vault";
-import type { CuaDriver } from "./driver/cli.ts";
+import { CuaDriver, execTargetFor } from "./driver/cli.ts";
 import { observeWindow } from "./tools/desktop.ts";
 import type { WindowTarget } from "./tools/desktop.ts";
 import { fillSecret, isStaleTarget } from "./tools/fill.ts";
@@ -23,6 +24,17 @@ import { fillSecret, isStaleTarget } from "./tools/fill.ts";
  *   and one masked sentence; a value never enters a message, a refusal, or a
  *   thrown error. `fillSecret` already has no field a value could travel in, and
  *   this wrapper keeps it that way.
+ *
+ * **Two traps anyone re-implementing this will hit**, both found by running it against
+ * a real box rather than a fake:
+ *
+ * - **Fill in the session that took the observation.** The driver keys its ref cache
+ *   by session, so a sink that builds its own driver at the default session finds none
+ *   of the caller's refs and gets `browser_binding_stale` — a code that reads like "the
+ *   page moved" and means "wrong session". `cuaFillSinkFor` takes `session` for this.
+ * - **A page ref pairs with `CuaPageState.snapshotId`, not the tab's `targetId`.**
+ *   Passing the target id refuses with `stale_element_token`, which is the staleness
+ *   guard doing its job on a caller mistake.
  */
 export interface CuaFillSinkOptions {
   driver: CuaDriver;
@@ -146,3 +158,41 @@ export function createCuaFillSink(options: CuaFillSinkOptions): VaultFillSink {
 
 /** Re-exported so a caller can tell a stale target from another refusal. */
 export { isStaleTarget };
+
+/**
+ * A sink for a box, built from the provider and the ref the run is on.
+ *
+ * This is the registration point `packages/vault`'s interface was waiting for: the
+ * vault decides *whether* a value may be used and hands the typing to whoever has the
+ * computer, and this connects the two without either package knowing about the other's
+ * transport. `apps/api` passes the result to `toolsForRun`.
+ *
+ * `surface` is the caller's to name because only the caller knows which window or tab
+ * is in front of the user — the sink does not guess, and a fill aimed at the wrong
+ * window is exactly the failure this path exists to prevent.
+ */
+export function cuaFillSinkFor(input: {
+  provider: Pick<ComputerProvider, "exec">;
+  ref: ComputerRef;
+  surface: CuaFillSinkOptions["surface"];
+  signal?: AbortSignal;
+  /**
+   * The driver session to fill in.
+   *
+   * **This must be the session that took the observation the caller's `token` came
+   * from.** The driver keys its element and ref caches by session, so a sink that
+   * starts its own defaults to a session where the caller's refs do not exist, and
+   * every fill comes back `browser_binding_stale` — a refusal that looks like
+   * staleness and is really a cache miss. It defaults only because a caller that
+   * reads, fills and acts through one `CuaDriver` should not have to say so twice.
+   */
+  session?: string;
+}): VaultFillSink {
+  return createCuaFillSink({
+    driver: new CuaDriver(execTargetFor(input.provider, input.ref), {
+      ...(input.session ? { session: input.session } : {}),
+    }),
+    surface: input.surface,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+}
