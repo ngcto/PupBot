@@ -2,6 +2,12 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  # esbuild ships its binary per platform but its install script verifies it.
+  esbuild: true
+  # Only Squirrel installers need it; apps/desktop uses NSIS.
+  electron-winstaller: false
+
 minimumReleaseAgeExclude:
   - "@better-auth/core@1.7.27"
   - "@better-auth/drizzle-adapter@1.7.27"
