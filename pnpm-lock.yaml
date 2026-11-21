@@ -440,6 +440,9 @@ importers:
       '@terabot/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@terabot/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
       '@terabot/ui':
         specifier: workspace:*
         version: link:../../packages/ui

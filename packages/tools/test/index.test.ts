@@ -152,29 +152,27 @@ describe("box needs a tool places on its computer", () => {
     // Two tools that read the screen are one requirement, not two: the allocator
     // asks "can this box show a screen", which is a yes or no.
     const tools = [
-      entry("screenshot", { needs: ["screen"] }),
-      entry("click_at", { needs: ["screen"] }),
+      entry("screenshot", { needs: ["screenshot"] }),
+      entry("click_at", { needs: ["screenshot"] }),
       entry("read_window"),
     ];
-    expect(computerRequiresFor(tools)).toEqual(["screen"]);
+    expect(computerRequiresFor(tools)).toEqual(["screenshot"]);
   });
 
   it("does not read a need from a tool the caller is not offering", () => {
     // The requirement comes from the tools a run is actually given, so removing
     // the screen tool removes the requirement rather than leaving it behind.
     const offered = [entry("read_window")];
-    const inTheCatalogue = [entry("screenshot", { needs: ["screen"] })];
+    const inTheCatalogue = [entry("screenshot", { needs: ["screenshot"] })];
     expect(computerRequiresFor(offered)).toEqual([]);
-    expect(computerRequiresFor(inTheCatalogue)).toEqual(["screen"]);
+    expect(computerRequiresFor(inTheCatalogue)).toEqual(["screenshot"]);
   });
 
-  it("keeps every stated need in the allocator's vocabulary", () => {
-    // The drift guard. `anyNeeds()` lives in the test, not the source, because a
-    // list of all needs in the package would be a second place to update; here it
-    // is checked against the union type, so adding `ToolNeed` without teaching
-    // the loop's mapping about it fails this test.
-    const needs = anyNeeds();
-    expect(needs).toEqual(["screen"]);
+  it("names every need the type allows, so a new one cannot go unhandled", () => {
+    // `anyNeeds()` is a `Record<ToolNeed, true>`, which cannot be written without
+    // listing every member of the union. Adding a need therefore fails to compile
+    // here, on whoever adds it, rather than reaching a runtime path months later.
+    expect(anyNeeds().sort()).toEqual(["exec", "files", "screenshot"]);
   });
 });
 
@@ -185,6 +183,6 @@ describe("box needs a tool places on its computer", () => {
  * not on a runtime path months later.
  */
 function anyNeeds(): ToolNeed[] {
-  const all: Record<ToolNeed, true> = { screen: true };
+  const all: Record<ToolNeed, true> = { exec: true, files: true, screenshot: true };
   return Object.keys(all) as ToolNeed[];
 }

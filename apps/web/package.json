@@ -23,6 +23,7 @@
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",
     "@terabot/storage": "workspace:*",
+    "@terabot/tools": "workspace:*",
     "@terabot/ui": "workspace:*",
     "@terabot/vault": "workspace:*",
     "better-auth": "^1.7.27",
