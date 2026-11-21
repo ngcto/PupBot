@@ -5,7 +5,6 @@ import type { ToolCall, ToolSchema } from "./types.ts";
  * gets a converter in and out so a tool defined once works on every endpoint.
  */
 
-const EMPTY_PARAMETERS: Record<string, unknown> = { type: "object", properties: {} };
 
 /**
  * A tool with no parameters must still carry a valid empty-object schema; some

@@ -19,7 +19,7 @@ import {
   providerHintForBaseUrl,
 } from "@terabot/providers";
 import type { EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
-import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { allocateComputerInline, inlineComputers } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";

@@ -5,7 +5,7 @@ import { Redirect } from "expo-router";
 import { useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { API_URL } from "../../src/api.ts";
-import { Card, Divider, PrimaryButton, Screen, ScreenTitle } from "../../src/components/ui.tsx";
+import { Card, Divider, Screen, ScreenTitle } from "../../src/components/ui.tsx";
 import { useSession } from "../../src/session.tsx";
 import { color, radius, space, type, weight } from "../../src/theme.ts";
 
