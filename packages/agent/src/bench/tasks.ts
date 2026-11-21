@@ -34,6 +34,31 @@ export interface Task {
 /** Every task that needs a tool is unattemptable by an arm with none. */
 const needsTools = (arm: Arm): boolean => arm !== "a";
 
+/**
+ * Task 11 is the only task all three arms can attempt: a plain question that needs
+ * no tool at all.
+ *
+ * It exists because arm A otherwise reads `n/a` in every cell, which leaves the table
+ * with no measurement of the product as it ships. It is also the honest cost test for
+ * code mode: on a task that needs no tools, arm C's 1,877-token index is pure
+ * overhead, and if it loses on turns or tokens here that goes in the table.
+ */
+const TASK_11: Task = {
+  id: 11,
+  prompt: "In two sentences, explain why an action that is refused should not be reported as a success.",
+  property: "The no-tool baseline: what each arm costs when no tool is needed",
+  needs: [],
+  attemptable: () => true,
+  validate: (answer) => {
+    const sentences = answer.split(/[.!?]+/).filter((part) => part.trim().length > 0).length;
+    const concrete = /refus|denied|not (applied|done)|unverif|fail/i.test(answer);
+    return {
+      ok: sentences >= 2 && concrete,
+      why: `${sentences} sentence(s), mentioned refusal=${concrete}`,
+    };
+  },
+};
+
 export const TASKS: Task[] = [
   {
     id: 1,
@@ -186,6 +211,7 @@ export const TASKS: Task[] = [
       };
     },
   },
+  TASK_11,
 ];
 
 /** Task 10's expected answer, computed from the fixture rather than hard-coded. */

@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const table = renderTable(runs);
+  const table = renderTable(runs, REPS);
   const payload = {
     machine: hostname(),
     model: MODEL,

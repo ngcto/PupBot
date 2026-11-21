@@ -163,29 +163,85 @@ export function say(text: string): ModelEvent[] {
   ];
 }
 
-/** Renders the result table. Two wall-clock columns, always both. */
-export function renderTable(runs: ArmRun[]): string {
-  const header = "| Arm | Task | OK | Turns | In tokens | Out tokens | Wall (model ms) | Wall (inclusive ms) | Why |";
+/** Median of a list; the table's aggregate rule. */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? Math.round((sorted[middle - 1]! + sorted[middle]!) / 2) : sorted[middle]!;
+}
+
+interface Cell {
+  arm: Arm;
+  taskId: number;
+  ok: boolean;
+  turns: number;
+  input: number;
+  output: number;
+  model: number;
+  inclusive: number;
+  why: string;
+}
+
+/** Reduces each (arm, task) group to one median row, carrying the last `why`. */
+function cellRowsFor(runs: ArmRun[]): Cell[] {
+  const groups = new Map<string, ArmRun[]>();
+  for (const run of runs) {
+    if (!run.attemptable) continue;
+    const key = `${run.arm}:${run.taskId}`;
+    groups.set(key, [...(groups.get(key) ?? []), run]);
+  }
+  return [...groups.entries()]
+    .map(([key, group]) => {
+      const [arm, taskId] = key.split(":");
+      return {
+        arm: arm as Arm,
+        taskId: Number(taskId),
+        ok: group.filter((r) => r.ok).length > group.length / 2,
+        turns: median(group.map((r) => r.turns)),
+        input: median(group.map((r) => r.inputTokens)),
+        output: median(group.map((r) => r.outputTokens)),
+        model: median(group.map((r) => r.wallMsModel)),
+        inclusive: median(group.map((r) => r.wallMsInclusive)),
+        why: group[0]!.why,
+      };
+    })
+    .sort((a, b) => a.taskId - b.taskId || a.arm.localeCompare(b.arm));
+}
+
+/**
+ * Renders the result table.
+ *
+ * Units stated in the header, because a reader will otherwise assume a "turn" is a
+ * tool call. Two wall-clock columns, always both. Aggregates are the **median** of
+ * the reps per cell — not the fastest, which would flatter whichever arm varies most,
+ * and code mode is the arm most likely to vary.
+ */
+export function renderTable(runs: ArmRun[], reps = 1): string {
+  const header =
+    "| Arm | Task | OK | Turns (model round trips) | In tokens | Out tokens | Wall (model ms) | Wall (inclusive ms) | Why |";
   const rule = "|---|---|---|---|---|---|---|---|---|";
-  const rows = runs.map(
-    (r) =>
-      `| ${r.arm.toUpperCase()} | ${r.taskId} | ${r.attemptable ? (r.ok ? "pass" : "fail") : "n/a"} | ${r.turns} | ${r.inputTokens} | ${r.outputTokens} | ${r.wallMsModel} | ${r.wallMsInclusive} | ${r.why} |`,
+  // Rows are the cells, each already reduced to its median, so nothing in the table
+  // is a single lucky or unlucky rep. `runs` is kept for the JSON, where the spread
+  // belongs.
+  const rows = runs
+    .filter((r) => r.arm === "a" && !r.attemptable)
+    .map(
+      (r) =>
+        `| ${r.arm.toUpperCase()} | ${r.taskId} | n/a | 0 | 0 | 0 | 0 | 0 | ${r.why} |`,
+    );
+  const cellRows = cellRowsFor(runs).map(
+    (c) =>
+      `| ${c.arm.toUpperCase()} | ${c.taskId} | ${c.ok ? "pass" : "fail"} | ${c.turns} | ${c.input} | ${c.output} | ${c.model} | ${c.inclusive} | ${c.why} |`,
   );
-  const totals = (["a", "b", "c"] as const).map((arm) => {
-    const forArm = runs.filter((r) => r.arm === arm && r.attemptable);
-    return {
-      arm: arm.toUpperCase(),
-      attempted: forArm.length,
-      passed: forArm.filter((r) => r.ok).length,
-      input: forArm.reduce((n, r) => n + r.inputTokens, 0),
-      output: forArm.reduce((n, r) => n + r.outputTokens, 0),
-      turns: forArm.reduce((n, r) => n + r.turns, 0),
-      model: forArm.reduce((n, r) => n + r.wallMsModel, 0),
-      inclusive: forArm.reduce((n, r) => n + r.wallMsInclusive, 0),
-    };
+  // One median per (arm, task) cell, then summed across tasks, so a noisy single rep
+  // cannot move an arm's total.
+  const medians = cellRowsFor(runs);
+
+  const summary = (["a", "b", "c"] as const).map((arm) => {
+    const forArm = medians.filter((m) => m.arm === arm);
+    if (forArm.length === 0) return `| ${arm.toUpperCase()} | all | 0/0 | 0 | 0 | 0 | 0 | 0 | not attempted |`;
+    return `| ${arm.toUpperCase()} | all (median of ${reps} rep${reps === 1 ? "" : "s"} per cell) | ${forArm.filter((m) => m.ok).length}/${forArm.length} | ${forArm.reduce((n, m) => n + m.turns, 0)} | ${forArm.reduce((n, m) => n + m.input, 0)} | ${forArm.reduce((n, m) => n + m.output, 0)} | ${forArm.reduce((n, m) => n + m.model, 0)} | ${forArm.reduce((n, m) => n + m.inclusive, 0)} | |`;
   });
-  const summary = totals.map(
-    (t) => `| ${t.arm} | all | ${t.passed}/${t.attempted} | ${t.turns} | ${t.input} | ${t.output} | ${t.model} | ${t.inclusive} | |`,
-  );
-  return [header, rule, ...rows, rule, ...summary].join("\n");
+  return [header, rule, ...rows, ...cellRows, rule, ...summary].join("\n");
 }

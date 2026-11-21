@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildArm } from "../src/bench/arms.ts";
+import { renderTable } from "../src/bench/runner.ts";
 import { TASKS, task10Expected } from "../src/bench/tasks.ts";
 import { armA, armB, armC, availableToolNames } from "../src/bench/arms.ts";
 import { treeFor, WINDOWS } from "../src/bench/fixtures.ts";
@@ -168,17 +169,27 @@ describe("the validators", () => {
 });
 
 describe("task attemptability", () => {
-  it("marks only arm A as unable to attempt the tool tasks", () => {
-    for (const t of TASKS) {
+  it("marks arm A unable to attempt every task that needs a tool", () => {
+    const toolTasks = TASKS.filter((t) => t.needs.length > 0);
+    for (const t of toolTasks) {
       expect(t.attemptable("a")).toBe(false);
       expect(t.attemptable("b")).toBe(true);
       expect(t.attemptable("c")).toBe(true);
     }
   });
 
-  it("has ten tasks", () => {
-    expect(TASKS).toHaveLength(10);
-    expect(TASKS.map((t) => t.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  it("gives every arm at least one task it can attempt", () => {
+    // Task 11 exists so arm A is measured rather than n/a in every cell, and so code
+    // mode's index cost shows up on a task that needs no tools.
+    expect(TASKS.some((t) => t.attemptable("a"))).toBe(true);
+    for (const arm of ["a", "b", "c"] as const) {
+      expect(TASKS.filter((t) => t.attemptable(arm)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("has eleven tasks, numbered in order", () => {
+    expect(TASKS).toHaveLength(11);
+    expect(TASKS.map((t) => t.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
   it("names only tools that exist in the fixture set", () => {
@@ -188,6 +199,28 @@ describe("task attemptability", () => {
 
   it("keeps task 10 aimed at a window the fixture really has", () => {
     expect(WINDOWS.some((w) => w.id === "w1")).toBe(true);
+  });
+});
+
+describe("the table", () => {
+  it("reports the median of the reps, not the fastest", () => {
+    // Three reps where one is an outlier: the fastest would flatter whichever arm
+    // varies most, and code mode is the arm most likely to.
+    const base = { attemptable: true, ok: true, why: "", answer: "", outputTokens: 0, wallMsModel: 0 };
+    const table = renderTable(
+      [
+        { ...base, arm: "c", taskId: 1, turns: 10, inputTokens: 1000, wallMsInclusive: 100 },
+        { ...base, arm: "c", taskId: 1, turns: 4, inputTokens: 400, wallMsInclusive: 40 },
+        { ...base, arm: "c", taskId: 1, turns: 6, inputTokens: 600, wallMsInclusive: 60 },
+      ],
+      3,
+    );
+    expect(table).toContain("| 6 | 600 |");
+    expect(table).not.toContain("| 4 | 400 |");
+  });
+
+  it("names the turn unit, so nobody reads it as tool calls", () => {
+    expect(renderTable([], 1)).toContain("Turns (model round trips)");
   });
 });
 
