@@ -164,9 +164,17 @@ jobs:
           TURBO_FILTER: ${{ needs.setup.outputs.filter }}
         run: pnpm turbo run typecheck $TURBO_FILTER
 
+      # Blocking. `turbo run lint` only runs the task in packages that declare
+      # it, so a package with no `lint` script is absent from the run rather than
+      # failing it — that is how two packages carried source through this gate
+      # unlinted. This fails on that shape, so a new package cannot be born
+      # invisible.
+      - name: Every package has a lint script
+        run: node scripts/check-lint-coverage.mjs
+
       # Blocking, and it actually lints: `eslint.config.js` at the root covers
-      # every workspace package and every package has a `lint` script. The rules
-      # that are deliberately off are documented in that file with reasons.
+      # every workspace package. The rules that are deliberately off are
+      # documented in that file with reasons.
       - name: Lint
         env:
           TURBO_FILTER: ${{ needs.setup.outputs.filter }}
