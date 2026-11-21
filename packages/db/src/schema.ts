@@ -314,19 +314,44 @@ export const modelEndpoint = pgTable(
 
 /* ───────────────────────────── computers ───────────────────────────── */
 
-export const computerAccount = pgTable("computer_account", {
-  id: uuid("id").primaryKey(),
-  provider: text("provider").notNull(),
-  label: text("label").notNull(),
-  encryptedCredential: text("encrypted_credential").notNull(),
-  status: computerAccountStatus("status").notNull().default("active"),
-  capacity: integer("capacity").notNull().default(1),
-  /** Do not start a box on this account before this instant (rate limits). */
-  parkedUntil: timestamp("parked_until", { withTimezone: true }),
-  lastError: text("last_error"),
-  usage: jsonb("usage").$type<Record<string, unknown>>(),
-  createdAt: createdAt(),
-});
+export const computerAccount = pgTable(
+  "computer_account",
+  {
+    id: uuid("id").primaryKey(),
+    provider: text("provider").notNull(),
+    label: text("label").notNull(),
+    encryptedCredential: text("encrypted_credential").notNull(),
+    status: computerAccountStatus("status").notNull().default("active"),
+    capacity: integer("capacity").notNull().default(1),
+    /**
+     * True when the deployment provided this account from its own key, so a
+     * user with no plan still gets a computer and no user can edit or delete
+     * the row. False for an account a user connected with their own key.
+     */
+    managed: boolean("managed").notNull().default(false),
+    /**
+     * Which user connected a non-managed account. Managed rows leave it null.
+     * A user's own account always outranks a managed one for their own bots.
+     */
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
+    /** Do not start a box on this account before this instant (rate limits). */
+    parkedUntil: timestamp("parked_until", { withTimezone: true }),
+    lastError: text("last_error"),
+    usage: jsonb("usage").$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // One account per provider per user, managed rows exempt. A user may still
+    // configure several providers; they just cannot stack up accounts of one.
+    uniqueIndex("computer_account_owner_provider_idx")
+      .on(t.ownerUserId, t.provider)
+      .where(sql`${t.ownerUserId} is not null`),
+    // One managed account per provider for the whole deployment.
+    uniqueIndex("computer_account_managed_provider_idx")
+      .on(t.provider)
+      .where(sql`${t.managed}`),
+  ],
+);
 
 export const computer = pgTable(
   "computer",

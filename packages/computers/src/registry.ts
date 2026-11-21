@@ -1,6 +1,7 @@
 import { decryptSecret } from "@terabot/db";
 import { CredentialConfigError, ProviderError } from "./contract.ts";
 import type { ProviderFactory } from "./allocator/types.ts";
+import { Agent37Provider } from "./agent37/provider.ts";
 import { FakeComputerProvider } from "./fake.ts";
 import { InstaboxProvider } from "./instabox/provider.ts";
 
@@ -10,6 +11,16 @@ export interface ProviderRegistryOptions {
   /** Provider-side delete backstop. */
   ttlSeconds?: number;
   idleTimeoutSeconds?: number;
+  /** Template a new Agent37 instance starts from; `agent37-hermes` by default. */
+  agent37Template?: string;
+  /** Where a new Agent37 instance runs: us, eu or ap-south. Fixed for its life. */
+  agent37Region?: "us" | "eu" | "ap-south";
+  /**
+   * Let Agent37 itself sleep an idle instance. Off by default so the
+   * allocator's idle sweep stays the single authority over sleep, as it is for
+   * Instabox.
+   */
+  agent37AutoSleep?: boolean;
 }
 
 /**
@@ -52,6 +63,29 @@ export function createProviderFactory(options: ProviderRegistryOptions = {}): Pr
         apiKey,
         template: options.template,
         ttlSeconds: options.ttlSeconds,
+        idleTimeoutSeconds: options.idleTimeoutSeconds,
+      });
+    }
+
+    if (account.provider === "agent37") {
+      let apiKey: string;
+      try {
+        apiKey = decryptSecret(account.encryptedCredential);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/CREDENTIAL_ENCRYPTION_KEY/.test(message)) {
+          throw new CredentialConfigError(`the Agent37 key for ${account.label} cannot be decrypted: ${message}`);
+        }
+        throw new ProviderError("auth", `the Agent37 key for ${account.label} cannot be decrypted: ${message}`, {
+          providerCode: "bad_credential",
+        });
+      }
+      return new Agent37Provider({
+        account: account.id,
+        apiKey,
+        template: options.agent37Template,
+        region: options.agent37Region,
+        autoSleep: options.agent37AutoSleep,
         idleTimeoutSeconds: options.idleTimeoutSeconds,
       });
     }

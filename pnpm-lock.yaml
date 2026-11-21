@@ -648,6 +648,9 @@ importers:
         specifier: ^4.1.12
         version: 4.6.7
     devDependencies:
+      '@terabot/config':
+        specifier: workspace:*
+        version: link:../config
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6

@@ -6,6 +6,7 @@ import {
   computerLease,
   database,
   newId,
+  workspace,
 } from "@terabot/db";
 import type { Database } from "@terabot/db";
 import { and, eq, isNull, lt } from "drizzle-orm";
@@ -102,6 +103,16 @@ export class DrizzleComputerStore implements ComputerStore {
   async botExists(botId: string): Promise<boolean> {
     const rows = await this.#db.select({ id: botTable.id }).from(botTable).where(eq(botTable.id, botId)).limit(1);
     return rows.length > 0;
+  }
+
+  async botOwnerUserId(botId: string): Promise<string | null> {
+    const rows = await this.#db
+      .select({ ownerId: workspace.ownerId })
+      .from(botTable)
+      .innerJoin(workspace, eq(workspace.id, botTable.workspaceId))
+      .where(eq(botTable.id, botId))
+      .limit(1);
+    return rows[0]?.ownerId ?? null;
   }
 
   async botBinding(botId: string): Promise<BindingRecord | null> {
@@ -214,6 +225,8 @@ function toAccount(row: AccountRow): AccountRecord {
     encryptedCredential: row.encryptedCredential,
     status: row.status,
     capacity: row.capacity,
+    managed: row.managed,
+    ownerUserId: row.ownerUserId,
     parkedUntil: iso(row.parkedUntil),
     lastError: row.lastError,
   };

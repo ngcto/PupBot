@@ -14,6 +14,7 @@ import {
 import { providerHintForBaseUrl } from "@terabot/providers";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { listConnectionsFor } from "./apps.ts";
+import { listComputerAccounts, providerAvailability } from "./computer-accounts.ts";
 import type {
   BotView,
   ConnectedApp,
@@ -237,5 +238,7 @@ export async function loadShellData(input: {
     endpoints,
     usage,
     connections,
+    computerAccounts: await listComputerAccounts(input.user.id),
+    computerProviders: await providerAvailability(input.user.id),
   };
 }

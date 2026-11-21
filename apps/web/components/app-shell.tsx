@@ -155,6 +155,8 @@ export function AppShell({ data }: { data: ShellData }) {
         bots={data.bots}
         usage={data.usage}
         endpoints={data.endpoints}
+        computerAccounts={data.computerAccounts}
+        computerProviders={data.computerProviders}
         initialSection={settingsSection}
       />
       <AppsDialog open={appsOpen} onOpenChange={setAppsOpen} initialConnections={data.connections} />
