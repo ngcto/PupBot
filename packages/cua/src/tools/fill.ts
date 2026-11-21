@@ -2,7 +2,7 @@ import { CuaDriverError } from "../driver/cli.ts";
 import type { CuaDriver } from "../driver/cli.ts";
 import type { ActOptions, WindowTarget } from "./desktop.ts";
 import type { CuaActionResult, CuaObservation } from "../types.ts";
-import { observeWindow, setValue } from "./desktop.ts";
+import { click, hotkey, observeWindow, setValue, typeText } from "./desktop.ts";
 import { browserState, browserType } from "./browser.ts";
 
 /**
@@ -98,10 +98,19 @@ export interface FillResult {
 /**
  * Type a value this code did not choose into a target someone else selected.
  *
- * Element route (desktop app): `setValue` is preferred over keystrokes, because
- * it writes the value without focus and without leaving a password in a
- * keystroke path. Pixel typing is not used for a secret at all — aiming pixels
- * at a field the caller cannot name is the mis-fill this guards against.
+ * Element route (desktop app): `setValue` first, then a foreground rung when it
+ * did not land.
+ *
+ * MEASURED on a box with a GTK entry: `set_value` is a no-op there. The driver
+ * answers `confirmed` for a plain entry and `suspected_noop` for a masked one,
+ * and the dialog's own `get_text()` was empty both times — so the driver's own
+ * verdict is not evidence that a native field took the value. A foreground click
+ * on the element's frame plus real keystrokes does land it, and the toolkit then
+ * reads the value back, which is what makes the write verifiable at all.
+ *
+ * The escalation is still aimed at a field the caller **named**: the click uses
+ * the same element token, so there is no pixel guess about which field to fill.
+ * Pixel typing without an element is never used for a secret.
  */
 export async function fillSecret(
   driver: CuaDriver,
@@ -113,6 +122,21 @@ export async function fillSecret(
     durationMs: Date.now() - started,
   });
 
+  // A missing value is a caller bug, not a driver result: forwarding `undefined`
+  // reaches the driver as a missing field and comes back as an unrelated parse
+  // error, which reads like a transport failure and hides the real mistake.
+  if (typeof request.value !== "string") {
+    return finish({
+      effect: "refused",
+      verified: false,
+      refusal: {
+        code: "wrong_target",
+        message: "no value was given to fill",
+        hint: "Pass the secret as `value`.",
+      },
+      message: "No value was given, so nothing was typed.",
+    });
+  }
   if (request.fill.kind === "element") return fillElement(driver, request, started, finish);
   return fillPage(driver, request, started, finish);
 }
@@ -179,31 +203,113 @@ async function fillElement(
     });
   }
 
+  const options = {
+    ...(request.delivery ? { delivery: request.delivery } : {}),
+    ...(request.signal ? { signal: request.signal } : {}),
+  };
+
   // `setValue` writes the element's value with no focus and no keystrokes, so the
-  // secret does not travel through a keyboard path.
+  // secret does not travel through a keyboard path. It is the first rung because
+  // on a toolkit that supports it there is nothing better.
   const action = await setValue(
     driver,
     request.target,
     { elementToken: fill.elementToken, value: request.value },
-    {
-      ...(request.delivery ? { delivery: request.delivery } : {}),
-      ...(request.signal ? { signal: request.signal } : {}),
-    },
+    options,
   );
-
-  const landed =
+  const readBack =
     request.verify === false
       ? undefined
       : await readBackHoldsValue(driver, request, observation, fill.elementToken).catch(() => undefined);
+  if (action.refusal || readBack === true || request.verify === false) {
+    return finish(result(action, readBack));
+  }
 
+  // The write did not show up in the field. On a native toolkit that is the
+  // normal case, not an error, so the next rung is real keystrokes at the *same
+  // element*: a foreground click on its frame, then the text.
+  const typed = await typeIntoElement(driver, request, fill.elementToken, element.role, options);
+  const typedReadBack = await readBackHoldsValue(driver, request, observation, fill.elementToken).catch(
+    () => undefined,
+  );
   return finish({
+    ...result(typed, typedReadBack),
+    // The first attempt is not hidden: a caller reading the result learns the
+    // value only landed on the second rung.
+    ...(typed !== action ? { message: describeEscalatedFill(typed, typedReadBack) } : {}),
+  });
+}
+
+/** Shape an action and its read-back into a result. */
+function result(
+  action: CuaActionResult,
+  landed: boolean | undefined,
+): Omit<FillResult, "durationMs"> {
+  return {
     effect: action.effect,
     verified: action.verified,
     ...(action.escalation ? { escalation: action.escalation } : {}),
     ...(action.refusal ? { refusal: action.refusal } : {}),
     ...(landed !== undefined ? { landed } : {}),
     message: describeFill(action, landed),
+  };
+}
+
+/**
+ * The foreground rung: click the element's own frame, then type at it.
+ *
+ * The click is above the widget rather than at its centre — a widget's frame can
+ * be its whole allocated row, and the centre of a row is not always inside the
+ * text area a toolkit focuses. `frame` comes from the same observation whose
+ * token the caller passed, so this still names one field and not a coordinate.
+ */
+async function typeIntoElement(
+  driver: CuaDriver,
+  request: FillRequest,
+  token: string,
+  role: string,
+  options: ActOptions,
+): Promise<CuaActionResult> {
+  const target = request.target;
+  const observation = await observeWindow(driver, target, {
+    screenshot: true,
+    ...(request.signal ? { signal: request.signal } : {}),
   });
+  // The token died with the read it came from, so the same widget is found by
+  // its role in the fresh one. A native toolkit reports the row and not the
+  // value, which is why the role is the only stable handle here.
+  const element = observation.elements.find((entry) => entry.frame && entry.role === role);
+  const frame = element?.frame;
+  if (!frame) {
+    // No pixels to aim at means this rung cannot be taken honestly; say that
+    // rather than typing at whatever happens to have focus.
+    return {
+      ok: false,
+      verified: false,
+      effect: "refused",
+      refusal: {
+        code: "background_unavailable",
+        message: "the field has no frame to click, so keystrokes cannot be aimed at it",
+        hint: "Observe the window with a screenshot and pass the element token from that read.",
+      },
+      durationMs: 0,
+      raw: {},
+    };
+  }
+  const clicked = await click(
+    driver,
+    target,
+    { x: Math.round(frame.x + frame.w / 2), y: Math.round(frame.y + frame.h / 2) },
+    { ...options, delivery: "foreground" },
+  );
+  // `type_text` inserts at the caret and the driver has no "replace" switch, so an
+  // existing value would be appended to. Selecting the field's text first makes
+  // the write a replacement. The chord names no element: it goes to whatever the
+  // click just focused, which is the field that was named a line earlier.
+  await hotkey(driver, target, ["ctrl", "a"], { ...options, delivery: "foreground" });
+  const typed = await typeText(driver, target, { text: request.value }, { ...options, delivery: "foreground" });
+  // The click's own verdict is not the news; the typing is.
+  return clicked.refusal ? clicked : typed;
 }
 
 async function fillPage(
@@ -286,10 +392,15 @@ const MASK_CHARS = /^[\u2022\u25cf*\u00b7]+$/u;
 /**
  * Did the field take the value?
  *
- * A plain field reports the value back and can be compared exactly. A password
- * field reports a mask of the right length (measured: `•••••••••••••••••••••`
- * for a 21-character value), so the honest test is "masked, and the right
- * length" — not a string comparison that can never match.
+ * A plain field reports the value back and can be compared exactly. A mask that
+ * the widget does report can be checked by length (measured: eleven
+ * `•••••••••••` for a 21-character value).
+ *
+ * MEASURED and important: some toolkits report **no value at all** for a masked
+ * entry — a GTK `Gtk.Entry` with `set_visibility(False)` gives `undefined`, not a
+ * mask. That is not evidence the fill failed: the same fill read back as empty
+ * while the dialog's own `get_text()` held the value. It means this read-back
+ * cannot answer the question, so `landed` stays absent rather than false.
  */
 function holdsValue(reported: unknown, value: string): boolean {
   if (reported === null || reported === undefined) return false;
@@ -346,6 +457,13 @@ async function readBackPageHoldsValue(
  * value, and it distinguishes "delivered" from "landed" the way the contract
  * requires: a fill that could not be read back is not described as done.
  */
+/** The message for a fill that only landed on the second rung. */
+function describeEscalatedFill(action: CuaActionResult, landed: boolean | undefined): string {
+  if (landed === true) return "The field now holds the value; it was typed in the foreground after a direct write did not take.";
+  if (action.refusal) return `Nothing was typed: ${action.refusal.message}`;
+  return "The value was typed but the field does not show it; read the field before relying on it.";
+}
+
 function describeFill(action: CuaActionResult, landed: boolean | undefined): string {
   if (action.refusal) return `Nothing was typed: ${action.refusal.message}`;
   if (landed === true) return "The field now holds the value.";

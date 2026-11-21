@@ -299,8 +299,6 @@ export async function typeText(
     elementToken?: string;
     x?: number;
     y?: number;
-    /** Replace the field's contents instead of inserting at the caret. */
-    replace?: boolean;
   },
   options: ActOptions = {},
 ): Promise<CuaActionResult> {
@@ -309,7 +307,6 @@ export async function typeText(
     text: input.text,
     ...(input.elementToken ? { element_token: input.elementToken } : {}),
     ...(input.x !== undefined && input.y !== undefined ? { x: input.x, y: input.y } : {}),
-    ...(input.replace ? { replace: true } : {}),
   };
   return act(driver, "type_text", args, options);
 }

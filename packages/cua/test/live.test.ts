@@ -236,6 +236,91 @@ describe.skipIf(!live)("cua driver live", () => {
         expect(labelsRestored, "clearing the filter must list the files again").toContain("proof-beta.txt");
         expect(labelsRestored).toContain("proof-gamma.txt");
 
+        /* ── a desktop fill: the route a Vault needs on a native app ── */
+
+        // A GTK dialog with a masked entry, because that is the case the page
+        // route cannot cover: the secret goes into a native widget, not a DOM
+        // input. `python3-gi` ships on the template, so this needs no install.
+        await provider.putFile(
+          box,
+          "/tmp/vault.py",
+          [
+            "import gi",
+            'gi.require_version("Gtk", "3.0")',
+            "from gi.repository import Gtk",
+            "w = Gtk.Window(title='Terabot Vault Fill')",
+            "w.set_default_size(360, 130)",
+            "box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=12)",
+            "box.pack_start(Gtk.Label(label='API key'), False, False, 0)",
+            "e = Gtk.Entry()",
+            "e.set_visibility(False)",
+            "e.set_name('secret')",
+            "e.set_placeholder_text('API key')",
+            "box.pack_start(e, False, False, 0)",
+            "def on_save(_button):",
+            "    open('/tmp/seen.txt', 'w').write(e.get_text())",
+            "button = Gtk.Button(label='Save')",
+            "button.connect('clicked', on_save)",
+            "box.pack_start(button, False, False, 0)",
+            "w.add(box)",
+            "w.connect('destroy', Gtk.main_quit)",
+            "w.show_all()",
+            "Gtk.main()",
+          ].join("\n"),
+        );
+        await provider.exec(box, "setsid python3 /tmp/vault.py >/tmp/vault.log 2>&1 < /dev/null & sleep 1; true", {
+          timeoutSeconds: 30,
+        });
+
+        const dialogWindow = await waitForWindow(driver, /terabot vault fill/i);
+        expect(dialogWindow, "the GTK dialog must have opened").toBeDefined();
+        const dialogTarget: WindowTarget = { pid: dialogWindow!.pid, windowId: dialogWindow!.windowId };
+        const dialog = await observeWindow(driver, dialogTarget);
+        const secretField = dialog.elements.find((element) => /password/i.test(element.role));
+        // A real toolkit exposes the widget as a masked text field; that is the
+        // whole reason this route exists rather than typing at a coordinate.
+        expect(secretField, "the dialog must expose a password field").toBeDefined();
+        console.log(`  desktop field: role=${secretField!.role} token=${secretField!.token}`);
+
+        const desktopValue = `desktop-${Date.now()}`;
+        const desktopFill = await time("fillSecret (desktop)", () =>
+          fillSecret(driver, {
+            target: dialogTarget,
+            fill: {
+              kind: "element",
+              observation: dialog,
+              elementToken: secretField!.token,
+              expect: { role: "password text" },
+            },
+            value: desktopValue,
+          }),
+        );
+        expect(desktopFill.effect, `desktop fill failed: ${desktopFill.message}`).not.toBe("refused");
+        // MEASURED: a GTK masked entry reports **no value at all** through
+        // AT-SPI, so neither `set_value`'s verdict nor a read-back can say the fill
+        // worked. What proves it is the application's own view of the field, which
+        // this dialog writes to a file when Save is pressed.
+        expect(desktopFill.landed, `an unreadable field must not claim it landed: ${desktopFill.message}`).not.toBe(true);
+        // The value itself must never appear anywhere in the result.
+        expect(JSON.stringify(desktopFill)).not.toContain(desktopValue);
+        // Press the dialog's own Save, then read what the application thinks its
+        // field holds. This is the only evidence that exists for a masked native
+        // widget: the toolkit reports nothing, so the app has to say.
+        const saveButton = (await observeWindow(driver, dialogTarget)).elements.find(
+          (element) => element.role === "button",
+        );
+        expect(saveButton, "the dialog must expose its Save button").toBeDefined();
+        await click(driver, dialogTarget, { elementToken: saveButton!.token }, { delivery: "foreground" });
+        const saved = await waitForFile(provider, box, "/tmp/seen.txt", 8000);
+        expect(saved, "the dialog must have received the value it was filled with").toBe(desktopValue);
+        const dialogAfter = await observeWindow(driver, dialogTarget);
+        const fieldAfter = dialogAfter.elements.find((element) => /password/i.test(element.role));
+        // Whatever the toolkit reports, it must never be the value itself.
+        if (fieldAfter?.value !== undefined && fieldAfter.value !== null) {
+          expect(String(fieldAfter.value)).not.toContain(desktopValue);
+        }
+        console.log(`  dialog received the value; toolkit reports: ${JSON.stringify(fieldAfter?.value)}`);
+
         /* ── a fill with a value this code chose, into a target it can name ── */
 
         // A real login form on the box itself, so the fill has a password field:
@@ -369,6 +454,34 @@ async function waitForLabels(
     last = await observeWindow(driver, target);
   }
   return last;
+}
+
+/** Wait for a file on the box to hold something, and hand back its contents. */
+async function waitForFile(
+  provider: InstaboxProvider,
+  box: { id: string },
+  path: string,
+  timeoutMs: number,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const read = await provider.exec(box, `cat ${path} 2>/dev/null || true`, { timeoutSeconds: 15 });
+    const text = read.stdout.trim();
+    if (text) return text;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return "";
+}
+
+/** Wait for a window whose title matches, then hand back the one that did. */
+async function waitForWindow(driver: CuaDriver, title: RegExp, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const window = (await listWindows(driver)).find((entry) => title.test(entry.title ?? ""));
+    if (window) return window;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return undefined;
 }
 
 /**

@@ -141,13 +141,31 @@ describe("a fill targets an element from the observation that produced it", () =
     expect(result.refusal?.code).toBe("wrong_target");
   });
 
-  it("never claims the fill landed when the read-back does not show it", async () => {
-    const { driver } = harness({
-      // The write succeeds, but the field does not show the value afterwards.
+  it("refuses a fill with no value instead of forwarding undefined to the driver", async () => {
+    const { driver, calls } = harness();
+    const result = await fillSecret(driver, {
+      target: { pid: 100, windowId: 200 },
+      fill: { kind: "element", observation: observation(), elementToken: "s00000005:12" },
+      // @ts-expect-error a caller that forgot the value is exactly the bug this guards.
+      value: undefined,
+    });
+    expect(result.effect).toBe("refused");
+    expect(result.message).toContain("No value was given");
+    // Nothing reached the driver, so no unrelated parse error can stand in for it.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("escalates to real keystrokes when the direct write does not show up", async () => {
+    // MEASURED on a box: a GTK entry ignores `set_value` while the driver still
+    // answers `confirmed`. A handleType: the only honest answer is a second
+    // rung, and the read-back decides the result.
+    const { driver, calls } = harness({
       set_value: { effect: "confirmed", verified: true },
       get_window_state: {
         snapshot_id: "s00000007",
-        elements: [{ element_token: "s00000007:12", role: "text field", label: "Password", value: "" }],
+        elements: [
+          { element_token: "s00000007:12", role: "text field", label: "Password", value: "", frame: { x: 10, y: 20, w: 200, h: 30 } },
+        ],
         tree_markdown: "- text field \"Password\"",
       },
     });
@@ -156,7 +174,15 @@ describe("a fill targets an element from the observation that produced it", () =
       fill: { kind: "element", observation: observation(), elementToken: "s00000005:12" },
       value: "hunter2",
     });
-    expect(result.effect).toBe("confirmed");
+    // Two rungs were taken: the direct write, then a click and keystrokes.
+    const tools = calls.map((entry) => entry.tool);
+    expect(tools).toContain("set_value");
+    expect(tools).toContain("click");
+    expect(tools).toContain("type_text");
+    // The click was aimed at the element's own frame, in the foreground.
+    const clicked = calls.find((entry) => entry.tool === "click")!;
+    expect(clicked.args).toMatchObject({ x: 110, y: 35, delivery_mode: "foreground" });
+    // The field still shows nothing, so the fill is not reported as landed.
     expect(result.landed).toBe(false);
     expect(result.message).toContain("does not show it");
   });
