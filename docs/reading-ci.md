@@ -135,6 +135,47 @@ This is the same mistake as the `403` at the top of this file: a report of a pro
 problem. The model's message is a *client's* description of what it received — exactly like an HTTP
 error is a client's description of the response — and the instrument to check it is on our side.
 
+## A stacked PR's `mergeable` is computed against the trunk, not its base
+
+GitHub reports mergeability for a pull request in a **native stack** against the stack's **trunk** —
+`main` — not against the base branch the pull request declares. On a four-layer stack that means
+every layer's board is answering a question nobody asked: "would this merge into `main` on its own",
+when the answer that matters for landing is "does it contain its parent".
+
+The failure mode is silent in both directions, and both were hit on the billing stack on 2026-11-21:
+
+- **A clean stack reads `CONFLICTING`.** Every layer-to-layer merge was a fast-forward
+  (`git merge-base --is-ancestor` said yes, `git merge --no-ff <parent>` said "Automatic merge went
+  well"), while layers 3 and 4 genuinely conflicted with `main` in four files. Nothing local said so.
+- **Replaying the tip is not enough.** The conflict was introduced in layer 3 and only touched lines
+  layer 4 never edited, so replaying layer 4 onto a rebased layer 3 succeeded while layer 3 itself
+  still could not merge.
+
+**The check that tells the truth, per layer:**
+
+```bash
+git fetch origin main
+for b in layer1 layer2 layer3 layer4; do
+  printf '%-24s ' "$b"
+  git merge-tree --write-tree origin/main "$b" >/dev/null 2>&1 && echo CLEAN || echo CONFLICT
+done
+```
+
+`git merge-tree --write-tree` answers "would this merge cleanly" without touching a working tree, so
+it is safe to run over every branch of a stack at once. Do it **before** pushing a replay, not after.
+
+Two more things that make local merges lie:
+
+- **`git merge-base --is-ancestor <parent> <child>` proves lineage, not mergeability.** A child can
+  contain its parent exactly and still be unmergeable into the trunk.
+- **`rerere` replays an old resolution as if it were a clean merge.** If `git config rerere.enabled`
+  is `true`, a repeated replay of the same conflict resolves itself and prints "Automatic merge went
+  well". Test with `-c rerere.enabled=false`, or from a fresh clone, before believing it.
+
+Finally: after a layer is **squash-merged**, GitHub retargets the next pull request to the squash's
+base and recomputes against the new `main`. A `CONFLICTING` reading immediately afterwards is usually
+the stack standing behind a squash — replay it, do not treat it as a defect in what you wrote.
+
 ## What a green board does and does not mean
 
 A green board means the change is shippable. It does not mean the change does what was asked. For
