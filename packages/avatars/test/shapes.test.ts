@@ -1,47 +1,106 @@
 import { describe, expect, it } from "vitest";
 import { validateAvatar } from "open-bot-avatar";
-import { SHAPES, DEFAULT_SHAPE, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
+import { SHAPES, DEFAULT_SHAPE, EYE_FIT, GLYPH_LEAN_DEG, eyeCapsules, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
 
-function coordinatesOf(path: string): Array<[number, number]> {
-  const numbers = (path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
-  const points: Array<[number, number]> = [];
-  for (let index = 0; index + 1 < numbers.length; index += 2) {
-    points.push([numbers[index]!, numbers[index + 1]!]);
+/** The markup inside the lean group, by walking its depth. */
+function leanGroup(svg: string): string {
+  const start = svg.indexOf('<g transform="rotate(');
+  if (start === -1) return "";
+  let depth = 0;
+  let i = start;
+  while (i < svg.length) {
+    if (svg.startsWith("<g ", i)) {
+      depth += 1;
+      i += 3;
+    } else if (svg.startsWith("</g>", i)) {
+      depth -= 1;
+      i += 4;
+      if (depth === 0) return svg.slice(start, i);
+    } else {
+      i += 1;
+    }
   }
-  return points;
+  return "";
 }
 
 const CONTRACT_ORDER = [
+  "mug",
+  "lightbulb",
+  "chat",
+  "sprout",
+  "watering-can",
+  "bull",
+  "bunny",
+  "camera",
+  "cat",
+  "cloud",
+  "ghost",
+  "rocket",
+  "star",
+  "witch-hat",
+] as const;
+
+/** Ids this registry retired or never shipped; none of them may still resolve. */
+const RETIRED = [
   "orb",
   "squircle",
-  "drop",
   "bell",
   "arch",
   "hexa",
-  "pill",
   "gem",
   "crest",
   "horns",
   "antennae",
   "scallop",
   "shoulder",
+  "star4",
+  "quatrefoil",
+  "flower",
+  "drop",
+  "pill",
+  "pick",
+  "house",
+  "splat",
+  "hexagon",
+  "book",
+  "brain",
+  "egg",
+  "magnifier",
+  "paint-brush",
+  "palette",
+  "shield",
+  "controller",
+  "barbell",
+  "circle",
+  "square",
+  "water-drop",
+  "heart",
 ] as const;
 
-describe("symmetric shapes", () => {
-  it("lists every contract id exactly once, in contract order", () => {
+describe("avatar registry", () => {
+  it("lists all 14 ids exactly once, in contract order", () => {
     expect(SHAPES.map((shape) => shape.id)).toEqual([...CONTRACT_ORDER]);
     expect(new Set(SHAPES.map((shape) => shape.id)).size).toBe(CONTRACT_ORDER.length);
   });
 
   it("keeps the lookup helpers consistent with the list", () => {
-    expect(DEFAULT_SHAPE).toBe("orb");
+    expect(DEFAULT_SHAPE).toBe("mug");
     for (const id of CONTRACT_ORDER) {
       expect(isShapeId(id)).toBe(true);
       expect(shapeById(id).definition).toBe(shapeDefinition(id));
       expect(shapeDefinition(id).id).toBe(id);
     }
     expect(isShapeId("bean")).toBe(false);
-    expect(shapeById("bean").id).toBe("orb");
+    expect(shapeById("bean").id).toBe("mug");
+  });
+
+  it.each(RETIRED)("falls back to the first id for the retired id %s", (id) => {
+    expect(isShapeId(id)).toBe(false);
+    expect(shapeById(id).id).toBe(DEFAULT_SHAPE);
+    expect(shapeDefinition(id)).toBe(shapeDefinition(DEFAULT_SHAPE));
+    expect(renderAvatarSvg({ shape: id, color: "sky", size: 64 })).toBe(
+      renderAvatarSvg({ shape: DEFAULT_SHAPE, color: "sky", size: 64 }),
+    );
   });
 
   it.each(CONTRACT_ORDER)("%s passes open-bot-avatar validation", (id) => {
@@ -49,24 +108,15 @@ describe("symmetric shapes", () => {
     expect(result.ok, result.ok ? "" : result.errors.join("; ")).toBe(true);
   });
 
-  it.each(CONTRACT_ORDER)("%s keeps every path coordinate inside the 6..94 safe area", (id) => {
-    const numbers = (shapeDefinition(id).body.path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
-    expect(numbers.length).toBeGreaterThan(0);
-    for (const value of numbers) {
-      expect(value).toBeGreaterThanOrEqual(6);
-      expect(value).toBeLessThanOrEqual(94);
-    }
-  });
-
-  it.each(CONTRACT_ORDER)("%s is one closed filled path with eyes inside the safe area", (id) => {
-    const { body, eyes } = shapeDefinition(id);
-    expect(body.path.startsWith("M ")).toBe(true);
-    expect(body.path.trimEnd().endsWith("Z")).toBe(true);
-    expect(body.path).not.toMatch(/[Aa]/);
-    expect(eyes.x - eyes.spacing / 2).toBeGreaterThan(6);
-    expect(eyes.x + eyes.spacing / 2).toBeLessThan(94);
-    expect(eyes.y).toBeGreaterThan(6);
-    expect(eyes.y).toBeLessThan(94);
+  it.each(CONTRACT_ORDER)("%s keeps the definition's own eyes and a closed path", (id) => {
+    const definition = shapeDefinition(id);
+    expect(definition.body.path.startsWith("M")).toBe(true);
+    expect(definition.body.path.trimEnd().endsWith("Z")).toBe(true);
+    expect(definition.eyes.x).toBeGreaterThan(6);
+    expect(definition.eyes.x).toBeLessThan(94);
+    expect(definition.eyes.y).toBeGreaterThan(6);
+    expect(definition.eyes.y).toBeLessThan(94);
+    expect(definition.eyes.scale).toBeLessThanOrEqual(1.8);
   });
 
   it("renders deterministically and paints the silhouette in the requested colour", () => {
@@ -77,25 +127,53 @@ describe("symmetric shapes", () => {
     }
   });
 
-  it.each(CONTRACT_ORDER)("%s mirrors exactly about the vertical axis", (id) => {
-    const points = coordinatesOf(shapeDefinition(id).body.path);
-    const tolerance = 0.35;
-    for (const [x, y] of points) {
-      const mirrored = points.some(
-        ([ox, oy]) => Math.abs(ox - (100 - x)) <= tolerance && Math.abs(oy - y) <= tolerance,
-      );
-      expect(mirrored, `no mirror for (${x.toFixed(2)}, ${y.toFixed(2)})`).toBe(true);
+  it("leans the body counter-clockwise, once, about the middle of the frame", () => {
+    for (const id of CONTRACT_ORDER) {
+      const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
+      expect(svg, id).toContain(`<g transform="rotate(${GLYPH_LEAN_DEG} 50 50)">`);
+      expect(svg.match(/rotate\(-?\d+ 50 50\)/g) ?? [], id).toHaveLength(1);
+    }
+    expect(GLYPH_LEAN_DEG).toBe(-12);
+  });
+
+  it("draws the eye pair outside the lean, so the pair keeps its screen angle", () => {
+    for (const id of CONTRACT_ORDER) {
+      const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
+      expect(leanGroup(svg), id).not.toContain('fill="#151515"');
+      expect(svg.indexOf('fill="#151515"'), id).toBeGreaterThan(svg.indexOf("</defs>"));
     }
   });
 
-  it.each(CONTRACT_ORDER)("%s stays centred on x = 50", (id) => {
-    const points = coordinatesOf(shapeDefinition(id).body.path);
-    const xs = points.map(([x]) => x);
-    expect(Math.min(...xs) + Math.max(...xs)).toBeCloseTo(100, 1);
+  it.each(CONTRACT_ORDER)("%s draws its own eye pair and leaves the package's out", (id) => {
+    const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
+    const ink = svg.match(/fill="#151515"/g) ?? [];
+    expect(ink).toHaveLength(2);
+    expect((svg.match(/<rect[^>]*fill="#151515"/g) ?? [])).toHaveLength(2);
   });
 
-  it("gives the eyes the contract ink at 90% opacity", () => {
-    const svg = renderAvatarSvg({ shape: "orb", color: "sky", size: 96 });
-    expect(svg).toContain('fill="#121212" fill-opacity="0.9"');
+  it("builds the eye pair the reference draws: a fat low near eye, a thin high far eye, both slanted", () => {
+    for (const id of CONTRACT_ORDER) {
+      const [near, far] = eyeCapsules(shapeDefinition(id) as never);
+      expect(near.width, id).toBeGreaterThan(far.width * 1.2);
+      expect(near.width / far.width, id).toBeLessThan(1.45);
+      expect(near.length / near.width, id).toBeGreaterThan(1.8);
+      expect(far.length / far.width, id).toBeGreaterThan(2.2);
+      expect(near.cx, id).toBeLessThan(far.cx);
+      expect(near.cy, id).toBeGreaterThan(far.cy);
+      for (const capsule of [near, far]) {
+        expect(capsule.angle).toBeGreaterThan(58);
+        expect(capsule.angle).toBeLessThan(62);
+      }
+    }
+  });
+
+  it("keeps the fit table to glyphs that need it", () => {
+    expect(Object.keys(EYE_FIT).sort()).toEqual(["rocket", "star", "witch-hat"]);
+  });
+
+  it("leaves eye colour and depth to the package", () => {
+    const svg = renderAvatarSvg({ shape: "mug", color: "ember", size: 96 });
+    expect(svg).toContain('fill="#151515"');
+    expect(svg).not.toContain("fill-opacity");
   });
 });

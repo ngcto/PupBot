@@ -14,7 +14,8 @@ export const COLORS: readonly AvatarColor[] = [
   { id: "slate", name: "Slate", hex: "#777777" },
 ] as const;
 
-export const DEFAULT_COLOR: AvatarColorId = "sky";
+/** The package's own starter orange is `#ff6a1a`; `ember` is the palette's nearest entry. */
+export const DEFAULT_COLOR: AvatarColorId = "ember";
 
 const byId = new Map(COLORS.map((color) => [color.id, color]));
 
