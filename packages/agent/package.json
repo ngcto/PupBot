@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@terabot/config": "workspace:*",
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",
     "drizzle-orm": "^0.45.4"

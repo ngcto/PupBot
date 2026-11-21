@@ -43,6 +43,20 @@
       "when": 1795233986793,
       "tag": "0005_drop_chatgpt_endpoint_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795245420686,
+      "tag": "0006_attachment_workspace_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795245420687,
+      "tag": "0007_model_gateway_backfill",
+      "breakpoints": true
     }
   ]
 }

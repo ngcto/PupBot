@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -12,6 +13,10 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
 
 /* ─────────────────────────────── enums ─────────────────────────────── */
 
@@ -450,6 +455,11 @@ export const attachment = pgTable(
   "attachment",
   {
     id: uuid("id").primaryKey(),
+    /**
+     * Set on upload, before any message names the file: it is what makes an
+     * unclaimed upload claimable by its own workspace and by no other.
+     */
+    workspaceId: uuid("workspace_id").references(() => workspace.id, { onDelete: "cascade" }),
     messageId: uuid("message_id").references(() => message.id, { onDelete: "cascade" }),
     storageKey: text("storage_key").notNull(),
     name: text("name").notNull(),
@@ -457,8 +467,20 @@ export const attachment = pgTable(
     mime: text("mime").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("attachment_message_idx").on(t.messageId)],
+  (t) => [index("attachment_message_idx").on(t.messageId), index("attachment_workspace_idx").on(t.workspaceId)],
 );
+
+/**
+ * Attachment bytes when no S3-compatible bucket is configured. The key is the
+ * attachment id, so the bytes cascade with the row that names them.
+ */
+export const attachmentBlob = pgTable("attachment_blob", {
+  attachmentId: uuid("attachment_id")
+    .primaryKey()
+    .references(() => attachment.id, { onDelete: "cascade" }),
+  bytes: bytea("bytes").notNull(),
+  createdAt: createdAt(),
+});
 
 export const usageEvent = pgTable(
   "usage_event",
@@ -502,5 +524,6 @@ export const schema = {
   skill,
   routine,
   attachment,
+  attachmentBlob,
   usageEvent,
 };

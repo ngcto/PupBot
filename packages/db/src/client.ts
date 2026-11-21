@@ -11,8 +11,8 @@ export interface DatabaseHandle {
   close: () => Promise<void>;
 }
 
-export function createDatabase(connectionString: string): DatabaseHandle {
-  const pool = new Pool({ connectionString, max: 10 });
+export function createDatabase(connectionString: string, max = 10): DatabaseHandle {
+  const pool = new Pool({ connectionString, max });
   const db = drizzle(pool, { schema });
   return {
     db,
@@ -30,7 +30,7 @@ export function database(): Database {
 }
 
 export function sharedDatabase(): DatabaseHandle {
-  if (!shared) shared = createDatabase(serverEnv().DATABASE_URL);
+  if (!shared) shared = createDatabase(serverEnv().DATABASE_URL, serverEnv().DATABASE_POOL_MAX);
   return shared;
 }
 

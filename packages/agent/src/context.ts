@@ -22,10 +22,19 @@ export function defaultInstructions(bot: ContextBot): string {
   ].join(" ");
 }
 
+/**
+ * An attached file is named in the transcript even though the model cannot read
+ * its bytes: a message that is only a file still has to reach the model, and a
+ * model that cannot see the file must be able to say so.
+ */
 function partText(parts: MessagePart[]): string {
   return parts
-    .map((part) => (part.type === "text" ? part.text : ""))
-    .join("")
+    .map((part) => {
+      if (part.type === "text") return part.text;
+      if (part.type === "file" || part.type === "image") return `[attached ${part.type}: ${part.name} (${part.mime})]`;
+      return "";
+    })
+    .join("\n")
     .trim();
 }
 

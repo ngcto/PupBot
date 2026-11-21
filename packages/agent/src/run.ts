@@ -3,7 +3,6 @@ import {
   bot as botTable,
   conversation as conversationTable,
   decryptSecret,
-  encryptSecret,
   message as messageTable,
   modelCatalog,
   modelEndpoint,
@@ -13,6 +12,7 @@ import {
   usageEvent,
 } from "@terabot/db";
 import type { Database, MessagePart } from "@terabot/db";
+import { gatewayCredential, serverEnv } from "@terabot/config";
 import { costAsDecimal, costOf, providerHintForBaseUrl } from "@terabot/providers";
 import type { ModelEndpointConfig, ModelGateway, ModelPricing } from "@terabot/providers";
 import { buildChatContext } from "./context.ts";
@@ -103,6 +103,13 @@ class EventLog {
   }
 }
 
+async function gatewayKeyFor(baseUrl: string): Promise<string | undefined> {
+  const env = serverEnv();
+  const normalise = (value: string) => value.replace(/\/+$/, "");
+  if (normalise(baseUrl) !== normalise(env.AI_GATEWAY_BASE_URL)) return undefined;
+  return gatewayCredential(env);
+}
+
 function textParts(text: string): MessagePart[] {
   return [{ type: "text", text }];
 }
@@ -154,6 +161,9 @@ async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<Res
       apiKey = undefined;
     }
   }
+  // The AI Gateway endpoint ships with no stored key: the deployment's own
+  // OIDC token (or an explicit AI_GATEWAY_API_KEY) authenticates the request.
+  apiKey ??= await gatewayKeyFor(endpoint.baseUrl);
 
   return {
     label: endpoint.label,
@@ -197,8 +207,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   }
 
   if (row.run.abortRequested) {
-    await finishRun(db, runId, "canceled", { now });
     await events.append({ type: "run.completed", payload: { status: "canceled" } });
+    await setRunTerminal(db, { runId, status: "canceled", finishedAt: now() });
     return { status: "canceled", assistantMessageId: null, text: "" };
   }
 
@@ -258,15 +268,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
 
   if (!resolved) {
     const reason = "No model endpoint is connected to this bot.";
-    await failRun(db, {
-      runId,
-      messageId: assistantMessageId,
-      text: "",
-      reason,
-      now,
-    });
+    await finishMessage(db, { messageId: assistantMessageId, text: "", status: "error" });
     await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text: "", status: "error" } });
     await events.append({ type: "run.completed", payload: { status: "error", error: reason } });
+    await setRunTerminal(db, { runId, status: "error", error: reason, finishedAt: now() });
     return { status: "error", assistantMessageId, text: "", error: reason };
   }
 
@@ -338,12 +343,13 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
       const ready = await options.computer.ensureReady(row.bot.id);
       if (!ready.ok) {
         const reason = ready.reason ?? "Your computer could not be started.";
-        await failRun(db, { runId, messageId: assistantMessageId, text: "", reason, now });
+        await finishMessage(db, { messageId: assistantMessageId, text: "", status: "error" });
         await events.append({
           type: "message.completed",
           payload: { messageId: assistantMessageId, text: "", status: "error" },
         });
         await events.append({ type: "run.completed", payload: { status: "error", error: reason } });
+        await setRunTerminal(db, { runId, status: "error", error: reason, finishedAt: now() });
         return { status: "error", assistantMessageId, text: "", error: reason };
       }
       leaseId = ready.leaseId;
@@ -434,26 +440,26 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     canceled || options.signal?.aborted ? "canceled" : failure ? "error" : "done";
 
   if (status === "error") {
-    await failRun(db, {
-      runId,
-      messageId: assistantMessageId,
-      text,
-      reason: failure ?? "unknown error",
-      now,
-      cost: costText,
-    });
+    await finishMessage(db, { messageId: assistantMessageId, text, status: text ? "complete" : "error" });
     await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text, status: "error" } });
     await events.append({ type: "run.completed", payload: { status: "error", error: failure } });
+    await setRunTerminal(db, {
+      runId,
+      status: "error",
+      error: failure ?? "unknown error",
+      finishedAt: now(),
+      cost: costText,
+    });
     return { status, assistantMessageId, text, error: failure };
   }
 
-  await db
-    .update(messageTable)
-    .set({ parts: textParts(text), status: "complete" })
-    .where(eq(messageTable.id, assistantMessageId));
-
-  await finishRun(db, runId, status, {
-    now,
+  await finishMessage(db, { messageId: assistantMessageId, text, status: "complete" });
+  await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text, status: "complete" } });
+  await events.append({ type: "run.completed", payload: { status } });
+  await setRunTerminal(db, {
+    runId,
+    status,
+    finishedAt: now(),
     inputTokens,
     outputTokens,
     model: resolved.config.model,
@@ -465,19 +471,32 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     .set({ lastMessagePreview: text.slice(0, 160), updatedAt: now() })
     .where(eq(conversationTable.id, row.conversation.id));
 
-  await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text, status: "complete" } });
-  await events.append({ type: "run.completed", payload: { status } });
-
   void reasoning;
   return { status, assistantMessageId, text };
 }
 
-async function finishRun(
+async function finishMessage(
   db: Database,
-  runId: string,
-  status: "done" | "canceled",
-  extra: {
-    now: () => Date;
+  input: { messageId: string; text: string; status: "complete" | "error" },
+): Promise<void> {
+  await db
+    .update(messageTable)
+    .set({ parts: textParts(input.text), status: input.status })
+    .where(eq(messageTable.id, input.messageId));
+}
+
+/**
+ * The run row is what tells a reader nothing more is coming, so it is written
+ * after the closing events: a client that sees a terminal status is guaranteed
+ * to find `message.completed` and `run.completed` already in the log.
+ */
+async function setRunTerminal(
+  db: Database,
+  input: {
+    runId: string;
+    status: "done" | "canceled" | "error";
+    finishedAt: Date;
+    error?: string;
     inputTokens?: number;
     outputTokens?: number;
     model?: string;
@@ -487,37 +506,12 @@ async function finishRun(
   await db
     .update(runTable)
     .set({
-      status,
-      finishedAt: extra.now(),
-      ...(extra.inputTokens !== undefined ? { inputTokens: extra.inputTokens } : {}),
-      ...(extra.outputTokens !== undefined ? { outputTokens: extra.outputTokens } : {}),
-      ...(extra.model ? { model: extra.model } : {}),
-      ...(extra.cost !== undefined ? { cost: extra.cost } : {}),
-    })
-    .where(eq(runTable.id, runId));
-}
-
-async function failRun(
-  db: Database,
-  input: {
-    runId: string;
-    messageId: string;
-    text: string;
-    reason: string;
-    now: () => Date;
-    cost?: string | null;
-  },
-): Promise<void> {
-  await db
-    .update(messageTable)
-    .set({ parts: textParts(input.text), status: input.text ? "complete" : "error" })
-    .where(eq(messageTable.id, input.messageId));
-  await db
-    .update(runTable)
-    .set({
-      status: "error",
-      error: input.reason,
-      finishedAt: input.now(),
+      status: input.status,
+      finishedAt: input.finishedAt,
+      ...(input.error ? { error: input.error } : {}),
+      ...(input.inputTokens !== undefined ? { inputTokens: input.inputTokens } : {}),
+      ...(input.outputTokens !== undefined ? { outputTokens: input.outputTokens } : {}),
+      ...(input.model ? { model: input.model } : {}),
       ...(input.cost !== undefined ? { cost: input.cost } : {}),
     })
     .where(eq(runTable.id, input.runId));
