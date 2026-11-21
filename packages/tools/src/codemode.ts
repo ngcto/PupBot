@@ -190,6 +190,43 @@ async function dispatch(
   return tool.execute(args, context);
 }
 
+/** Total characters the trace may add, whatever the calls returned. */
+export const TRACE_CHARS = 600;
+/** Calls shown, newest last: the ones a model is about to debug against. */
+export const TRACE_CALLS = 3;
+
+/**
+ * What the program's last calls returned.
+ *
+ * Deliberately says what was called and what came back, and nothing about why the
+ * program failed — the model already knows it printed nothing. Each preview is
+ * truncated by the sandbox before it crosses, and the whole trace is capped again
+ * here, so a program that read a large result cannot return it through the trace.
+ */
+export function traceFor(result: SandboxResult): string | undefined {
+  const withPreview = result.calls.filter((call) => call.preview !== undefined && call.preview !== "");
+  if (withPreview.length === 0) return undefined;
+
+  const shown = withPreview.slice(-TRACE_CALLS);
+  const omitted = withPreview.length - shown.length;
+  const head = omitted > 0 ? [`What your last ${shown.length} calls returned (${omitted} earlier omitted):`] : ["What your calls returned:"];
+
+  let used = 0;
+  const lines = [...head];
+  for (const call of shown) {
+    const mark = call.ok ? "" : " [failed]";
+    const cut = call.truncated ? " [truncated]" : "";
+    const line = `- ${call.name}${mark}: ${call.preview}${cut}`;
+    if (used + line.length > TRACE_CHARS) {
+      lines.push("- (trace cut at its limit)");
+      break;
+    }
+    used += line.length;
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 /**
  * What the model reads.
  *
@@ -201,6 +238,9 @@ export function renderForModel(result: SandboxResult): string {
   const lines: string[] = [];
 
   for (const item of result.output) lines.push(item);
+  // Whether the *program* produced something, which is not the same as whether
+  // `lines` is empty by the time the fallback "printed nothing" message is added.
+  const printed = result.output.length > 0 || (result.ok && result.value !== undefined && result.value !== null);
 
   if (!result.ok) {
     const where = result.error.line !== undefined ? ` (line ${result.error.line})` : "";
@@ -223,6 +263,14 @@ export function renderForModel(result: SandboxResult): string {
         ? "The program finished and printed nothing. If it was meant to report something, call text(...) or return it."
         : "The program failed without printing anything.",
     );
+  }
+
+  // The trace: only when the program printed nothing or failed. A successful program
+  // that printed its answer gets no trace at all, because a trace on success is how a
+  // code-mode surface quietly doubles its token cost.
+  if (!printed || !result.ok) {
+    const trace = traceFor(result);
+    if (trace) lines.push(trace);
   }
 
   if (result.calls.length > 0) {
