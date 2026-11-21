@@ -251,7 +251,7 @@ export function renderTable(runs: ArmRun[], reps = 1): string {
   // cannot move an arm's total.
   const medians = cellRowsFor(runs);
 
-  const summary = (["a", "b", "c"] as const).map((arm) => {
+  const summary = (["a", "b", "c", "d"] as const).map((arm) => {
     const forArm = medians.filter((m) => m.arm === arm);
     if (forArm.length === 0) return `| ${arm.toUpperCase()} | all | 0/0 | 0 | 0 | 0 | 0 | 0 | not attempted |`;
     return `| ${arm.toUpperCase()} | all (median of ${reps} rep${reps === 1 ? "" : "s"} per cell) | ${forArm.filter((m) => m.ok).length}/${forArm.length} | ${forArm.reduce((n, m) => n + m.turns, 0)} | ${forArm.reduce((n, m) => n + m.input, 0)} | ${forArm.reduce((n, m) => n + m.output, 0)} | ${forArm.reduce((n, m) => n + m.model, 0)} | ${forArm.reduce((n, m) => n + m.inclusive, 0)} | |`;

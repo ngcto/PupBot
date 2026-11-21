@@ -61,20 +61,42 @@ export interface CodeModeOptions {
  * 1,771 is index and 106 instructions; 146 with the instructions and no index, for
  * a search-only variant. `verify-index.mts` prices both through a real `tools` block.
  */
-export function codemodeSchema(tools: ToolEntry[], placement: ToolPlacement = "host") {
+export interface CodeModeSchemaOptions {
+  /**
+   * Whether the capability index travels in the tool description.
+   *
+   * `inline` (the default) is 1,877 tokens on the 26-entry surface and costs no turn.
+   * `lazy` is 146: the index is dropped and a program calls `searchTools` to find what
+   * it needs, which costs one call inside the sandbox rather than a model round trip.
+   * Neither is known to be better — it depends on whether a model can phrase a useful
+   * query for a capability it was never told exists, which is a behavioural question.
+   */
+  disclosure?: "inline" | "lazy";
+}
+
+export function codemodeSchema(
+  tools: ToolEntry[],
+  placement: ToolPlacement = "host",
+  options: CodeModeSchemaOptions = {},
+) {
   const index = availableIndex(tools, placement);
+  const instructions = [
+    "Run JavaScript that calls tools. Call one as `await tools.<name>(args)`.",
+    "Use `text(value)` to show something to the user of this tool, or `return` a value.",
+    "Nothing you do not print reaches you: a tool's full result is yours to inspect and filter in code.",
+    "Use `await tools.searchTools({ query })` to find a tool by the situation you are in,",
+    "and `await tools.describeTool({ name })` for its exact signature.",
+  ];
+  const description = [
+    ...instructions,
+    "",
+    // Lazy keeps the discovery instructions — which are what make a search-only
+    // surface usable — and drops only the index itself.
+    ...(options.disclosure === "lazy" ? ["The tools available here are listed by `searchTools`; nothing is listed in this prompt."] : ["Available here:", renderIndex(index)]),
+  ].join("\n");
   return {
     name: "codemode",
-    description: [
-      "Run JavaScript that calls tools. Call one as `await tools.<name>(args)`.",
-      "Use `text(value)` to show something to the user of this tool, or `return` a value.",
-      "Nothing you do not print reaches you: a tool's full result is yours to inspect and filter in code.",
-      "Use `await tools.searchTools({ query })` to find a tool by the situation you are in,",
-      "and `await tools.describeTool({ name })` for its exact signature.",
-      "",
-      "Available here:",
-      renderIndex(index),
-    ].join("\n"),
+    description,
     parameters: {
       type: "object",
       properties: {
