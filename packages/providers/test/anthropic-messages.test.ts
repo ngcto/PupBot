@@ -4,7 +4,7 @@ import {
   buildAnthropicRequest,
   wireAnthropicMessages,
 } from "../src/adapters/anthropic-messages.ts";
-import { collect, fixture, jsonResponse, sseResponse } from "./helpers.ts";
+import { collect, fixture, sseResponse } from "./helpers.ts";
 import type { ChatMessage } from "../src/types.ts";
 
 const endpoint = { kind: "anthropic-messages" as const, baseUrl: "http://example.test/v1", model: "claude-fixture" };
@@ -135,7 +135,7 @@ describe("anthropic-messages adapter", () => {
           [
             'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}',
             'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_half","name":"run_shell"}}',
-            'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":"}}',
+            'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"cmd":}}',
             "",
           ].join("\n\n"),
         ),

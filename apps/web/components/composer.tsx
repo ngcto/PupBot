@@ -187,7 +187,7 @@ export function Composer({
         ) : null}
 
         <div className="flex items-end gap-2.5 px-2 py-2">
-          <RowTools bot={bot} onAttach={() => picker.current?.click()} />
+          <RowTools onAttach={() => picker.current?.click()} />
           <input
             ref={picker}
             type="file"
@@ -299,7 +299,7 @@ function ComputerGate({ bot, onConnect }: { bot: BotView; onConnect: () => void 
   );
 }
 
-function RowTools({ bot, onAttach }: { bot: BotView; onAttach: () => void }) {
+function RowTools({ onAttach }: { onAttach: () => void }) {
   return (
     <div className="flex items-center gap-1.5">
       <MenuRoot>

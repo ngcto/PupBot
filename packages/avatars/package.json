@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "contact-sheet": "tsx scripts/contact-sheet.ts"
+    "contact-sheet": "tsx scripts/contact-sheet.ts",
+    "lint": "eslint ."
   },
   "dependencies": {
     "open-bot-avatar": "^0.3.0"
