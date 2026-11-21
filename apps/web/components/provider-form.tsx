@@ -118,10 +118,11 @@ export function ProviderForm({
   const [apiKey, setApiKey] = useState("");
   // Blank means "not mine": the server may fill it. A number here is the user's
   // and is never replaced.
+  const hadTypedContext = Boolean(
+    endpoint?.contextWindow && !endpoint.detailSources.includes("contextWindow"),
+  );
   const [contextWindow, setContextWindow] = useState(
-    endpoint?.contextWindow && !endpoint.detailSources.includes("contextWindow")
-      ? String(endpoint.contextWindow)
-      : "",
+    hadTypedContext ? String(endpoint!.contextWindow) : "",
   );
   const [advanced, setAdvanced] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -142,6 +143,10 @@ export function ProviderForm({
       ? compactTokens(endpoint.contextWindow)
       : null;
   const typedContext = contextWindow.trim() ? Number(contextWindow) : null;
+  // Blanking a window the user set earlier is a deliberate clear, so it must send
+  // an explicit null; sending nothing would leave the stored number in place and
+  // the field could never be emptied.
+  const cleared = typedContext === null && hadTypedContext;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -200,11 +205,14 @@ export function ProviderForm({
           kind: builtin?.kind ?? kind,
           ...(builtin ? { builtinId: builtin.id } : { baseUrl }),
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-          // Only a field the user typed is claimed as theirs; a blank one leaves
-          // whatever the catalogue filled in place.
+          // A field the user typed is theirs, so its auto badge goes; a blank
+          // one leaves whatever the catalogue filled in place — unless they
+          // cleared a value they had set, which is an explicit clear.
           ...(typedContext !== null
             ? { contextWindow: typedContext, userSetFields: ["contextWindow"] as DetailField[] }
-            : {}),
+            : cleared
+              ? { contextWindow: null }
+              : {}),
         });
       } else {
         await addModelEndpoint({
