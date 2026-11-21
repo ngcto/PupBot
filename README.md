@@ -36,6 +36,15 @@ Generate the two secrets with `openssl rand -base64 32`.
 | `pnpm e2e` | Playwright: sign up → bot → computer → streamed reply → blocked composer |
 | `pnpm db:generate` / `db:migrate` / `db:seed` | Drizzle schema and data |
 | `pnpm catalog:sync` | fetch models.dev and upsert `model_catalog` |
+| `pnpm --filter @pupbot/mobile start` | Expo dev server for the phone app |
+
+## Mobile app
+
+`apps/mobile` is the iOS/Android client: Expo SDK 58 with expo-router, native screens against the
+same API — no webview. The HTTP client, the SSE reader and the chat reducer it uses live in
+`packages/api-client`, so the phone and the web app share one contract. See
+`apps/mobile/README.md` for the LAN address a device needs and what v1 deliberately leaves to the
+web app.
 
 ## Shape
 
