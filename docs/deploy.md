@@ -80,8 +80,19 @@ database works for reads but the integration tests time out on the round trip.
 
 That deployment predates everything merged into `main` since, so **the live URL still serves the
 product under its pre-rename name**: no real computers (#2), no avatar set from main (#3), no
-desktop shell (#5), no mobile client (#6), no marketing site (#7), and not the rename (#4).
-Marketing is a separate app by design and does not belong in this deployment either way.
+desktop shell (#5), no mobile client (#6), no model gateway or usage pricing (#1), and not the
+rename (#4). Marketing (#7) is a separate app by design and does not belong in this deployment
+either way.
+
+The hosted database needs its migrations run before or with that redeploy, and one entry there is a
+repair rather than a feature: `0007_model_gateway_backfill` completes the three migrations whose
+timestamps put them behind rows the database had already recorded, so a plain `pnpm db:migrate`
+against it leaves the schema complete. Run it with the session-mode connection string, since
+migrations take advisory locks:
+
+```bash
+MIGRATE_DATABASE_URL='<session-mode connection string>' pnpm db:migrate
+```
 
 The most visible consequence is the API mount. The live build answers on a mount path this branch
 no longer serves — `curl` the health line in [Verification](#verification) at each path to see
