@@ -2,6 +2,7 @@
 
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  ApiGatewayIcon,
   Cancel01Icon,
   ComputerIcon,
   InformationCircleIcon,
@@ -29,10 +30,12 @@ import {
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "../lib/auth-client.ts";
-import type { BotView, ShellUser } from "../lib/types.ts";
+import type { BotView, EndpointView, ShellUser, UsageView } from "../lib/types.ts";
+import { ProvidersPanel } from "./settings-providers.tsx";
 
 const NAV = [
   { value: "general", label: "General", icon: Settings01Icon },
+  { value: "providers", label: "Providers", icon: ApiGatewayIcon },
   { value: "computer", label: "Computer", icon: ComputerIcon },
   { value: "permissions", label: "Permissions", icon: Shield01Icon },
   { value: "vault", label: "Vault", icon: LockPasswordIcon },
@@ -45,11 +48,18 @@ export function SettingsDialog({
   onOpenChange,
   user,
   bots,
+  usage,
+  endpoints,
+  initialSection = "general",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   user: ShellUser;
   bots: BotView[];
+  usage: UsageView[];
+  endpoints: EndpointView[];
+  /** A link elsewhere in the app can land straight on a section. */
+  initialSection?: string;
 }) {
   const router = useRouter();
   const [sendWithCtrlEnter, setSendWithCtrlEnter] = useState(false);
@@ -59,7 +69,7 @@ export function SettingsDialog({
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
       <DialogContent width={1106} className="h-[756px] max-h-[92vh] overflow-hidden p-0" data-testid="settings-dialog">
-        <TabsRoot defaultValue="general" orientation="vertical" className="flex h-full">
+        <TabsRoot defaultValue={initialSection} orientation="vertical" className="flex h-full">
           <div className="flex w-[206px] flex-none flex-col bg-dialog-nav p-2">
             <p className="px-2 py-3 text-lg font-semibold text-ink">Settings</p>
             <TabsList className="flex flex-col items-stretch gap-0.5">
@@ -153,6 +163,11 @@ export function SettingsDialog({
               </Card>
             </TabsPanel>
 
+            <TabsPanel value="providers">
+              <DialogTitle className="text-xl font-semibold">Providers</DialogTitle>
+              <ProvidersPanel endpoints={endpoints} />
+            </TabsPanel>
+
             <TabsPanel value="computer">
               <DialogTitle className="text-xl font-semibold">Computer</DialogTitle>
               <GroupLabel>Providers</GroupLabel>
@@ -203,22 +218,45 @@ export function SettingsDialog({
 
             <TabsPanel value="usage">
               <DialogTitle className="text-xl font-semibold">Usage &amp; Billing</DialogTitle>
-              <GroupLabel>This period</GroupLabel>
+              <GroupLabel>All time</GroupLabel>
               <Card>
                 {bots.length === 0 ? (
                   <div className="px-4 py-3 text-body text-ink-muted">No bots yet.</div>
                 ) : (
-                  bots.map((bot) => (
-                    <div key={bot.id} className="flex items-center gap-3 px-4 py-3">
-                      <span className="w-[120px] truncate text-body text-ink">{bot.name}</span>
-                      <span className="h-1.5 flex-1 rounded-pill bg-raised-2">
-                        <span className="block h-full w-0 rounded-pill bg-ink-secondary" />
-                      </span>
-                      <span className="text-sm tabular text-ink-muted">0 tokens</span>
-                    </div>
-                  ))
+                  bots.map((bot) => {
+                    const row = usage.find((entry) => entry.botId === bot.id);
+                    const total = row ? row.inputTokens + row.outputTokens : 0;
+                    return (
+                      <div key={bot.id} className="flex items-center gap-3 px-4 py-3">
+                        <span className="w-[120px] truncate text-body text-ink">{bot.name}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm tabular text-ink-muted">
+                            {row
+                              ? `${total.toLocaleString()} tokens · ${row.calls} call${row.calls === 1 ? "" : "s"}`
+                              : "No calls yet"}
+                          </span>
+                          {row && row.unpricedCalls > 0 ? (
+                            <span className="block text-sm text-ink-faint">
+                              {row.unpricedCalls} unpriced (model not in models.dev)
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="text-sm tabular text-ink-secondary">
+                          {row?.costUsd !== null && row?.costUsd !== undefined
+                            ? `$${row.costUsd.toFixed(4)}`
+                            : row
+                              ? "cost unknown"
+                              : "—"}
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </Card>
+              <p className="mt-3 max-w-[520px] text-base text-ink-muted">
+                Priced from the models.dev catalogue on every usage event. A model with no catalogue entry
+                records its tokens with an unknown cost instead of guessing.
+              </p>
             </TabsPanel>
 
             <TabsPanel value="updates">

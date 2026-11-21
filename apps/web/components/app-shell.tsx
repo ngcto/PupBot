@@ -22,6 +22,12 @@ export function AppShell({ data }: { data: ShellData }) {
   const [settingsBotId, setSettingsBotId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState("general");
+
+  const openProviders = useCallback(() => {
+    setSettingsSection("providers");
+    setSettingsOpen(true);
+  }, []);
 
   const activeBot = data.activeBot;
   const settingsBot = useMemo(
@@ -102,6 +108,7 @@ export function AppShell({ data }: { data: ShellData }) {
           initialMessages={data.messages}
           activeRunId={data.activeRunId}
           onGiveComputer={onGiveComputer}
+          onManageProviders={openProviders}
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center justify-center bg-canvas">
@@ -121,7 +128,12 @@ export function AppShell({ data }: { data: ShellData }) {
         <Rail bot={activeBot} onClose={() => setRailOpen(false)} onConnect={onGiveComputer} />
       ) : null}
 
-      <CreateBotDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateBotDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        endpoints={data.endpoints}
+        onManageProviders={openProviders}
+      />
       <PrimaryBotDialog open={primaryOpen} onOpenChange={setPrimaryOpen} bots={data.bots} />
       <SearchPalette
         open={paletteOpen}
@@ -131,13 +143,23 @@ export function AppShell({ data }: { data: ShellData }) {
         onCreateBot={() => setCreateOpen(true)}
         onOpenSettings={(botId) => setSettingsBotId(botId)}
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={data.user} bots={data.bots} />
+      <SettingsDialog
+        key={settingsSection}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        user={data.user}
+        bots={data.bots}
+        usage={data.usage}
+        endpoints={data.endpoints}
+        initialSection={settingsSection}
+      />
       {settingsBot ? (
         <BotSettingsDialog
           bot={settingsBot}
           endpoints={data.endpoints}
           open={Boolean(settingsBotId)}
           onOpenChange={(open) => setSettingsBotId(open ? settingsBotId : null)}
+          onManageProviders={openProviders}
         />
       ) : null}
     </div>

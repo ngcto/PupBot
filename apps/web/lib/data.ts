@@ -8,9 +8,19 @@ import {
   message,
   modelEndpoint,
   run,
+  usageEvent,
 } from "@terabot/db";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
-import type { BotView, EndpointView, MessageView, ShellData, ShellUser, SectionView } from "./types.ts";
+import { providerHintForBaseUrl } from "@terabot/providers";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import type {
+  BotView,
+  EndpointView,
+  MessageView,
+  SectionView,
+  ShellData,
+  ShellUser,
+  UsageView,
+} from "./types.ts";
 
 function botQuery(workspaceId: string) {
   const db = database();
@@ -129,18 +139,64 @@ export async function loadShellData(input: {
     activeRunId = runRows[0]?.id ?? null;
   }
 
-  const endpoints: EndpointView[] = await db
+  const endpointRows = await db
     .select({
       id: modelEndpoint.id,
       label: modelEndpoint.label,
       kind: modelEndpoint.kind,
+      // Settings > Providers shows this so a custom gateway is identifiable; it
+      // is the workspace's own row, never another tenant's.
+      baseUrl: modelEndpoint.baseUrl,
       modelId: modelEndpoint.modelId,
       contextWindow: modelEndpoint.contextWindow,
       catalogMatch: modelEndpoint.catalogMatch,
+      modelList: modelEndpoint.modelList,
+      // Only whether a key exists. The key never leaves the server.
+      hasKey: sql<boolean>`${modelEndpoint.encryptedKey} is not null`,
     })
     .from(modelEndpoint)
     .where(eq(modelEndpoint.workspaceId, input.workspaceId))
     .orderBy(asc(modelEndpoint.createdAt));
+
+  const endpoints: EndpointView[] = endpointRows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    kind: row.kind,
+    baseUrl: row.baseUrl,
+    modelId: row.modelId,
+    contextWindow: row.contextWindow,
+    catalogMatch: row.catalogMatch,
+    modelCount: row.modelList?.length ?? null,
+    hasKey: row.hasKey,
+    providerHint: providerHintForBaseUrl(row.baseUrl) ?? null,
+  }));
+
+  const usage: UsageView[] = [];
+  if (bots.length > 0) {
+    const usageRows = await db
+      .select({
+        botId: usageEvent.botId,
+        inputTokens: sql<string>`coalesce(sum(${usageEvent.inputTokens}), 0)`,
+        outputTokens: sql<string>`coalesce(sum(${usageEvent.outputTokens}), 0)`,
+        cost: sql<string | null>`sum(${usageEvent.cost})`,
+        calls: sql<string>`count(*)`,
+        unpricedCalls: sql<string>`count(*) filter (where ${usageEvent.cost} is null)`,
+      })
+      .from(usageEvent)
+      .where(inArray(usageEvent.botId, bots.map((bot) => bot.id)))
+      .groupBy(usageEvent.botId);
+
+    for (const row of usageRows) {
+      usage.push({
+        botId: row.botId,
+        inputTokens: Number(row.inputTokens),
+        outputTokens: Number(row.outputTokens),
+        costUsd: row.cost === null ? null : Number(row.cost),
+        calls: Number(row.calls),
+        unpricedCalls: Number(row.unpricedCalls),
+      });
+    }
+  }
 
   return {
     user: input.user,
@@ -151,5 +207,6 @@ export async function loadShellData(input: {
     messages,
     activeRunId,
     endpoints,
+    usage,
   };
 }
