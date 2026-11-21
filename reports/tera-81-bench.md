@@ -7,8 +7,10 @@
 > index listed only `codemode`. Every code-mode number here — arm C's 5/11, the whole disclosure
 > curve, the `names` and `lazy` findings — measures a wrapper inside a wrapper, not the surface.
 >
-> **Do not quote a code-mode arm from this document.** Arm B's numbers stand: it was never wrapped.
-> The fix, what it invalidates, and the partial re-run are in
+> **Do not quote a code-mode arm from this document.** Arm B's numbers here were taken on
+> `claude-sonnet-5-5` and stand: it was never wrapped. The code-mode table has been **re-measured on
+> `claude-haiku-5-5` and is in [`reports/tera-81-bench-haiku.md`](tera-81-bench-haiku.md)** — that is
+> the table to read, and it reaches the opposite conclusion on tokens. The defect is written up in
 > [`reports/ngs-85-refusals.md`](ngs-85-refusals.md).
 
 **Read this first: the desktop and browser tools in every arm were deterministic fixtures of
