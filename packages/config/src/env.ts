@@ -36,7 +36,7 @@ const serverSchema = z.object({
   // Vercel AI Gateway: OpenAI-compatible, keyless on a Vercel deployment
   // because the deployment's OIDC token authenticates each request.
   AI_GATEWAY_BASE_URL: url.default("https://ai-gateway.vercel.sh/v1"),
-  AI_GATEWAY_MODEL: z.string().min(1).default("nvidia/nemotron-3.5-lightning-free"),
+  AI_GATEWAY_MODEL: z.string().min(1).default("recursive/flint-v1.0"),
   AI_GATEWAY_API_KEY: optionalSecret,
   /** Injected by Vercel at runtime; auto-refreshed, never committed. */
   VERCEL_OIDC_TOKEN: optionalSecret,
