@@ -27,11 +27,29 @@ model, same temperature, same seed, same step cap.
 | **Tokens** | `/v1/messages/count_tokens` on the exact request, summed across the run's turns | yes |
 | **Turns** | Model calls per run, counted by the driver | yes |
 | **Cost** | tokens × the endpoint's published per-million rates | yes |
-| **Wall clock** | monotonic clock around each run, on a **large** machine | only on a large box |
+| **Wall clock** | monotonic clock around each run on a **large** machine, reported as **two** numbers | only on a large box |
 
-Wall clock is the column that lies. On a small machine the tool latency dominates and the number
-looks like evidence while measuring the box. It is measured on the large machine the Captain frees
-or it is left out with a reason — never filled in from a small box.
+Wall clock is the column that lies, and it lies in two ways at once.
+
+**First, it measures the box.** On a small machine the tool latency dominates and the number looks
+like evidence while measuring the machine. It is measured on the large machine or it is left out
+with a reason — never filled in from a small box.
+
+**Second, it is ambiguous unless it says which clock it is.** So the table carries **two**
+wall-clock columns and never a single one:
+
+| Column | Starts | Stops | Contains |
+|---|---|---|---|
+| **Model time** | when the request is sent | when the last token of the reply arrives | model latency only |
+| **Wall clock, inclusive** | before the first model call | after the last tool result is observed | model time **plus** tool time plus local compute |
+
+The distinction decides how the table is read. An arm making twenty in-box calls and an arm making
+twenty model turns have wildly different totals, and the interesting quantity is the *difference*
+between the two columns: it is what the tools actually cost. A single "wall clock" number invites
+the reader to assume whichever interpretation makes their preferred arm look right.
+
+So: **`wall_ms_model` and `wall_ms_inclusive`, both always present, both from the same monotonic
+clock in the same process.** A run that reports one without the other is not a result.
 
 One column cannot be measured at all: **image tokens**. This endpoint accepts image blocks and does
 not forward their pixels, so a screenshot's token cost does not track its size or content. Any task
@@ -104,7 +122,9 @@ should not be quoted as evidence.
 
 ## What this benchmark cannot tell you
 
-- **Nothing about wall clock on a small machine.** See above.
+- **Nothing about wall clock on a small machine.** See above. And nothing from a single wall-clock
+  number: the table carries `wall_ms_model` and `wall_ms_inclusive`, and the difference between
+  them is the only honest statement about what tools cost in time.
 - **Nothing about image cost.** Unmeasurable on this endpoint.
 - **Nothing about the table/spreadsheet case.** No arm has the tool. If that case matters to the
   product, it needs a data tool first, and that is a separate decision from code mode.
