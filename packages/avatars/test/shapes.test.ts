@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateAvatar } from "open-bot-avatar";
-import { SHAPES, DEFAULT_SHAPE, GLYPH_TILT_DEG, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
+import { SHAPES, DEFAULT_SHAPE, EYE_FIT, eyeCapsules, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
 
 const CONTRACT_ORDER = [
   "mug",
@@ -106,14 +106,40 @@ describe("avatar registry", () => {
     }
   });
 
-  it("leans every glyph once, counter-clockwise, about the middle of the frame", () => {
+  it("turns no glyph as a whole: the lean lives in the eyes", () => {
     for (const id of CONTRACT_ORDER) {
       const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
-      const tilts = svg.match(/rotate\(/g) ?? [];
-      expect(tilts, id).toHaveLength(1);
-      expect(svg).toContain(`<g transform="rotate(${GLYPH_TILT_DEG} 50 50)">`);
+      expect(svg, id).not.toContain("rotate(12 50 50)");
+      expect(svg, id).not.toContain("rotate(-12 50 50)");
+      expect(svg, id).not.toContain("rotate(0 50 50)");
     }
-    expect(GLYPH_TILT_DEG).toBe(-12);
+  });
+
+  it.each(CONTRACT_ORDER)("%s draws its own eye pair and leaves the package's out", (id) => {
+    const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
+    const ink = svg.match(/fill="#151515"/g) ?? [];
+    expect(ink).toHaveLength(2);
+    expect((svg.match(/<rect[^>]*fill="#151515"/g) ?? [])).toHaveLength(2);
+  });
+
+  it("builds the eye pair the reference draws: a fat low near eye, a thin high far eye, both slanted", () => {
+    for (const id of CONTRACT_ORDER) {
+      const [near, far] = eyeCapsules(shapeDefinition(id) as never);
+      expect(near.width, id).toBeGreaterThan(far.width * 1.2);
+      expect(near.width / far.width, id).toBeLessThan(1.45);
+      expect(near.length / near.width, id).toBeGreaterThan(1.8);
+      expect(far.length / far.width, id).toBeGreaterThan(2.2);
+      expect(near.cx, id).toBeLessThan(far.cx);
+      expect(near.cy, id).toBeGreaterThan(far.cy);
+      for (const capsule of [near, far]) {
+        expect(capsule.angle).toBeGreaterThan(58);
+        expect(capsule.angle).toBeLessThan(62);
+      }
+    }
+  });
+
+  it("keeps the fit table to glyphs that need it", () => {
+    expect(Object.keys(EYE_FIT).sort()).toEqual(["rocket", "witch-hat"]);
   });
 
   it("leaves eye colour and depth to the package", () => {

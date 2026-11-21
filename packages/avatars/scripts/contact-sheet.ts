@@ -57,7 +57,7 @@ const html = `<!doctype html>
 <main>
   <h1>PupBot avatars</h1>
   <p class="lead">${SHAPES.length} starter avatars from <code>open-bot-avatar</code> 0.3.0, in our
-  palette. The definitions, the eyes and the depth are the package's; the colours are ours.</p>
+  palette. The bodies and their depth are the package's; the eye pair and the colours are ours.</p>
   <h2>Shapes at 96px</h2>
   <div class="grid">${shapeRows}</div>
   <h2>Sizes ${SIZES.join(" / ")}</h2>

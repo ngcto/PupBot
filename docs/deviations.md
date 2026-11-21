@@ -18,22 +18,26 @@ five starter avatars taken from the package with `getExample` (`mug`, `lightbulb
   the gallery files live in the upstream repository and are not on npm. They are copied in unchanged
   (MIT, Copyright (c) 2026 Dominik Scholz) with `gallery/NOTICE.md` recording provenance and how to
   re-vendor.
-- **Eyes, depth and ink are the definition's.** Each definition carries its own eye placement; we pass
-  only colour, size, `motion: "idle"`, `time: 0` and `reducedMotion: true`, so nothing of ours
-  overrides the package's geometry, depth (its default 6) or `#151515` ink.
-- **The glyph is turned 12° counter-clockwise inside its frame.** The reference set leans to the left,
-  so `render.ts` wraps the drawn groups in one `rotate(-12 50 50)` about the middle of the 0..100 box —
-  the definitions themselves stay exactly the package's, so a re-vendor is still mechanical, and the
-  title and defs are untouched. The angle is measured from Ng's screenshot: its trace, rotation-matched
-  against the levelled revision of the same trace, comes out at 12.25° for `square`, 14° for `hexagon`,
-  11.25° for `cloud` and `pill`, 10° for `house` and 5–8° for the lobed shapes; the clean-edged shapes
-  cluster at 11–14° and the median of the eight is 11.6°, so 12° is the dominant lean. The first cut
-  applied the sign at `+12` and leaned them right; the matching had returned the magnitude only. Every
-  glyph still fits its frame at that angle: the widest drawn extent is `witch-hat` at 48.44 units from
-  the middle of a 50-unit half box, then `bull` 47.5, `sprout` 46.88, `camera` 45 — none needed
-  shrinking. Rotation preserves each glyph's distance from the middle, so `sprout` (50.33) and
-  `witch-hat` (52.05) reach past a 50-unit circle whether they are turned or not; the app draws no ring,
-  so nothing clips.
+- **Depth, body and ink are the definition's; the eye pair is ours.** We pass colour, size,
+  `motion: "idle"`, `time: 0` and `reducedMotion: true`, so the body and its depth (the package's
+  default 6) are untouched, and the ink stays `#151515`. The package draws two level vertical ovals;
+  Ng's reference draws a different pair, so `render.ts` takes those two groups out and draws the pair
+  itself in the same place, under the same matrix, in `eyes.ts`. **The definitions are still exactly
+  the package's**, which is what matters for a re-vendor.
+- **The eye pair is the lean.** The reference's "looking up and to the right" is not a rotated body —
+  each silhouette in the reference already carries its own orientation in the artwork, a circle being
+  a circle — it is the pair: a fat, low near capsule and a thin, high far one, both slanted from
+  upper-left to lower-right, receding up and right. Measured off the Grok picker cells and the chat
+  mascot: capsules 0.52R and 0.50R long (R = the glyph's inscribed radius), 0.27R and 0.21R thick,
+  60° below horizontal, near eye's centre 0.21R left and 0.05R below the pair's midpoint, far eye
+  mirrored. Placed with the pair's midpoint 0.52R right of the definition's own eye anchor and 0.06R
+  below it, which reproduces the reference's proportions across our 14: pair box 0.344 of the body's
+  width by 0.255 of its height against the reference's 0.350 by 0.252, at 0.337 from the body's top
+  against 0.339, 6.4% of body area against 6.6%. `rocket` and `witch-hat` carry the pair 0.16R
+  further left to stay inside their own outline; no glyph needed a smaller pair.
+- **No synthetic rotation.** An earlier cut turned every glyph 12°; with the eye pair in place the
+  reference comparison reads worse turned than level, so the rotation is gone and the frame is the
+  glyph's own.
 - **Colour is ours.** The eleven palette ids and `deriveAccent()` are unchanged; the default colour is
   `ember` (`#f9670e`), the palette's nearest entry to the package's starter orange `#ff6a1a`, and the
   contact sheet shows all 14 in both.
