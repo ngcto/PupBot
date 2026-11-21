@@ -350,3 +350,33 @@ export async function billingSummary(userId: string, env: ServerEnv = serverEnv(
 }
 
 export { PolarError };
+
+/**
+ * Strip trailing slashes without a regex. `BETTER_AUTH_URL` is configuration, so
+ * a backtracking pattern over it is an unnecessary ReDoS surface for a job a
+ * simple loop does exactly.
+ */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
+/**
+ * A signed link into Polar's customer portal for the account's own customer.
+ *
+ * This is the repair action for a subscription that is `past_due` or `unpaid`:
+ * the card that failed is updated there, not by buying a second plan.
+ */
+export async function customerPortalUrl(userId: string, env: ServerEnv = serverEnv()): Promise<string | null> {
+  if (!env.POLAR_ACCESS_TOKEN) return null;
+  const rows = await database()
+    .select({ polarCustomerId: billingSubscription.polarCustomerId })
+    .from(billingSubscription)
+    .where(eq(billingSubscription.userId, userId))
+    .limit(1);
+  const customerId = rows[0]?.polarCustomerId;
+  if (!customerId) return null;
+  const returnUrl = `${trimTrailingSlashes(env.BETTER_AUTH_URL)}/settings/billing`;
+  return client(env).customerPortal(customerId, returnUrl);
+}

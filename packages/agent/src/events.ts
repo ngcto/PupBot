@@ -34,7 +34,15 @@ export type RunStreamEvent =
       };
     }
   | { type: "message.completed"; payload: { messageId: string; text: string; status: "complete" | "error" } }
-  | { type: "run.completed"; payload: { status: "done" | "canceled" | "error"; error?: string } };
+  | {
+      type: "run.completed";
+      /**
+       * `gated` names the refusal that produced this reply instead of model
+       * output, so a client can tell an answer from a gate notice without
+       * parsing prose.
+       */
+      payload: { status: "done" | "canceled" | "error"; error?: string; gated?: string };
+    };
 
 export interface RunEventRecord {
   runId: string;

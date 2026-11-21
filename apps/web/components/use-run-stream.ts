@@ -188,7 +188,24 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
         });
 
         if (!response.ok) {
-          const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+          const detail = (await response.json().catch(() => null)) as {
+            error?: string;
+            gate?: { code: string; situation: string; resolution: string };
+          } | null;
+          // A gate refusal is an answer, not a failure: it arrives as the bot's
+          // own reply so the thread explains the situation the same way the run
+          // would, and the composer keeps the draft.
+          if (response.status === 402 && detail?.gate) {
+            appendMessage({
+              id: `gate-${detail.gate.code}-${Date.now()}`,
+              role: "assistant",
+              parts: [{ type: "text", text: `${detail.gate.situation} ${detail.gate.resolution}` }],
+              status: "complete",
+              createdAt: new Date().toISOString(),
+              runId: null,
+            });
+            return false;
+          }
           setError(
             detail?.error === "unauthorized"
               ? "Your session expired. Sign in again."

@@ -58,6 +58,10 @@ const subscriptionSchema = z.object({
   cancel_at_period_end: z.boolean().optional(),
 });
 
+const customerSessionSchema = z.object({
+  customer_portal_url: z.string().url(),
+});
+
 const customerStateSchema = z.object({
   id: z.string().min(1),
   active_subscriptions: z.array(subscriptionSchema).default([]),
@@ -114,6 +118,23 @@ export function createPolarClient(options: PolarClientOptions) {
         throw new PolarError("Polar returned a checkout without a url", { code: "polar_bad_response" });
       }
       return { id: parsed.data.id, url: parsed.data.url };
+    },
+
+    /**
+     * A signed link into Polar's customer portal, where a past-due payment is
+     * fixed. Without this, "update your payment method" is advice with no
+     * action behind it.
+     */
+    async customerPortal(customerId: string, returnUrl: string): Promise<string> {
+      const raw = await request("/customer-sessions/", {
+        method: "POST",
+        body: JSON.stringify({ customer_id: customerId, return_url: returnUrl }),
+      });
+      const parsed = customerSessionSchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new PolarError("Polar returned a session without a portal url", { code: "polar_bad_response" });
+      }
+      return parsed.data.customer_portal_url;
     },
 
     /** The customer's current subscriptions, by our own user id. */

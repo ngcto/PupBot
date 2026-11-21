@@ -16,7 +16,8 @@ import type { Database, MessagePart } from "@terabot/db";
 import { gatewayCredential, serverEnv } from "@terabot/config";
 import { costAsDecimal, costOf, endpointConfigForRow, providerHintForBaseUrl } from "@terabot/providers";
 import type { ModelEndpointConfig, ModelGateway, ModelPricing } from "@terabot/providers";
-import { buildChatContext } from "./context.ts";
+import { canSendMessages } from "@terabot/billing";
+import { buildChatContext, type RunNotice } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
 import { createToolRegistry, schemasOf, summariseToolError } from "./tools.ts";
@@ -42,6 +43,15 @@ export interface ExecuteRunOptions {
   db: Database;
   gateway: ModelGateway;
   runId: string;
+  /**
+   * The owner of the bot this run belongs to, resolved by the caller that
+   * scoped the request. The run refuses to start a paid action for an account
+   * without access even when no UI ever asked — this is the last enforcement
+   * point, covering the inline path and the worker alike.
+   */
+  userId?: string;
+  /** Overridable for tests; defaults to the real gate. */
+  gate?: (userId: string) => Promise<{ allowed: boolean; notice?: RunNotice | null }>;
   /** How often the in-flight run checks `run.abort_requested`. */
   abortPollMs?: number;
   signal?: AbortSignal;
@@ -62,6 +72,12 @@ export interface ExecuteRunOptions {
    */
   tools?: RunTool[];
   now?: () => Date;
+  /**
+   * Refusals the person must hear about through the bot rather than through a
+   * rendered card. The run carries them into the system message, so the model
+   * explains the situation and the fix in its own words.
+   */
+  notices?: RunNotice[];
 }
 
 /** A ceiling on tool steps per message, so a model in a loop cannot bill forever. */
@@ -86,6 +102,8 @@ export interface RunOutcome {
   assistantMessageId: string | null;
   text: string;
   error?: string;
+  /** Set when the reply is a gate refusal rather than model output. */
+  gated?: string;
 }
 
 const CONTEXT_LIMIT = 40;
@@ -208,6 +226,15 @@ async function defaultResolveEndpoint(
 }
 
 /**
+ * The default access check. Kept local to the run so `packages/agent` does not
+ * import the web app, and so a test can substitute it without a database.
+ */
+async function defaultGate(userId: string): Promise<{ allowed: boolean; notice?: RunNotice | null }> {
+  const access = await canSendMessages(userId);
+  return { allowed: access.allowed, notice: access.notice };
+}
+
+/**
  * One run: assemble context, stream the model through the gateway, and append
  * every delta to `run_event` so a reconnect replays what it missed. Aborting is
  * cooperative: `abort_requested` flips the signal, the partial text is kept as a
@@ -236,12 +263,20 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     return { status: row.run.status, assistantMessageId: null, text: "" };
   }
 
+  // The last gate: whatever path got here (a server action, the inline runner in
+  // a serverless function, the worker), an account without access does not get a
+  // paid run. The refusal is relayed by the bot, so the thread still answers.
+  const gateRefusal = options.userId ? await resolveGateRefusal(options, options.userId) : null;
+
   if (row.run.abortRequested) {
     await events.append({ type: "run.completed", payload: { status: "canceled" } });
     await setRunTerminal(db, { runId, status: "canceled", finishedAt: now() });
     return { status: "canceled", assistantMessageId: null, text: "" };
   }
 
+  // An account that may not run gets its answer from the bot, not a blank
+  // thread: the notice becomes the assistant message, and the run is `done`
+  // because the person was actually told what happened and what fixes it.
   await db
     .update(runTable)
     .set({ status: "running", startedAt: row.run.startedAt ?? now() })
@@ -297,6 +332,18 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
 
   await events.append({ type: "run.started", payload: { runId, messageId: assistantMessageId } });
 
+  // A gated account still gets an answer, and a redelivered job must not leave a
+  // second one: the assistant message is the same one the ordinary path reuses.
+  if (gateRefusal) {
+    const text = `${gateRefusal.situation} ${gateRefusal.resolution}`;
+    await finishMessage(db, { messageId: assistantMessageId, text, status: "complete" });
+    await events.append({ type: "text_delta", payload: { text } });
+    await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text, status: "complete" } });
+    await events.append({ type: "run.completed", payload: { status: "done", gated: gateRefusal.code } });
+    await setRunTerminal(db, { runId, status: "done", finishedAt: now() });
+    return { status: "done", assistantMessageId, text, gated: gateRefusal.code };
+  }
+
   if (!resolved) {
     const reason = "No model endpoint is connected to this bot.";
     await finishMessage(db, { messageId: assistantMessageId, text: "", status: "error" });
@@ -305,30 +352,6 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     await setRunTerminal(db, { runId, status: "error", error: reason, finishedAt: now() });
     return { status: "error", assistantMessageId, text: "", error: reason };
   }
-
-  const context = buildChatContext(row.bot, history);
-  // The conversation the loop grows: system prompt and transcript, then each
-  // assistant tool-call turn and its results.
-  const conversation: ChatMessage[] = [...context];
-  /*
-   * The computer is offered as a tool, not woken up front: the machine is
-   * obtained inside `run_command`, so a bot that only chats never provisions
-   * one. That is the whole point of the lazy lifecycle, and it is why no step
-   * label says "Waking your computer" before the model has asked for anything.
-   */
-  const runTools = [
-    ...(options.tools ?? []),
-    ...(options.computer ? [runCommandTool(options.computer, row.bot.id)] : []),
-  ];
-
-  // Added after the run's own tools so `run_command` is in the index code mode
-  // builds from, rather than being the one tool a program cannot call.
-  //
-  // A run that already has a `codemode` is not wrapped again: the registry keys by
-  // name, so two would collapse into one and the model would read a shell whose index
-  // lists only itself. See `isCodeMode`.
-  const code = isCodeMode(runTools) ? null : codemodeTool(runTools);
-  const registry = createToolRegistry(code ? [...runTools, code] : runTools);
 
   const controller = new AbortController();
   const onExternalAbort = () => controller.abort();
@@ -391,7 +414,40 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     }
   };
 
+  /** Returns the notice to relay when the account may not run, else null. */
+  async function resolveGateRefusal(opts: ExecuteRunOptions, userId: string): Promise<RunNotice | null> {
+    const check = opts.gate ?? defaultGate;
+    const result = await check(userId);
+    if (result.allowed) return null;
+    return result.notice ?? null;
+  }
+
   try {
+    // Built here rather than earlier so a notice can be added by anything the
+    // run does before the first token, without a second context build.
+    const context = buildChatContext(row.bot, history, options.notices ?? []);
+    // The conversation the loop grows: system prompt and transcript, then each
+    // assistant tool-call turn and its results.
+    const conversation: ChatMessage[] = [...context];
+    /*
+     * The computer is offered as a tool, not woken up front: the machine is
+     * obtained inside `run_command`, so a bot that only chats never provisions
+     * one. That is the whole point of the lazy lifecycle, and it is why no step
+     * label says "Waking your computer" before the model has asked for anything.
+     */
+    const runTools = [
+      ...(options.tools ?? []),
+      ...(options.computer ? [runCommandTool(options.computer, row.bot.id)] : []),
+    ];
+
+    // Added after the run's own tools so `run_command` is in the index code mode
+    // builds from, rather than being the one tool a program cannot call.
+    // A run that already has a `codemode` is not wrapped again: the registry keys by
+    // name, so two would collapse into one and the model would read a shell whose index
+    // lists only itself. See `isCodeMode`.
+    const code = isCodeMode(runTools) ? null : codemodeTool(runTools);
+    const registry = createToolRegistry(code ? [...runTools, code] : runTools);
+
     rotate = setInterval(() => {
       if (sawToken || controller.signal.aborted) return;
       void events

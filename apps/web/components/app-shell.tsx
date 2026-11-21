@@ -65,7 +65,12 @@ export function AppShell({ data }: { data: ShellData }) {
   const onGiveComputer = useCallback(async () => {
     if (!activeBot) return;
     try {
-      await giveComputer(activeBot.id);
+      const result = await giveComputer(activeBot.id);
+      // A refusal comes back as a value with its reason; saying it out loud is
+      // the whole point, so it is surfaced rather than swallowed.
+      if (result && "ok" in result && result.ok === false) {
+        toast(`${result.notice.situation} ${result.notice.resolution}`);
+      }
       router.refresh();
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not connect a computer.");

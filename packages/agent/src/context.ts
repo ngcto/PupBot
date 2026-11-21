@@ -6,6 +6,23 @@ export interface ContextBot {
   instructions: string;
 }
 
+/**
+ * A refusal the harness could not resolve on its own, phrased once as
+ * instructions so the bot relays it instead of the UI rendering it.
+ *
+ * The billing gate is the first producer: see `describeGate` in
+ * `@terabot/billing`. Anything else that must reach the person through the bot
+ * (a computer that cannot start for a reason the person must act on) passes a
+ * `GateNotice`-shaped object here rather than inventing its own wording.
+ */
+export interface RunNotice {
+  code: string;
+  /** What is true, in one sentence. */
+  situation: string;
+  /** What the person can do about it. */
+  resolution: string;
+}
+
 export interface ContextMessage {
   role: "user" | "assistant" | "system";
   parts: MessagePart[];
@@ -38,8 +55,25 @@ function partText(parts: MessagePart[]): string {
     .trim();
 }
 
+/**
+ * The instruction that makes a refusal land as a normal reply. Exported so a
+ * test can assert the wording exists once, and so sibling work (the computer
+ * lifecycle) adds to this list instead of writing a second phrasing.
+ */
+export function noticeInstruction(notice: RunNotice): string {
+  return [
+    `A gated action was refused: ${notice.situation}`,
+    "Tell the person this plainly and in your own words as part of your reply, and do not claim you did it.",
+    `What fixes it: ${notice.resolution}`,
+  ].join(" ");
+}
+
 /** Bot instructions first, then the tail of the transcript. */
-export function buildChatContext(bot: ContextBot, messages: ContextMessage[]): ChatMessage[] {
+export function buildChatContext(
+  bot: ContextBot,
+  messages: ContextMessage[],
+  notices: RunNotice[] = [],
+): ChatMessage[] {
   const usable = messages
     .filter((message) => message.status !== "error" && message.role !== "system")
     .slice(-MAX_CONTEXT_MESSAGES);
@@ -54,5 +88,9 @@ export function buildChatContext(bot: ContextBot, messages: ContextMessage[]): C
     else transcript.push({ role, content });
   }
 
-  return [{ role: "system", content: bot.instructions.trim() || defaultInstructions(bot) }, ...transcript];
+  const instructions = bot.instructions.trim() || defaultInstructions(bot);
+  // Notices go last in the system message so they outrank the bot's own
+  // instructions: a refusal is about this turn, not about who the bot is.
+  const content = notices.length > 0 ? [instructions, ...notices.map(noticeInstruction)].join("\n\n") : instructions;
+  return [{ role: "system", content }, ...transcript];
 }

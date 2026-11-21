@@ -19,6 +19,7 @@
     "@hono/node-server": "^2.1.9",
     "@terabot/agent": "workspace:*",
     "@terabot/avatars": "workspace:*",
+    "@terabot/billing": "workspace:*",
     "@terabot/computers": "workspace:*",
     "@terabot/config": "workspace:*",
     "@terabot/cua": "workspace:*",
