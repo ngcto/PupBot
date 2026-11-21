@@ -44,13 +44,33 @@ async function managedRows(db: Database) {
 }
 
 describe("managed computer accounts against Postgres", () => {
-  it("does nothing at all when the deployment configured no key", async () => {
+  it("creates nothing when the deployment configured no key, and drains what is left", async () => {
     await inRolledBackTransaction(async (db) => {
-      const before = await managedRows(db);
+      await db.delete(computerAccount).where(eq(computerAccount.managed, true));
+      await ensureManagedComputerAccounts({ INSTABOX_API_KEY: "ibx-test-key" }, { db });
+
       const result = await ensureManagedComputerAccounts({}, { db });
       expect(result.ensured).toEqual([]);
       expect(result.absent).toEqual(["instabox", "agent37"]);
-      expect(await managedRows(db)).toHaveLength(before.length);
+
+      // The row stays, because the boxes on it still exist and reconcile needs
+      // the credential to find them; draining is what stops it serving bots.
+      const rows = await managedRows(db);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("draining");
+    });
+  });
+
+  it("brings a managed account back when the key returns", async () => {
+    await inRolledBackTransaction(async (db) => {
+      await db.delete(computerAccount).where(eq(computerAccount.managed, true));
+      await ensureManagedComputerAccounts({ INSTABOX_API_KEY: "ibx-test-key" }, { db });
+      await ensureManagedComputerAccounts({}, { db });
+      await ensureManagedComputerAccounts({ INSTABOX_API_KEY: "ibx-test-key" }, { db });
+
+      const rows = await managedRows(db);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("active");
     });
   });
 

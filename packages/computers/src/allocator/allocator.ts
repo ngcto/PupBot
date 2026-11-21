@@ -75,7 +75,13 @@ export class ComputerAllocator {
   readonly #now: () => Date;
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #log: (message: string) => void;
-  readonly #providerCache = new Map<string, ComputerProvider>();
+  /**
+   * Built providers, keyed by account id. The credential is part of the key: a
+   * rotated key gets a fresh provider, because a provider holds the key it was
+   * built with and a worker that kept the old one would fail every later call
+   * even though the row was updated successfully.
+   */
+  readonly #providerCache = new Map<string, { credential: string; provider: ComputerProvider }>();
   readonly #botLocks = new Map<string, Promise<unknown>>();
   readonly #boxLocks = new Map<string, Promise<unknown>>();
   readonly #accountLocks = new Map<string, Promise<unknown>>();
@@ -184,14 +190,26 @@ export class ComputerAllocator {
       const attempt = await this.#provision(account, provider, botId);
       if (!attempt.ok) return attempt;
 
-      const computer = await this.store.createComputer({
-        accountId: account.id,
-        provider: provider.name,
-        externalId: attempt.ref.id,
-        status: "awake",
-        metadata: { [OWNER_TAG]: "1", botId },
-        lastUsedAt: this.#now().toISOString(),
-      });
+      let computer: ComputerRecord;
+      try {
+        computer = await this.store.createComputer({
+          accountId: account.id,
+          provider: provider.name,
+          externalId: attempt.ref.id,
+          status: "awake",
+          metadata: { [OWNER_TAG]: "1", botId },
+          lastUsedAt: this.#now().toISOString(),
+        });
+      } catch (error) {
+        // The account row was removed while the provider was creating, so this
+        // insert has no account to hang off. The machine exists and nothing
+        // would ever find it by account again, so destroy it here: a failed
+        // bookkeeping insert must not leave a box billing.
+        await provider.destroy(attempt.ref).catch((next: unknown) => {
+          this.#log(`orphaned ${attempt.ref.id} could not be destroyed: ${asProviderError(next).code}`);
+        });
+        throw error;
+      }
       await this.store.bindComputer(botId, computer);
       return { ok: true as const, computerId: computer.id };
     });
@@ -484,7 +502,20 @@ export class ComputerAllocator {
         }
 
         const botId = box.metadata?.botId;
-        if (botId && (await this.store.botExists(botId))) {
+        // Adoption hands a machine to a bot, so the bot's owner must be somebody
+        // this account may serve. A user's key is for that user's own bots; a
+        // managed account and one with no recorded owner serve anyone. Without
+        // this, a bot on a shared key could label a machine with another bot's
+        // id and have reconcile bind it across users.
+        //
+        // An owner that cannot be resolved is allowed through rather than
+        // refused: the store says that happens, and refusing would strand every
+        // box whose bot row is being created as reconcile runs. The case worth
+        // stopping is two *different* known owners.
+        const botOwner = botId ? await this.store.botOwnerUserId(botId) : null;
+        const wrongOwner =
+          account.ownerUserId !== null && !account.managed && botOwner !== null && botOwner !== account.ownerUserId;
+        if (botId && !wrongOwner && (await this.store.botExists(botId))) {
           // Adoption books a row against this account, so it has to respect the
           // same capacity the provisioning path does. Without this a reconcile
           // can push an account past its capacity and starve every later bot.
@@ -828,9 +859,9 @@ export class ComputerAllocator {
 
   #provider(account: AccountRecord): ComputerProvider {
     const cached = this.#providerCache.get(account.id);
-    if (cached) return cached;
+    if (cached?.credential === account.encryptedCredential) return cached.provider;
     const provider = this.#providers(account);
-    this.#providerCache.set(account.id, provider);
+    this.#providerCache.set(account.id, { credential: account.encryptedCredential, provider });
     return provider;
   }
 

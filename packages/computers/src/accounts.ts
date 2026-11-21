@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "@terabot/db";
 import { computerAccount, database, encryptSecret, newId } from "@terabot/db";
 
@@ -90,12 +90,8 @@ export async function ensureManagedComputerAccounts(
   options: { db?: Database } = {},
 ): Promise<EnsureManagedAccountsResult> {
   const specs = managedProviderSpecs(env);
-  const result: EnsureManagedAccountsResult = {
-    ensured: [],
-    created: [],
-    absent: MANAGED_PROVIDERS.filter((provider) => !specs.some((spec) => spec.provider === provider)),
-  };
-  if (specs.length === 0) return result;
+  const absent = MANAGED_PROVIDERS.filter((provider) => !specs.some((spec) => spec.provider === provider));
+  const result: EnsureManagedAccountsResult = { ensured: [], created: [], absent };
 
   const db = options.db ?? database();
 
@@ -124,13 +120,35 @@ export async function ensureManagedComputerAccounts(
         set: {
           capacity: spec.capacity,
           encryptedCredential: sql`excluded.encrypted_credential`,
-          // A deployment that fixed its key should not stay drained forever.
-          status: sql`case when ${computerAccount.status} = 'error' then 'active'::computer_account_status else ${computerAccount.status} end`,        },
+          // A deployment that fixed its key, or put it back after removing it,
+          // should not stay drained forever. `draining` on a managed row only
+          // ever means the key was absent, so an ensure that has a key again is
+          // the proof it should serve bots.
+          status: sql`case when ${computerAccount.status} in ('error', 'draining') then 'active'::computer_account_status else ${computerAccount.status} end`,
+        },
       })
       .returning({ inserted: sql<boolean>`(xmax = 0)` });
 
     result.ensured.push(spec.provider);
     if (row?.inserted) result.created.push(spec.provider);
+  }
+
+  // A provider the deployment stopped lending out keeps its row: the boxes on it
+  // still exist, and reconcile needs the credential to find and destroy them.
+  // Draining it is what stops it serving new bots, so removing the key from the
+  // environment takes effect at the next ensure instead of at the next failure
+  // when the allocator discovers the key no longer works.
+  if (absent.length > 0) {
+    await db
+      .update(computerAccount)
+      .set({ status: "draining" })
+      .where(
+        and(
+          eq(computerAccount.managed, true),
+          inArray(computerAccount.provider, absent),
+          eq(computerAccount.status, "active"),
+        ),
+      );
   }
 
   return result;

@@ -167,6 +167,16 @@ export async function disconnectComputerAccount(userId: string, accountId: strin
     );
   }
 
+  // Stop new allocations first, then look again. The allocator only provisions
+  // from an `active` account, so a provisioning request that had not yet read
+  // this row now refuses to use it, and the count below is read against a pool
+  // that can no longer grow. Without this a create in flight would land after
+  // the delete, fail its foreign key, and leave a machine nobody has a row for.
+  await db
+    .update(computerAccount)
+    .set({ status: "draining" })
+    .where(and(eq(computerAccount.id, accountId), eq(computerAccount.ownerUserId, userId)));
+
   // `computer.account_id` is ON DELETE SET NULL, so deleting the row would leave
   // every box it owns attached to nothing: the idle sweep skips a box with no
   // account and reconcile only walks accounts that still exist, so nothing would
@@ -181,6 +191,12 @@ export async function disconnectComputerAccount(userId: string, accountId: strin
     .where(and(eq(computer.accountId, accountId), sql`${computer.status} <> 'deleted'`));
   const live = Number(attached?.count ?? 0);
   if (live > 0) {
+    // Back to serving bots: a refused disconnect must not leave the account
+    // draining, which would quietly take the user's own computer away.
+    await db
+      .update(computerAccount)
+      .set({ status: "active" })
+      .where(and(eq(computerAccount.id, accountId), eq(computerAccount.ownerUserId, userId)));
     throw new Error(
       live === 1
         ? "this computer still has a bot's machine. Delete that bot, then disconnect."
