@@ -325,6 +325,55 @@ describe("allocator — reconcile", () => {
     expect(binding?.computer?.externalId).toBe(ref.id);
   });
 
+  it("adopts a box whose bot's owner cannot be resolved, rather than stranding it", async () => {
+    // The store says an owner can be unresolvable — a bot row mid-creation, or a
+    // workspace read that failed. Refusing those would strand a box that is
+    // already booting and leave the bot with no computer, so the check must
+    // allow an unknown owner through and only stop two *different* known ones.
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", capacity: 5, ownerUserId: "user-1" });
+    const ref = await fake("a").provision({ metadata: { botId: "bot-1" } });
+
+    const summary = await allocator.reconcile();
+
+    expect(store.botOwners.get("bot-1")).toBeUndefined();
+    expect(summary.adopted).toBe(1);
+    const binding = await store.botBinding("bot-1");
+    expect(binding?.computer?.externalId).toBe(ref.id);
+  });
+
+  it("refuses to adopt a box labelled with another user's bot", async () => {
+    // A user's own key serves that user's bots. A machine carrying a different
+    // user's botId must not be adopted onto their account and billed to them.
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-2");
+    store.addAccount({ id: "a", capacity: 5, ownerUserId: "user-1" });
+    const ref = await fake("a").provision({ metadata: { botId: "bot-1" } });
+
+    const summary = await allocator.reconcile();
+
+    expect(summary.adopted).toBe(0);
+    expect(await store.botBinding("bot-1")).toBeNull();
+    // Not adopted, and not silently destroyed either: it becomes the ownerless
+    // case below on a later pass, where the account may still be asked about it.
+    expect((await fake("a").listComputers()).some((box) => box.id === ref.id)).toBe(true);
+  });
+
+  it("adopts onto a managed account regardless of whose bot it is", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-2");
+    store.addAccount({ id: "a", capacity: 5, managed: true, ownerUserId: null });
+    const ref = await fake("a").provision({ metadata: { botId: "bot-1" } });
+
+    const summary = await allocator.reconcile();
+
+    expect(summary.adopted).toBe(1);
+    expect((await store.botBinding("bot-1"))?.computer?.externalId).toBe(ref.id);
+  });
+
   it("refuses to adopt a box past the account's capacity", async () => {
     const { store, allocator, fake } = harness();
     store.addBot("bot-1");

@@ -515,7 +515,16 @@ export class ComputerAllocator {
         const botOwner = botId ? await this.store.botOwnerUserId(botId) : null;
         const wrongOwner =
           account.ownerUserId !== null && !account.managed && botOwner !== null && botOwner !== account.ownerUserId;
-        if (botId && !wrongOwner && (await this.store.botExists(botId))) {
+        if (wrongOwner) {
+          // Not adopted, and not destroyed either. The machine says it belongs
+          // to a bot this account may not serve, which on a key two deployments
+          // share means it may be somebody else's running work. Leaving it is
+          // recoverable; deleting it is not.
+          this.#log(`reconcile ${account.label}: ${box.id} is labelled for another owner, leaving it`);
+          summary.failed += 1;
+          continue;
+        }
+        if (botId && (await this.store.botExists(botId))) {
           // Adoption books a row against this account, so it has to respect the
           // same capacity the provisioning path does. Without this a reconcile
           // can push an account past its capacity and starve every later bot.

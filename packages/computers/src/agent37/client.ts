@@ -207,6 +207,18 @@ function bodyInit(body: string | Uint8Array | undefined): string | ArrayBuffer |
   return copy;
 }
 
+/**
+ * A configured base URL with no trailing slashes, so every path built from it
+ * has exactly one separator. A loop rather than `/\/+$/`: CodeQL flags that
+ * pattern as quadratic on a string of many slashes, and a base URL is operator
+ * input.
+ */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end -= 1;
+  return url.slice(0, end);
+}
+
 export function providerErrorFrom(
   status: number,
   body: unknown,
@@ -253,8 +265,8 @@ export class Agent37Client {
   constructor(options: Agent37ClientOptions) {
     this.account = options.account;
     this.#apiKey = options.apiKey;
-    this.apiUrl = (options.apiUrl ?? AGENT37_API_URL).replace(/\/+$/, "");
-    this.sandboxUrl = (options.sandboxUrl ?? AGENT37_SANDBOX_URL).replace(/\/+$/, "");
+    this.apiUrl = trimTrailingSlashes(options.apiUrl ?? AGENT37_API_URL);
+    this.sandboxUrl = trimTrailingSlashes(options.sandboxUrl ?? AGENT37_SANDBOX_URL);
     this.#fetch = options.fetch ?? fetch;
   }
 
