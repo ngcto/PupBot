@@ -128,3 +128,49 @@ The phone is a client of the same API, and v1 only claims what a phone is good f
   (no KVM), so the app is verified by typecheck, unit tests, a live Node run of the shared client
   against the real API + worker, and `expo export` bundles for both platforms. Touch behaviour and
   layout on a real screen remain unverified.
+## Model gateway
+
+- **`ModelGateway` cannot receive a raw key from the browser.** Endpoint keys are decrypted inside the
+  server action or the run loop, then handed to an adapter. The endpoint config never round-trips
+  through a client component.
+- **Adapters emit each delta exactly once.** They parse `run_event`-free: a resuming client replays
+  the run log by `seq`, and abort cancels the fetch and the reader, so a reconnect cannot duplicate a
+  delta inside one run. Partial text on abort is the run loop's existing behaviour; the adapters prove
+  they stop yielding after the signal.
+- **Wire fixtures are docs-derived, not recorded.** No provider key exists on the build machine; every
+  payload in `packages/providers/test/fixtures/` follows the provider's published streaming reference
+  and is labelled as such in its README. They must not be presented as live recordings.
+- **Only the test paths police where a request lands.** A saved provider may point at a private host — a
+  local gateway is a legitimate BYO endpoint, and chat reaches it — but Test connection resolves the
+  hostname, refuses a private address and follows only same-host redirects, so a probe cannot be steered
+  at an internal service.
+- **A provider lives in Settings, a bot only picks from it.** `model_endpoint` is still the storage row, but
+  it is presented as a *provider*: kind, key and base URL are set once under Settings → Providers, and
+  creating a bot is a name, a provider and one of that provider's models. No bot dialog takes a key, a base
+  URL or an "add endpoint" affordance; with no provider configured, bot creation says so and links to the
+  settings section. A provider's own default model is chosen once (first id it lists, else the catalogue's
+  newest tool-capable model) so a bot created without touching the picker still answers.
+- **A ChatGPT subscription is not a supported endpoint kind.** The device-flow sign-in, token storage,
+  refresh and subscription model catalog were built and then removed on the product owner's
+  instruction: a free plan's catalog answers with zero models, so the kind bought nothing a key does
+  not. Endpoints are API-key only — OpenAI chat, OpenAI Responses, Anthropic Messages, or a custom
+  base URL.
+- **The Responses input uses `output_text` parts for assistant history and `input_text` elsewhere**,
+  with prior tool calls as `function_call` items and results as `function_call_output`. That matches
+  the documented input-item union.
+- **Anthropic `max_tokens` defaults to 4096** when a caller does not set one, because the API requires
+  the field. A `max_tokens`/`refusal` stop reason surfaces as our `max_tokens`/`content_filter` error
+  event instead of looking like a complete answer.
+- **Cache tokens are priced separately.** Usage events carry `cacheReadTokens`/`cacheWriteTokens`
+  internally; models.dev's `cache_read`/`cache_write` rates are applied when present and fall back to
+  the input rate. The stored event keeps total prompt tokens in `input_tokens`, because the table has
+  no cache columns yet.
+- **An unknown model stores a null cost, not zero.** `usage_event.cost` became nullable in migration
+  `0003`; the Settings usage row says "cost unknown" and names the unpriced call count, so the number
+  never reads as free.
+- **A tool with no parameters is canonicalised to `{type:"object",properties:{}}`** on every wire
+  format, because a missing `parameters`/`input_schema` is rejected by some providers.
+- **The model picker is Base UI's Combobox** wrapped in `packages/ui`; it searches `model_catalog`
+  through a server action, shows the model name by default and adds context window plus per-million
+  prices only when Details/Advanced is enabled (the sign-in picker, when there was one, never showed them), and
+  allows an id outside the catalogue with a warning rather than a block.

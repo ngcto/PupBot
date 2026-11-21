@@ -52,9 +52,28 @@ export interface EndpointView {
   id: string;
   label: string;
   kind: string;
+  /** Shown in Settings > Providers so a custom gateway is identifiable. */
+  baseUrl: string;
+  /** The provider's default model; a bot picks its own when it is created. */
   modelId: string;
   contextWindow: number | null;
   catalogMatch: string;
+  /** How many models the provider itself listed, or null before it was asked. */
+  modelCount: number | null;
+  /** Whether a key is stored; the key itself never leaves the server. */
+  hasKey: boolean;
+  /** models.dev provider guessed from the base URL, used to filter the picker. */
+  providerHint: string | null;
+}
+
+export interface UsageView {
+  botId: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** USD across the priced calls; null when the catalogue price is unknown for all of them. */
+  costUsd: number | null;
+  calls: number;
+  unpricedCalls: number;
 }
 
 export interface ShellUser {
@@ -72,4 +91,5 @@ export interface ShellData {
   messages: MessageView[];
   activeRunId: string | null;
   endpoints: EndpointView[];
+  usage: UsageView[];
 }
