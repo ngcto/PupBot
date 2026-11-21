@@ -6,7 +6,8 @@
  * the version resolved from the tag and the asset file names the job actually
  * uploaded:
  *
- *   node scripts/stamp-release-version.mjs 0.1.0 "Terabot-0.1.0.AppImage,Terabot Setup 0.1.0.exe,terabot-0.1.0.apk"
+ *   node scripts/stamp-release-version.mjs 0.1.0 \
+ *     "Terabot-0.1.0-x86_64.AppImage,Terabot-0.1.0-setup.exe,terabot-0.1.0.apk"
  *
  * It writes `apps/marketing/released.version.json` — the one file `releases.ts`
  * reads — and aligns `apps/desktop`'s package version so electron-builder names
