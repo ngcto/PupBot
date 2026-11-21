@@ -83,15 +83,32 @@ export const runRoutes = new Hono<AppEnv>()
             .limit(1);
           const status = current[0]?.status;
 
-          if (!status || (isTerminal(status) && events.length === 0)) {
+          if (!status) {
             await stream.writeSSE({
               event: "done",
-              data: JSON.stringify({ runId, status: status ?? "missing" }),
+              data: JSON.stringify({ runId, status: "missing" }),
             });
             break;
           }
 
-          if (events.length === 0) await stream.sleep(POLL_MS);
+          if (isTerminal(status)) {
+            // The closing events can land a moment after the status, so read
+            // the log once more before calling the stream finished.
+            const tail = await db
+              .select({ seq: runEvent.seq })
+              .from(runEvent)
+              .where(and(eq(runEvent.runId, runId), gt(runEvent.seq, cursor)))
+              .limit(1);
+            if (tail.length === 0) {
+              await stream.writeSSE({
+                event: "done",
+                data: JSON.stringify({ runId, status }),
+              });
+              break;
+            }
+          } else if (events.length === 0) {
+            await stream.sleep(POLL_MS);
+          }
         }
       },
       async (error, stream) => {

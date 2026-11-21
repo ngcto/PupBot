@@ -114,6 +114,13 @@ describe("conversation run protocol", () => {
     const body = await replay.text();
     expect(body).toContain("event: done");
     expect(body).not.toContain('"seq":1,');
+
+    // The client renders the reply from `message.completed`, so the replay must
+    // carry it, and the stream must not close before it.
+    const completedAt = body.indexOf("event: message.completed");
+    const doneAt = body.indexOf("event: done");
+    expect(completedAt).toBeGreaterThan(-1);
+    expect(doneAt).toBeGreaterThan(completedAt);
     const firstReplayed = body.match(/"seq":(\d+)/)?.[1];
     expect(Number(firstReplayed)).toBe(3);
 
