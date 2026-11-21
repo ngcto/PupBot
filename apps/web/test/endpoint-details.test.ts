@@ -283,6 +283,19 @@ describe("what a save writes into the detail columns", () => {
     expect(columns.pricing).toBeNull();
   });
 
+  it("keeps a window typed for an uncatalogued model, where the fill has no answer", () => {
+    // The case the review caught: a custom endpoint serving a model models.dev has
+    // never seen, with a window typed in Edit. The fill returns null and there is
+    // no catalogue row, so a null here would silently drop the user's number.
+    const columns = detailColumnsFor({
+      retargeted: false,
+      filled: null,
+      current: { ...mine, contextWindow: 32_000 },
+    });
+    expect(columns.contextWindow).toBe(32_000);
+    expect(columns.pricing).toEqual({ input: 1, output: 2 });
+  });
+
   it("starts a retargeted row blank rather than inheriting the old provider's details", () => {
     // The old provider's window and price say nothing about the new one.
     expect(detailColumnsFor({ retargeted: true, filled: null, current: mine })).toEqual({

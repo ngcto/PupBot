@@ -7,7 +7,7 @@ import { BUILTIN_PROVIDERS } from "@terabot/providers";
 import { useEffect, useState } from "react";
 import { addModelEndpoint, probeProviderEndpoint, updateModelEndpointProvider } from "../app/actions.ts";
 import type { ProviderProbe, TestEndpointResult } from "../app/actions.ts";
-import type { EndpointKind } from "@terabot/providers";
+import type { DetailField, EndpointKind } from "@terabot/providers";
 import type { EndpointView } from "../lib/types.ts";
 
 /**
@@ -43,6 +43,12 @@ const KIND_OPTIONS: Array<{ value: EndpointKind; label: string }> = [
 ];
 
 const ADVANCED_KEY = "terabot:provider-advanced";
+
+function compactTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(1))}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
+}
 
 /** The built-in a saved row is, matched by id and then by its URL for an old row. */
 function builtinOf(endpoint: EndpointView | null) {
@@ -110,6 +116,13 @@ export function ProviderForm({
   const [baseUrl, setBaseUrl] = useState(endpoint?.baseUrl ?? "");
   const [label, setLabel] = useState(endpoint?.label ?? "");
   const [apiKey, setApiKey] = useState("");
+  // Blank means "not mine": the server may fill it. A number here is the user's
+  // and is never replaced.
+  const [contextWindow, setContextWindow] = useState(
+    endpoint?.contextWindow && !endpoint.detailSources.includes("contextWindow")
+      ? String(endpoint.contextWindow)
+      : "",
+  );
   const [advanced, setAdvanced] = useState(false);
   const [testing, setTesting] = useState(false);
   const [probe, setProbe] = useState<ProviderProbe | null>(null);
@@ -122,6 +135,13 @@ export function ProviderForm({
   const config = custom ? CUSTOM_CONFIG[choice === ANTHROPIC ? ANTHROPIC : CUSTOM]! : null;
   const targetUrl = builtin?.baseUrl ?? baseUrl;
   const canSave = Boolean(targetUrl.trim());
+  // What the catalogue filled before, shown as the placeholder so a blank field
+  // still says what the endpoint will use.
+  const autoContext =
+    endpoint?.detailSources.includes("contextWindow") && endpoint.contextWindow
+      ? compactTokens(endpoint.contextWindow)
+      : null;
+  const typedContext = contextWindow.trim() ? Number(contextWindow) : null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -180,6 +200,11 @@ export function ProviderForm({
           kind: builtin?.kind ?? kind,
           ...(builtin ? { builtinId: builtin.id } : { baseUrl }),
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          // Only a field the user typed is claimed as theirs; a blank one leaves
+          // whatever the catalogue filled in place.
+          ...(typedContext !== null
+            ? { contextWindow: typedContext, userSetFields: ["contextWindow"] as DetailField[] }
+            : {}),
         });
       } else {
         await addModelEndpoint({
@@ -187,6 +212,7 @@ export function ProviderForm({
           kind: builtin?.kind ?? kind,
           ...(builtin ? { builtinId: builtin.id } : { baseUrl }),
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...(typedContext !== null ? { contextWindow: typedContext } : {}),
         });
       }
       onSaved();
@@ -278,6 +304,26 @@ export function ProviderForm({
                 />
               </div>
             ) : null}
+            <div>
+              <p className="mb-1.5 text-sm text-ink-muted">Context window</p>
+              <Input
+                aria-label="Context window"
+                inputMode="numeric"
+                value={contextWindow}
+                placeholder={
+                  autoContext ? `${autoContext} (filled)` : "Filled from models.dev when it is known"
+                }
+                onChange={(event) => {
+                  setContextWindow(event.target.value.replace(/[^0-9]/g, ""));
+                  setProbe(null);
+                }}
+              />
+              <p className="mt-1.5 text-sm text-ink-faint">
+                {contextWindow.trim()
+                  ? "Yours. Auto-population will never replace it."
+                  : "Only a blank field is filled from models.dev."}
+              </p>
+            </div>
           </div>
         </CollapsiblePanel>
       </CollapsibleRoot>
