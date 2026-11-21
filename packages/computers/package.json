@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@pupbot/db": "workspace:*",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
