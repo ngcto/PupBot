@@ -56,7 +56,6 @@ export function Chat({
     const node = scroller.current;
     if (node) node.scrollTop = node.scrollHeight;
     // Land at the latest message when the bot opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

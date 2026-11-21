@@ -11,7 +11,8 @@
     "test": "vitest run --passWithNoTests",
     "export:ios": "expo export --platform ios",
     "export:android": "expo export --platform android",
-    "doctor": "npx --yes expo-doctor"
+    "doctor": "npx --yes expo-doctor",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.4.0",

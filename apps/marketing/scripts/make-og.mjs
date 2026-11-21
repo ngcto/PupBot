@@ -6,7 +6,7 @@
  *   node apps/marketing/scripts/make-og.mjs
  * The cards are checked in, so this only runs when the copy or the brand moves.
  */
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";

@@ -467,8 +467,9 @@ function AppLogo({ app, size }: { app: AppCard; size: number }) {
       <span className="text-base font-semibold text-[#111]">{app.name.slice(0, 1).toUpperCase()}</span>
       {app.logoUrl ? (
         // Composio serves one logo per toolkit from logos.composio.dev. Kept as a
-        // plain img so a blocked CDN degrades to the initial behind it.
-        // eslint-disable-next-line @next/next/no-img-element
+        // plain img so a blocked CDN degrades to the initial behind it, and the
+        // `onError` below is the fallback. (`@next/next/no-img-element` is not
+        // part of this repo's lint config, so no suppression is needed.)
         <img
           src={app.logoUrl}
           alt=""

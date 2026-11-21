@@ -8,10 +8,8 @@ import {
   Delete02Icon,
   EyeOffIcon,
   FolderAddIcon,
-  MoreHorizontalCircle01Icon,
   PencilEdit02Icon,
   PinIcon,
-  PlusSignIcon,
   Search01Icon,
   Settings01Icon,
   VoiceIcon,
@@ -22,23 +20,12 @@ import {
   ContextMenuArea,
   ContextMenuItem,
   ContextMenuSeparator,
-  MenuRoot,
-  MenuTrigger,
-  MenuPopup,
-  MenuItem,
-  MenuSeparator,
   Tooltip,
   cn,
   toast,
 } from "@terabot/ui";
 import { useState } from "react";
-import {
-  deleteBot,
-  moveBotToSection,
-  renameBot,
-  setBotFlags,
-  setPrimaryBot,
-} from "../app/actions.ts";
+import { deleteBot, moveBotToSection, setBotFlags } from "../app/actions.ts";
 import { previewText } from "../lib/format.ts";
 import type { BotView, SectionView, ShellUser } from "../lib/types.ts";
 import { AccountMenu } from "./account-menu.tsx";
@@ -110,7 +97,7 @@ export function Sidebar({
 
       {primary ? (
         <div className="flex flex-col items-center pb-1 pt-[26px]">
-          <ContextMenuArea items={<PrimaryMenu bot={primary} onChoosePrimary={onChoosePrimary} onOpenSettings={onOpenSettings} />}>
+          <ContextMenuArea items={<PrimaryMenu bot={primary} onChoosePrimary={onChoosePrimary} />}>
             <button
               type="button"
               data-testid="primary-bot"
@@ -274,15 +261,7 @@ function BotRow({
   );
 }
 
-function PrimaryMenu({
-  bot,
-  onChoosePrimary,
-  onOpenSettings,
-}: {
-  bot: BotView;
-  onChoosePrimary: () => void;
-  onOpenSettings: (botId: string) => void;
-}) {
+function PrimaryMenu({ bot, onChoosePrimary }: { bot: BotView; onChoosePrimary: () => void }) {
   return (
     <>
       <ContextMenuItem onClick={() => void setBotFlags(bot.id, { pinned: !bot.pinned })}>
