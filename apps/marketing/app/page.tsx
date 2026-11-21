@@ -46,7 +46,7 @@ export default function LandingPage() {
           </h1>
           <p className="lede hero-lede" data-enter="2" style={{ marginTop: 24 }}>
             Terabot is a chat app for bots you set up yourself. A bot has a name, a face and a standing brief. It
-            answers through the model you point it at, and it keeps a cloud computer of its own.
+            answers through the model you point it at, and it is bound to a cloud computer of its own.
           </p>
           <div className="hero-actions" data-enter="3">
             <Link className="btn btn-primary" href="/download">

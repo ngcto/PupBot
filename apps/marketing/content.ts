@@ -25,7 +25,7 @@ export const tiers: readonly Tier[] = [
     availability: "available",
     summary: "One plan, for everyone using Terabot today. We do not bill anything.",
     included: [
-      "Bots with their own conversation, instructions and cloud computer",
+      "Bots with their own conversation, instructions and a computer bound to each one",
       "Your own model provider, connected with your own key",
       "Chat history kept in your workspace",
       "The desktop and mobile apps, when their builds are published",
@@ -68,7 +68,7 @@ export const questions: readonly Question[] = [
   {
     question: "Where do the computers come from?",
     answer:
-      "Each bot gets a cloud computer of its own, separate from every other bot's. It runs on the computer provider set up for your workspace, and the app shows whether it is awake.",
+      "Each bot gets a cloud computer of its own, separate from every other bot's, and the app shows whether it is awake. Provisioning goes through a provider interface; the current build uses a stub provider that runs no commands, so the machine is bound but not yet doing work.",
   },
   {
     question: "Can I install it yet?",
@@ -113,7 +113,7 @@ export const botParts: readonly BotPart[] = [
   },
   {
     title: "A computer",
-    body: "A cloud machine that belongs to that bot alone, listed in the rail with whether it is awake.",
+    body: "A cloud computer bound to that bot alone, listed in the rail with whether it is awake.",
   },
 ];
 
