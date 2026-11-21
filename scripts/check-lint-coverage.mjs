@@ -60,15 +60,21 @@ const expandGlob = (glob) => {
     .map((name) => join(parent, name));
 };
 
-const hasSource = (dir) => {
+/**
+ * Does this package ship source? Returns `null` when the answer is unknown,
+ * which the caller treats as a failure: a directory we cannot read is not the
+ * same as a directory with nothing in it, and answering "no source" for the
+ * former would exempt exactly the package we failed to inspect.
+ */
+const findSource = (dir) => {
   const stack = [join(repoRoot, dir)];
   while (stack.length > 0) {
     const current = stack.pop();
     let entries;
     try {
       entries = readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
+    } catch (error) {
+      return { readable: false, error: `${relative(repoRoot, current)}: ${error.code ?? error.message}` };
     }
     for (const entry of entries) {
       if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue;
@@ -76,11 +82,11 @@ const hasSource = (dir) => {
       if (entry.isDirectory()) {
         stack.push(path);
       } else if (/\.(?:[cm]?[jt]sx?)$/.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
-        return true;
+        return { readable: true, source: true };
       }
     }
   }
-  return false;
+  return { readable: true, source: false };
 };
 
 const problems = [];
@@ -88,7 +94,11 @@ const checked = [];
 
 for (const dir of parseWorkspaceGlobs().flatMap(expandGlob)) {
   const manifestPath = join(repoRoot, dir, "package.json");
-  if (!existsSync(manifestPath)) continue;
+  if (!existsSync(manifestPath)) {
+    // A directory under `packages/*` with no manifest is not a workspace package
+    // (a scratch dir, an asset folder), so it is not this check's business.
+    continue;
+  }
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -99,10 +109,22 @@ for (const dir of parseWorkspaceGlobs().flatMap(expandGlob)) {
 
   const name = manifest.name ?? relative(repoRoot, dir);
   const lint = manifest.scripts?.lint;
-  const source = hasSource(dir);
-  checked.push({ name, source, lint: Boolean(lint) });
+  const scan = findSource(dir);
 
-  if (!source) continue;
+  // An unreadable package is exactly the one we cannot vouch for. Fail on it
+  // rather than skipping it, or the gate covers nothing and still says green.
+  if (!scan.readable) {
+    checked.push({ name, source: null, lint: Boolean(lint) });
+    problems.push(
+      `${name} (${dir}) could not be read, so its coverage is unknown: ${scan.error}. ` +
+        `A package this check cannot inspect is not a package it may pass.`,
+    );
+    continue;
+  }
+
+  checked.push({ name, source: scan.source, lint: Boolean(lint) });
+
+  if (!scan.source) continue;
 
   if (!lint) {
     problems.push(
@@ -133,5 +155,6 @@ if (problems.length > 0) {
 const linted = checked.filter((entry) => entry.lint).length;
 console.log(`${checked.length} workspace packages, ${linted} with a lint script`);
 for (const entry of checked) {
-  console.log(`  ${entry.name.padEnd(26)} ${entry.source ? (entry.lint ? "linted" : "MISSING") : "no source"}`);
+  const state = entry.source === null ? "UNREADABLE" : entry.source ? (entry.lint ? "linted" : "MISSING") : "no source";
+  console.log(`  ${entry.name.padEnd(26)} ${state}`);
 }
