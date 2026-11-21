@@ -1,5 +1,7 @@
 import { CredentialConfigError, ProviderError } from "../contract.ts";
 import type { ComputerProvider, ComputerRef, ComputerStatus, ProviderErrorCode } from "../contract.ts";
+import type { ComputerFailure, PoolAvailability } from "./failures.ts";
+import { NO_POOL, classifyFailure } from "./failures.ts";
 import type {
   AccountRecord,
   AllocateResult,
@@ -9,6 +11,7 @@ import type {
   EnsureReadyResult,
   LeaseRecord,
   AllocateOptions,
+  OrphanReason,
   ProviderFactory,
   ReconcileSummary,
   RequiredCapability,
@@ -77,13 +80,7 @@ export class ComputerAllocator {
   readonly #now: () => Date;
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #log: (message: string) => void;
-  /**
-   * Built providers, keyed by account id. The credential is part of the key: a
-   * rotated key gets a fresh provider, because a provider holds the key it was
-   * built with and a worker that kept the old one would fail every later call
-   * even though the row was updated successfully.
-   */
-  readonly #providerCache = new Map<string, { credential: string; provider: ComputerProvider }>();
+  readonly #providerCache = new Map<string, ComputerProvider>();
   readonly #botLocks = new Map<string, Promise<unknown>>();
   readonly #boxLocks = new Map<string, Promise<unknown>>();
   readonly #accountLocks = new Map<string, Promise<unknown>>();
@@ -99,10 +96,20 @@ export class ComputerAllocator {
   }
 
   /**
-   * Give a bot a computer: pick an account, provision, bind. Idempotent per bot
-   * under a lock, so two messages arriving together create one box.
+   * Give a bot a computer, on its first actual use of one: pick the best
+   * account this bot may draw on, provision, bind. Idempotent per bot under a
+   * lock, so two messages arriving together create one box, and the bind itself
+   * is atomic in the store so two *processes* cannot create two.
+   *
+   * Every account is tried before giving up: the loop below walks the whole
+   * ordered pool and only reports a failure once the last one has refused. That
+   * is what makes one provider being full a non-event rather than a failed use.
    */
-  async allocateForBot(botId: string, options: AllocateOptions = {}): Promise<AllocateResult> {
+  async allocateForBot(
+    botId: string,
+    options: AllocateOptions = {},
+    availability: PoolAvailability = NO_POOL,
+  ): Promise<AllocateResult> {
     return this.#withBotLock(botId, async () => {
       const requires = options.requires ?? DEFAULT_REQUIREMENTS;
       const current = await this.store.botBinding(botId);
@@ -119,15 +126,15 @@ export class ComputerAllocator {
         await this.store.releaseComputer(botId);
       }
 
+      // Every account this bot may use: its owner's own keys plus the
+      // deployment's managed pools, and never another user's.
       const ownerUserId = await this.store.botOwnerUserId(botId);
       const accounts = eligibleAccounts(await this.store.listAccounts(), ownerUserId);
+
+      // Nothing connected: there is no point holding the "binding" state or
+      // touching a provider. Report what a person would have to do instead.
       if (accounts.length === 0) {
-        return this.#block(
-          botId,
-          ownerUserId
-            ? "No computer is connected for this bot, and this deployment has no managed capacity."
-            : "No computer account is connected.",
-        );
+        return this.#block(botId, { accounts: accounts.length, availability, failures: [] });
       }
 
       // An account whose provider cannot deliver a required capability is left
@@ -141,7 +148,22 @@ export class ComputerAllocator {
         else usable.push(account);
       }
       if (usable.length === 0) {
-        return this.#block(botId, describeMissingCapabilities(incapable.map((entry) => entry.reason)));
+        // No account can do the job this bot asked for, which is a different
+        // answer from "no account at all": say what is missing, plainly.
+        const gap = describeMissingCapabilities(incapable.map((entry) => entry.reason));
+        await this.store.setBindingState(botId, "blocked", gap);
+        return {
+          state: "blocked",
+          reason: gap,
+          failure: {
+            code: "provider_error",
+            summary: gap,
+            detail: "Every connected provider is missing a capability this request needs.",
+            resolution: "The user can connect a different computer provider in Settings, under Computer.",
+            userAction: "configure",
+            retryable: false,
+          },
+        };
       }
 
       const computers = await this.store.listComputers();
@@ -164,11 +186,18 @@ export class ComputerAllocator {
           hosted.has(account.id) ? 0 : 1,
           accountClass(account, ownerUserId),
           (used.get(account.id) ?? 0) / Math.max(account.capacity, 1),
+          account.provider,
           account.label,
         ];
-        const [hostedA, classA, ratioA, labelA] = rank(a) as [number, number, number, string];
-        const [hostedB, classB, ratioB, labelB] = rank(b) as [number, number, number, string];
-        return hostedA - hostedB || classA - classB || ratioA - ratioB || labelA.localeCompare(labelB);
+        const [hostedA, classA, ratioA, providerA, labelA] = rank(a) as [number, number, number, string, string];
+        const [hostedB, classB, ratioB, providerB, labelB] = rank(b) as [number, number, number, string, string];
+        return (
+          hostedA - hostedB ||
+          classA - classB ||
+          ratioA - ratioB ||
+          providerA.localeCompare(providerB) ||
+          labelA.localeCompare(labelB)
+        );
       });
 
       await this.store.setBindingState(botId, "binding", null);
@@ -180,7 +209,8 @@ export class ComputerAllocator {
         failures.push({ code: reservation.code, message: reservation.message });
       }
 
-      return this.#block(botId, describeFailures(failures));
+      const everyAccount = await this.store.listAccounts();
+      return this.#block(botId, { accounts: everyAccount.length, availability, failures });
     });
   }
 
@@ -241,7 +271,14 @@ export class ComputerAllocator {
       const used = computers.filter(
         (computer) => computer.accountId === account.id && computer.status !== "deleted",
       ).length;
-      if (used >= account.capacity) {
+      /*
+       * A capacity of 0 means "this plan's limit is unknown", and the provider is
+       * then the authority: the local count exists to avoid a pointless create and
+       * to order accounts, never to be stricter than the plan the user paid for.
+       * Storing a guessed 1 for a user-supplied key would permanently cap them at
+       * one bot with no way to raise it.
+       */
+      if (account.capacity > 0 && used >= account.capacity) {
         return { ok: false as const, code: "quota" as const, message: `${account.label} is at capacity` };
       }
 
@@ -256,56 +293,95 @@ export class ComputerAllocator {
       const attempt = await this.#provision(account, provider, botId);
       if (!attempt.ok) return attempt;
 
-      let computer: ComputerRecord;
-      try {
-        computer = await this.store.createComputer({
-          accountId: account.id,
-          provider: provider.name,
-          externalId: attempt.ref.id,
-          status: "awake",
-          metadata: { [OWNER_TAG]: "1", botId },
-          lastUsedAt: this.#now().toISOString(),
-        });
-      } catch (error) {
-        // The account row was removed while the provider was creating, so this
-        // insert has no account to hang off. The machine exists and nothing
-        // would ever find it by account again, so destroy it here: a failed
-        // bookkeeping insert must not leave a box billing.
-        await provider.destroy(attempt.ref).catch((next: unknown) => {
-          this.#log(`orphaned ${attempt.ref.id} could not be destroyed: ${asProviderError(next).code}`);
-        });
-        throw error;
+      const workspaceId = await this.store.botWorkspaceId(botId);
+      const computer = await this.store.createComputer({
+        accountId: account.id,
+        workspaceId,
+        provider: provider.name,
+        externalId: attempt.ref.id,
+        status: "awake",
+        metadata: { botId },
+        lastUsedAt: this.#now().toISOString(),
+      });
+
+      // The bind, not the lock above, is what makes a second box impossible:
+      // the lock only serialises this process, and two runs can be served by two
+      // of them. If another allocation already bound a box, this one loses and
+      // destroys what it just made rather than leaving it to bill unnoticed.
+      const bound = await this.store.tryBindComputer(botId, computer);
+      if (!bound) {
+        await this.#destroyComputer(computer);
+        const winner = await this.store.botBinding(botId);
+        if (winner?.computer && winner.computer.status !== "deleted") {
+          return { ok: true as const, computerId: winner.computer.id };
+        }
+        return { ok: false as const, code: "busy" as const, message: "another allocation is in flight" };
       }
-      await this.store.bindComputer(botId, computer);
       return { ok: true as const, computerId: computer.id };
     });
   }
 
   /**
-   * Wake on first use: the run path calls this before the model's first token.
-   * `start()` is always explicit; exec never wakes a paused box by itself.
+   * Wake on first use: the run path calls this when the model asks for the
+   * computer. `start()` is always explicit; exec never wakes a paused box by
+   * itself. A failure comes back structured, because the model — not a card —
+   * is what tells the user about it.
    */
-  async ensureReady(botId: string, options: EnsureReadyOptions = {}): Promise<EnsureReadyResult> {
-    return this.#ensureReady(botId, options, 0);
+  async ensureReady(
+    botId: string,
+    options: EnsureReadyOptions = {},
+    availability: PoolAvailability = NO_POOL,
+  ): Promise<EnsureReadyResult> {
+    return this.#ensureReady(botId, options, availability, 0);
   }
 
-  async #ensureReady(botId: string, options: EnsureReadyOptions, depth: number): Promise<EnsureReadyResult> {
+  async #ensureReady(
+    botId: string,
+    options: EnsureReadyOptions,
+    availability: PoolAvailability,
+    depth: number,
+  ): Promise<EnsureReadyResult> {
     const requires = options.requires ?? DEFAULT_REQUIREMENTS;
     const binding = await this.store.botBinding(botId);
     if (!binding || binding.state !== "ready" || !binding.computer || binding.computer.status === "deleted") {
-      const allocation = await this.allocateForBot(botId, { requires });
+      const allocation = await this.allocateForBot(botId, { requires }, availability);
       if (allocation.state !== "ready") {
-        return { ok: false, reason: allocation.reason ?? "No computer is available.", blocked: true };
+        return {
+          ok: false,
+          reason: allocation.reason ?? "No computer is available.",
+          blocked: true,
+          ...(allocation.failure ? { failure: allocation.failure } : {}),
+        };
       }
-      if (depth >= 2) return { ok: false, reason: "The computer could not be started.", blocked: true };
-      return this.#ensureReady(botId, options, depth + 1);
+      if (depth >= 2) {
+        return {
+          ok: false,
+          reason: "The computer could not be started.",
+          blocked: true,
+          failure: transientFailure("The computer was created but would not start."),
+        };
+      }
+      return this.#ensureReady(botId, options, availability, depth + 1);
     }
 
     const computer = binding.computer;
     const account = (await this.store.listAccounts()).find((entry) => entry.id === computer.accountId);
     if (!account) {
       await this.store.releaseComputer(botId);
-      return { ok: false, reason: "This bot's computer account was removed.", blocked: true };
+      return {
+        ok: false,
+        reason: "This bot's computer account was removed.",
+        blocked: true,
+        failure: {
+          code: "provider_error",
+          summary: "This bot's computer account was removed, so its machine can no longer be reached.",
+          detail: "The account that owned the machine is gone from the workspace.",
+          resolution:
+            "The user can add a computer provider again in Settings, under Computer; the bot builds itself a new machine on the next attempt.",
+          userAction: "configure",
+          retryable: false,
+        },
+      };
     }
 
     // A requirement added after this box was bound must fail loudly here rather
@@ -325,13 +401,25 @@ export class ComputerAllocator {
       provider = this.#provider(account);
     } catch (error) {
       const failure = await this.#providerBuildFailure(account, error);
+      const auth = failure.code === "auth";
       return {
         ok: false,
-        reason:
-          failure.code === "auth"
-            ? "The computer account's credentials were rejected."
-            : "The computer service is misconfigured; try again later.",
-        blocked: failure.code === "auth",
+        reason: auth
+          ? "The computer account's credentials were rejected."
+          : "The computer service is misconfigured; try again later.",
+        blocked: auth,
+        failure: {
+          code: "provider_error",
+          summary: auth
+            ? `The ${account.provider} credentials for this workspace were rejected.`
+            : "The computer provider is misconfigured on this deployment.",
+          detail: failure.message,
+          resolution: auth
+            ? `The user can replace the ${account.provider} key in Settings, under Computer; a key that was revoked or rotated is the usual cause.`
+            : "Nothing the user can change: this is a deployment configuration problem. It is worth telling them the machine is unavailable and to try again later.",
+          userAction: auth ? "configure" : "none",
+          retryable: !auth,
+        },
       };
     }
 
@@ -339,18 +427,18 @@ export class ComputerAllocator {
     try {
       status = await provider.status(toRef(computer));
     } catch (error) {
-      return this.#handleUseError(botId, computer, account, asProviderError(error), options, depth);
+      return this.#handleUseError(botId, computer, account, asProviderError(error), options, availability, depth);
     }
 
     if (status.state === "error" || status.state === "destroyed") {
-      return this.#replace(botId, computer, "The computer failed; building a new one.", options, depth);
+      return this.#replace(botId, computer, "The computer failed; building a new one.", options, availability, depth);
     }
 
     let woke = false;
     if (!status.ready) {
       const wake = await this.#wake(computer, provider, options.timeoutMs);
       if (!wake.ok) {
-        return this.#handleWakeFailure(botId, computer, account, wake, options, depth);
+        return this.#handleWakeFailure(botId, computer, account, wake, options, availability, depth);
       }
       woke = true;
     }
@@ -387,12 +475,170 @@ export class ComputerAllocator {
     }
   }
 
-  /** Tear a bot's computer down (bot deleted, or its box is beyond repair). */
+  /**
+   * Destroy a box at the provider, and never lose track of one that will not go.
+   *
+   * A destroy that fails leaves a machine running and billing at the provider.
+   * That is the one outcome this code exists to prevent, so a failure is
+   * recorded in the orphan ledger with the provider, account and external id a
+   * later attempt needs, and the reap retries it. The local row is then marked
+   * deleted either way: the binding must not keep pointing at a box nobody can
+   * use, and the ledger — not the computer row — is the durable record of the
+   * leak.
+   */
+  async #destroyComputer(computer: ComputerRecord, reason: OrphanReason = "bot-delete"): Promise<void> {
+    const account = (await this.store.listAccounts()).find((entry) => entry.id === computer.accountId);
+    if (account && computer.externalId) {
+      try {
+        const provider = this.#provider(account);
+        await this.#withBoxLock(computer.id, () => provider.destroy(toRef(computer)));
+      } catch (error) {
+        const providerError = asProviderError(error);
+        // `destroy` resolves for a box that is already gone; a `not_found` here
+        // still means the box is not there, so there is nothing left to bill.
+        if (providerError.code !== "not_found") {
+          await this.store.recordOrphan({
+            accountId: account.id,
+            provider: computer.provider,
+            externalId: computer.externalId,
+            reason,
+            botId: computer.metadata?.botId ?? null,
+            lastError: `${providerError.code}: ${providerError.message}`,
+          });
+          this.#log(
+            `destroy ${computer.provider}/${computer.externalId} failed (${providerError.code}); recorded as an orphan`,
+          );
+        }
+      }
+    }
+    await this.store.deleteLeasesForComputer(computer.id);
+    await this.store.updateComputer(computer.id, { status: "deleted" });
+  }
+
+  /**
+   * Retry every box a previous destroy could not remove. Runs on the maintenance
+   * tick, so a provider outage delays the cleanup instead of losing it, and an
+   * operator can read `computer_orphan` to see exactly what is still billing.
+   */
+  async reapOrphans(limit = 20): Promise<{ reaped: number; failed: number }> {
+    const orphans = (await this.store.listOrphans()).slice(0, limit);
+    const accounts = await this.store.listAccounts();
+    let reaped = 0;
+    let failed = 0;
+
+    for (const orphan of orphans) {
+      const account = accounts.find((entry) => entry.id === orphan.accountId);
+      if (!account) {
+        // The account row is gone, so its credential is too: nothing can reach
+        // this box again. Leave the row for an operator to delete by hand in
+        // the provider's dashboard rather than pretending it was cleaned up.
+        await this.store.markOrphanAttempt(orphan.id, "the account that owned this box no longer exists");
+        failed += 1;
+        continue;
+      }
+      try {
+        const provider = this.#provider(account);
+        await provider.destroy({ provider: orphan.provider, account: account.id, id: orphan.externalId });
+        await this.store.deleteOrphan(orphan.id);
+        reaped += 1;
+      } catch (error) {
+        const providerError = asProviderError(error);
+        if (providerError.code === "not_found") {
+          await this.store.deleteOrphan(orphan.id);
+          reaped += 1;
+          continue;
+        }
+        await this.store.markOrphanAttempt(orphan.id, `${providerError.code}: ${providerError.message}`);
+        failed += 1;
+      }
+    }
+    return { reaped, failed };
+  }
+
+  /** Tear a bot's computer down now: the bot was deleted and must not keep billing. */
   async destroyForBot(botId: string): Promise<void> {
     const binding = await this.store.botBinding(botId);
     const computer = binding?.computer;
-    if (computer) await this.#destroyComputer(computer);
+    if (computer) await this.#destroyComputer(computer, "bot-delete");
     await this.store.releaseComputer(botId);
+  }
+
+  /**
+   * Tear down every box one account owns, before its credential is thrown away.
+   *
+   * Removing an account is only safe once nothing is left running on it: the row
+   * is the only place its key lives, so deleting it while a box survives makes
+   * that box undeletable. This destroys what it can and reports what it could
+   * not, and the caller refuses the removal when anything is still outstanding.
+   */
+  async destroyForAccount(accountId: string): Promise<{ destroyed: number; outstanding: number }> {
+    /*
+     * Orphans that were already here *before* this call. They are retried below,
+     * because removing an account is the moment a person expects the backlog
+     * cleared — but an orphan recorded during this pass must not be retried here:
+     * the provider just refused, and retrying it immediately would turn a real
+     * failure into an apparent success.
+     */
+    const backlog = (await this.store.listOrphans()).filter((orphan) => orphan.accountId === accountId);
+
+    const computers = (await this.store.listComputers()).filter(
+      (computer) => computer.accountId === accountId && computer.status !== "deleted",
+    );
+    let destroyed = 0;
+    for (const computer of computers) {
+      await this.#destroyComputer(computer, "account-delete");
+      destroyed += 1;
+    }
+    /*
+     * A box the provider refused earlier is already an orphan, and it still needs
+     * this account's credential. Retry those too: a removal is the one moment a
+     * person expects the backlog cleared, and leaving them for the maintenance
+     * sweep would make the refusal look permanent when it was not.
+     */
+    const stillListed = new Set((await this.store.listOrphans()).map((orphan) => orphan.id));
+    const account = (await this.store.listAccounts()).find((entry) => entry.id === accountId);
+    for (const orphan of backlog.filter((entry) => stillListed.has(entry.id))) {
+      if (!account) {
+        // No credential, no way in: leave the row for a human to delete in the
+        // provider's dashboard rather than claiming it was cleaned up.
+        await this.store.markOrphanAttempt(orphan.id, "the account's credential is already gone");
+        continue;
+      }
+      try {
+        const provider = this.#provider(account);
+        await provider.destroy({ provider: orphan.provider, account: account.id, id: orphan.externalId });
+        await this.store.deleteOrphan(orphan.id);
+      } catch (error) {
+        const providerError = asProviderError(error);
+        if (providerError.code === "not_found") {
+          await this.store.deleteOrphan(orphan.id);
+          continue;
+        }
+        await this.store.markOrphanAttempt(orphan.id, `${providerError.code}: ${providerError.message}`);
+      }
+    }
+
+    const outstanding = (await this.store.listOrphans()).filter(
+      (orphan) => orphan.accountId === accountId,
+    ).length;
+    return { destroyed, outstanding };
+  }
+
+  /** Tear down every box a workspace still owns: the workspace was deleted. */
+  async destroyForWorkspace(workspaceId: string): Promise<{ destroyed: number; orphans: number }> {
+    const computers = (await this.store.listComputers()).filter(
+      (computer) => computer.workspaceId === workspaceId && computer.status !== "deleted",
+    );
+    let destroyed = 0;
+    for (const computer of computers) {
+      const before = (await this.store.listOrphans()).length;
+      await this.#destroyComputer(computer, "workspace-delete");
+      if ((await this.store.listOrphans()).length > before) {
+        this.#log(`workspace ${workspaceId} left an orphan for ${computer.externalId}`);
+      }
+      destroyed += 1;
+    }
+    return { destroyed, orphans: (await this.store.listOrphans()).length };
   }
 
   /** Sleep every box whose leases have all lapsed and whose idle window is over. */
@@ -524,11 +770,6 @@ export class ComputerAllocator {
    * Reconcile on boot: adopt orphans whose bot still exists, destroy strays
    * whose bot is gone, and rebuild boxes the database thinks are alive but the
    * provider does not have.
-   *
-   * Cleanup is limited to machines this deployment can prove it created. A user
-   * may connect their own provider account, and that account's inventory is the
-   * user's: their other machines must never be adopted or deleted just because
-   * the account joined the pool. The marker is set on every box we provision.
    */
   async reconcile(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
     const summary: ReconcileSummary = { accounts: 0, adopted: 0, destroyed: 0, reprovisioned: 0, failed: 0 };
@@ -566,8 +807,6 @@ export class ComputerAllocator {
       const seen = new Set<string>();
 
       for (const box of boxes) {
-        // Somebody else's machine on a shared account: not ours to touch.
-        if (!isOurs(box)) continue;
         seen.add(box.id);
         const row = rows.find((computer) => computer.externalId === box.id);
         if (row) {
@@ -581,28 +820,6 @@ export class ComputerAllocator {
         }
 
         const botId = box.metadata?.botId;
-        // Adoption hands a machine to a bot, so the bot's owner must be somebody
-        // this account may serve. A user's key is for that user's own bots; a
-        // managed account and one with no recorded owner serve anyone. Without
-        // this, a bot on a shared key could label a machine with another bot's
-        // id and have reconcile bind it across users.
-        //
-        // An owner that cannot be resolved is allowed through rather than
-        // refused: the store says that happens, and refusing would strand every
-        // box whose bot row is being created as reconcile runs. The case worth
-        // stopping is two *different* known owners.
-        const botOwner = botId ? await this.store.botOwnerUserId(botId) : null;
-        const wrongOwner =
-          account.ownerUserId !== null && !account.managed && botOwner !== null && botOwner !== account.ownerUserId;
-        if (wrongOwner) {
-          // Not adopted, and not destroyed either. The machine says it belongs
-          // to a bot this account may not serve, which on a key two deployments
-          // share means it may be somebody else's running work. Leaving it is
-          // recoverable; deleting it is not.
-          this.#log(`reconcile ${account.label}: ${box.id} is labelled for another owner, leaving it`);
-          summary.failed += 1;
-          continue;
-        }
         if (botId && (await this.store.botExists(botId))) {
           // Adoption books a row against this account, so it has to respect the
           // same capacity the provisioning path does. Without this a reconcile
@@ -702,7 +919,7 @@ export class ComputerAllocator {
 
     while (true) {
       try {
-        const ref = await provider.provision({ metadata: { [OWNER_TAG]: "1", botId }, ttlSeconds: this.config.ttlSeconds });
+        const ref = await provider.provision({ metadata: { botId }, ttlSeconds: this.config.ttlSeconds });
         return { ok: true, ref };
       } catch (error) {
         const providerError = asProviderError(error);
@@ -813,6 +1030,7 @@ export class ComputerAllocator {
     account: AccountRecord,
     wake: Extract<WakeOutcome, { ok: false }>,
     options: EnsureReadyOptions,
+    availability: PoolAvailability,
     depth: number,
   ): Promise<EnsureReadyResult> {
     if (wake.code === "not_found" || wake.code === "timeout") {
@@ -823,21 +1041,40 @@ export class ComputerAllocator {
           ? "The computer disappeared; building a new one."
           : "The computer would not wake; building a new one.",
         options,
+        availability,
         depth,
       );
     }
     if (wake.code === "quota") {
-      return { ok: false, reason: "Every computer account is busy right now.", blocked: true };
+      return {
+        ok: false,
+        reason: "Every computer account is busy right now.",
+        blocked: true,
+        failure: classifyFailure({ accounts: 1, availability, failures: [{ code: "quota", message: wake.message }] }),
+      };
     }
     if (wake.code === "auth") {
       await this.#markAccountBroken(account, new ProviderError("auth", wake.message));
-      return { ok: false, reason: "The computer account's credentials were rejected.", blocked: true };
+      return {
+        ok: false,
+        reason: "The computer account's credentials were rejected.",
+        blocked: true,
+        failure: {
+          code: "provider_error",
+          summary: `The ${account.provider} credentials for this workspace were rejected when the machine tried to wake.`,
+          detail: wake.message,
+          resolution: `The user can replace the ${account.provider} key in Settings, under Computer.`,
+          userAction: "configure",
+          retryable: false,
+        },
+      };
     }
     await this.store.updateComputer(computer.id, { status: "awake" });
     return {
       ok: false,
       reason: "The computer is restarting; try again in a moment.",
       blocked: false,
+      failure: transientFailure("The machine is restarting and was not ready yet.", true),
     };
   }
 
@@ -847,19 +1084,50 @@ export class ComputerAllocator {
     account: AccountRecord,
     providerError: ProviderError,
     options: EnsureReadyOptions,
+    availability: PoolAvailability,
     depth: number,
   ): Promise<EnsureReadyResult> {
     if (providerError.code === "not_found") {
-      return this.#replace(botId, computer, "The computer disappeared; building a new one.", options, depth);
+      return this.#replace(botId, computer, "The computer disappeared; building a new one.", options, availability, depth);
     }
     if (providerError.code === "auth") {
       await this.#markAccountBroken(account, providerError);
-      return { ok: false, reason: "The computer account's credentials were rejected.", blocked: true };
+      return {
+        ok: false,
+        reason: "The computer account's credentials were rejected.",
+        blocked: true,
+        failure: {
+          code: "provider_error",
+          summary: `The ${account.provider} credentials for this workspace were rejected.`,
+          detail: providerError.message,
+          resolution: `The user can replace the ${account.provider} key in Settings, under Computer.`,
+          userAction: "configure",
+          retryable: false,
+        },
+      };
     }
     if (providerError.code === "timeout" || providerError.code === "unavailable") {
-      return { ok: false, reason: "The computer is restarting; try again in a moment.", blocked: false };
+      return {
+        ok: false,
+        reason: "The computer is restarting; try again in a moment.",
+        blocked: false,
+        failure: transientFailure(`${account.provider} could not be reached, so the machine was not used.`, true),
+      };
     }
-    return { ok: false, reason: "The computer could not be reached.", blocked: false };
+    return {
+      ok: false,
+      reason: "The computer could not be reached.",
+      blocked: false,
+      failure: {
+        code: "provider_error",
+        summary: `The machine could not be reached through ${account.provider}.`,
+        detail: `${providerError.code}: ${providerError.message}`,
+        resolution:
+          "Retrying once is reasonable. If it keeps failing, the user can check the provider key in Settings, under Computer.",
+        userAction: "configure",
+        retryable: true,
+      },
+    };
   }
 
   async #replace(
@@ -867,30 +1135,24 @@ export class ComputerAllocator {
     computer: ComputerRecord,
     reason: string,
     options: EnsureReadyOptions,
+    availability: PoolAvailability,
     depth: number,
   ): Promise<EnsureReadyResult> {
-    if (depth >= 2) return { ok: false, reason, blocked: true };
+    if (depth >= 2) {
+      return { ok: false, reason, blocked: true, failure: transientFailure(reason) };
+    }
     await this.#destroyComputer(computer);
     await this.store.releaseComputer(botId);
-    const allocation = await this.allocateForBot(botId);
+    const allocation = await this.allocateForBot(botId, options, availability);
     if (allocation.state !== "ready") {
-      return { ok: false, reason: allocation.reason ?? reason, blocked: true };
+      return {
+        ok: false,
+        reason: allocation.reason ?? reason,
+        blocked: true,
+        ...(allocation.failure ? { failure: allocation.failure } : {}),
+      };
     }
-    return this.#ensureReady(botId, options, depth + 1);
-  }
-
-  async #destroyComputer(computer: ComputerRecord): Promise<void> {
-    const account = (await this.store.listAccounts()).find((entry) => entry.id === computer.accountId);
-    if (account) {
-      try {
-        const provider = this.#provider(account);
-        await this.#withBoxLock(computer.id, () => provider.destroy(toRef(computer)));
-      } catch (error) {
-        this.#log(`destroy ${computer.externalId}: ${asProviderError(error).code}`);
-      }
-    }
-    await this.store.deleteLeasesForComputer(computer.id);
-    await this.store.updateComputer(computer.id, { status: "deleted" });
+    return this.#ensureReady(botId, options, availability, depth + 1);
   }
 
   async #takeLease(
@@ -940,16 +1202,22 @@ export class ComputerAllocator {
     return { code: providerError.code, message: providerError.message };
   }
 
-  async #block(botId: string, reason: string): Promise<AllocateResult> {
-    await this.store.setBindingState(botId, "blocked", reason);
-    return { state: "blocked", reason };
+  /**
+   * Record that the bot cannot get a computer, with the explanation the model
+   * will relay. The `reason` string stays because the run record and the UI read
+   * it; `failure` is the structured form that carries what the user can do.
+   */
+  async #block(botId: string, input: Parameters<typeof classifyFailure>[0]): Promise<AllocateResult> {
+    const failure = classifyFailure(input);
+    await this.store.setBindingState(botId, "blocked", failure.summary);
+    return { state: "blocked", reason: failure.summary, failure };
   }
 
   #provider(account: AccountRecord): ComputerProvider {
     const cached = this.#providerCache.get(account.id);
-    if (cached?.credential === account.encryptedCredential) return cached.provider;
+    if (cached) return cached;
     const provider = this.#providers(account);
-    this.#providerCache.set(account.id, { credential: account.encryptedCredential, provider });
+    this.#providerCache.set(account.id, provider);
     return provider;
   }
 
@@ -997,30 +1265,35 @@ export class ComputerAllocator {
 
 type WakeOutcome = { ok: true } | { ok: false; code: ProviderErrorCode; message: string };
 
-/**
- * The metadata key every box we create carries. Reconcile uses it to tell our
- * machines from the ones already sitting on a provider account a user connected:
- * that account's inventory is theirs, and deleting a machine we did not create
- * would be destroying someone's work.
- *
- * It is a metadata label rather than a naming convention so both providers carry
- * it unchanged — Instabox takes `metadata`, Agent37 echoes `metadata` back.
- */
-export const OWNER_TAG = "terabot";
-
-/**
- * True when a provider-reported machine was created by this deployment. A box
- * with a `botId` counts too: that id only exists because we minted it.
- */
-export function isOurs(box: { metadata?: Record<string, string> | undefined }): boolean {
-  return box.metadata?.[OWNER_TAG] === "1" || Boolean(box.metadata?.botId);
-}
-
 type InventoryEntry = ComputerRef & {
   name: string;
   status: ComputerStatus;
   metadata?: Record<string, string>;
 };
+
+/**
+ * A failure with no user action: the machine or the provider is momentarily
+ * unavailable, and trying again is the whole remedy. Used where a specific
+ * provider error has already been turned into a sentence.
+ */
+function transientFailure(detail: string, retryable = true): ComputerFailure {
+  return {
+    code: "provider_error",
+    summary: "The computer was not available for this attempt.",
+    detail,
+    resolution: retryable
+      ? "Nothing to configure and nothing to buy: trying again in a moment is the fix."
+      : "Retrying may not help; the provider's own status is the thing to watch.",
+    userAction: retryable ? "wait" : "none",
+    retryable,
+  };
+}
+
+export function asProviderError(error: unknown): ProviderError {
+  if (error instanceof ProviderError) return error;
+  return new ProviderError("unknown", error instanceof Error ? error.message : String(error));
+}
+
 
 /**
  * Which accounts may serve this bot.
@@ -1049,7 +1322,7 @@ export function eligibleAccounts(accounts: AccountRecord[], ownerUserId: string 
  * sits last is that a development stub lives there, so it must never outrank a
  * real deployment computer.
  */
-function accountClass(account: AccountRecord, ownerUserId: string | null): number {
+export function accountClass(account: AccountRecord, ownerUserId: string | null): number {
   if (!account.managed && ownerUserId !== null && account.ownerUserId === ownerUserId) return 0;
   if (account.managed) return 1;
   return 2;
@@ -1081,9 +1354,4 @@ export function describeFailures(failures: Array<{ code: ProviderErrorCode; mess
   if (codes.has("rate_limited")) return "The computer accounts are rate-limited right now.";
   if (codes.size === 0) return "A computer could not be provisioned.";
   return "A computer could not be provisioned.";
-}
-
-export function asProviderError(error: unknown): ProviderError {
-  if (error instanceof ProviderError) return error;
-  return new ProviderError("unknown", error instanceof Error ? error.message : String(error));
 }

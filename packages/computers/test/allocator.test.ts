@@ -168,7 +168,15 @@ describe("allocator — picking an account", () => {
     expect(fake("a").calls.provision).toBe(1);
     const binding = await store.botBinding("bot-1");
     expect(binding?.state).toBe("blocked");
-    expect(binding?.reason).toContain("full");
+    // The model, not a card, is what tells the user: "all busy" must carry no
+    // purchase prompt, because there is nothing to buy.
+    expect(result.failure?.code).toBe("all_busy");
+    expect(result.failure?.userAction).toBe("wait");
+    // No purchase prompt: a busy machine is not a reason to sell a plan. The
+    // wording may mention "this plan" descriptively, so the assertion is on the
+    // advice, not on a word.
+    expect(result.failure?.resolution).not.toContain("Billing");
+    expect(result.failure?.resolution).not.toContain("choose a plan");
   });
 
   it("parks an account when the provider rate-limits it and uses another", async () => {
@@ -198,7 +206,11 @@ describe("allocator — picking an account", () => {
     expect(fake("a").calls.provision).toBe(1);
     const account = (await store.listAccounts()).find((entry) => entry.id === "a");
     expect(account?.status).toBe("error");
-    expect((await store.botBinding("bot-1"))?.reason).toContain("plan");
+    // A refused template is the provider's problem, so the user is pointed at
+    // the credential, not told to buy a plan they may already have.
+    expect(result.failure?.code).toBe("provider_error");
+    expect(result.failure?.resolution).toContain("Settings");
+    expect(result.failure?.detail).toContain("template_refused");
   });
 
   it("blocks a bot with a reason when no account is connected at all", async () => {
@@ -210,7 +222,11 @@ describe("allocator — picking an account", () => {
     expect(result.state).toBe("blocked");
     const binding = await store.botBinding("bot-1");
     expect(binding?.state).toBe("blocked");
-    expect(binding?.reason).toBe("No computer account is connected.");
+    // No provider at all is a setting the user can change, and the wording has
+    // to say so: this is the whole message they will ever see.
+    expect(result.failure?.code).toBe("no_provider");
+    expect(result.failure?.userAction).toBe("configure");
+    expect(binding?.reason).toContain("no computer provider is configured");
   });
 
   it("retries an allocation on the next use after a blocked attempt", async () => {
@@ -369,55 +385,6 @@ describe("allocator — reconcile", () => {
     expect(binding?.computer?.externalId).toBe(ref.id);
   });
 
-  it("adopts a box whose bot's owner cannot be resolved, rather than stranding it", async () => {
-    // The store says an owner can be unresolvable — a bot row mid-creation, or a
-    // workspace read that failed. Refusing those would strand a box that is
-    // already booting and leave the bot with no computer, so the check must
-    // allow an unknown owner through and only stop two *different* known ones.
-    const { store, allocator, fake } = harness();
-    store.addBot("bot-1");
-    store.addAccount({ id: "a", capacity: 5, ownerUserId: "user-1" });
-    const ref = await fake("a").provision({ metadata: { botId: "bot-1" } });
-
-    const summary = await allocator.reconcile();
-
-    expect(store.botOwners.get("bot-1")).toBeUndefined();
-    expect(summary.adopted).toBe(1);
-    const binding = await store.botBinding("bot-1");
-    expect(binding?.computer?.externalId).toBe(ref.id);
-  });
-
-  it("refuses to adopt a box labelled with another user's bot", async () => {
-    // A user's own key serves that user's bots. A machine carrying a different
-    // user's botId must not be adopted onto their account and billed to them.
-    const { store, allocator, fake } = harness();
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-2");
-    store.addAccount({ id: "a", capacity: 5, ownerUserId: "user-1" });
-    const ref = await fake("a").provision({ metadata: { botId: "bot-1" } });
-
-    const summary = await allocator.reconcile();
-
-    expect(summary.adopted).toBe(0);
-    expect(await store.botBinding("bot-1")).toBeNull();
-    // Not adopted, and not silently destroyed either: it becomes the ownerless
-    // case below on a later pass, where the account may still be asked about it.
-    expect((await fake("a").listComputers()).some((box) => box.id === ref.id)).toBe(true);
-  });
-
-  it("adopts onto a managed account regardless of whose bot it is", async () => {
-    const { store, allocator, fake } = harness();
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-2");
-    store.addAccount({ id: "a", capacity: 5, managed: true, ownerUserId: null });
-    const ref = await fake("a").provision({ metadata: { botId: "bot-1" } });
-
-    const summary = await allocator.reconcile();
-
-    expect(summary.adopted).toBe(1);
-    expect((await store.botBinding("bot-1"))?.computer?.externalId).toBe(ref.id);
-  });
-
   it("refuses to adopt a box past the account's capacity", async () => {
     const { store, allocator, fake } = harness();
     store.addBot("bot-1");
@@ -524,79 +491,195 @@ describe("allocator — capacity, account health and wake auth", () => {
   });
 });
 
-describe("allocator — managed and user-supplied accounts", () => {
-  it("gives a bot with no plan a managed computer with no configuration", async () => {
+describe("allocator — one provider being out of capacity does not fail the use", () => {
+  it("tries every configured provider and uses one that still has room", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "ws-1");
+    // Equal capacity, so the tiebreak is the provider name: boat is asked first,
+    // then instabox. Both are workspace-configured, so the managed-first rule
+    // does not decide this.
+    store.addAccount({ id: "boat", provider: "boat", label: "boat", capacity: 5, managed: false, ownerUserId: "ws-1" });
+    store.addAccount({ id: "ib", provider: "instabox", label: "instabox", capacity: 5, managed: false, ownerUserId: "ws-1" });
+
+    // boat is not locally full: only the provider's own refusal can move on.
+    // `quota` is the code the allocator never retries, so the refusal is final
+    // and the next provider is the only way forward.
+    fake("boat").fail("provision", new ProviderError("quota", "this plan already has its machine"));
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("ready");
+    expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("ib");
+    // The first provider was really asked and really refused, and only then was
+    // the second one used: one provider being out of capacity did not fail the use.
+    expect(fake("boat").calls.provision).toBe(1);
+    expect(fake("ib").calls.provision).toBe(1);
+    expect(fake("ib").calls.destroy).toBe(0);
+  });
+
+  it("reports all_busy with no purchase prompt only after every provider refuses", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "ws-1");
+    store.addAccount({ id: "a", label: "a", provider: "instabox", capacity: 5, managed: false, ownerUserId: "ws-1" });
+    store.addAccount({ id: "b", label: "b", provider: "boat", capacity: 5, managed: false, ownerUserId: "ws-1" });
+    fake("a").fail("provision", new ProviderError("quota", "full"));
+    fake("b").fail("provision", new ProviderError("rate_limited", "slow down", { retryAfterSeconds: 30 }));
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("blocked");
+    // Both were tried: one provider being full is not the answer.
+    expect(fake("a").calls.provision).toBe(1);
+    expect(fake("b").calls.provision).toBe(1);
+    expect(result.failure?.code).toBe("all_busy");
+    expect(result.failure?.userAction).toBe("wait");
+  });
+
+  it("orders identically on every run: hosted first, then the user's own key, then managed", async () => {
     const { store, allocator } = harness();
     store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-new");
-    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 1 });
+    store.botOwners.set("bot-1", "ws-1");
+    store.addAccount({ id: "z-user", label: "z", provider: "instabox", capacity: 4, managed: false, ownerUserId: "ws-1" });
+    store.addAccount({ id: "a-managed", label: "a", provider: "instabox", capacity: 4, managed: true });
+
+    // A user's own key is spent before the deployment's pool, even though "a"
+    // sorts first: their key is the one they chose for their bots.
+    const first = await allocator.allocateForBot("bot-1");
+    expect(first.state).toBe("ready");
+    expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("z-user");
+  });
+});
+
+describe("allocator — a workspace only reaches its own accounts", () => {
+  it("never spends another workspace's key", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1", "ws-1");
+    store.botOwners.set("bot-1", "ws-1");
+    store.addAccount({ id: "theirs", provider: "instabox", label: "theirs", capacity: 5, managed: false, ownerUserId: "ws-2" });
+    store.addAccount({ id: "mine", provider: "boat", label: "mine", capacity: 5, managed: false, ownerUserId: "ws-1" });
 
     const result = await allocator.allocateForBot("bot-1");
 
     expect(result.state).toBe("ready");
-    expect((await store.botBinding("bot-1"))?.state).toBe("ready");
-  });
-
-  it("prefers the user's own account over a managed one for their own bot", async () => {
-    const { store, allocator, fake } = harness();
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-a");
-    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 5 });
-    store.addAccount({ id: "mine", label: "My Instabox", ownerUserId: "user-a", capacity: 5 });
-
-    await allocator.allocateForBot("bot-1");
-
-    expect(fake("mine").calls.provision).toBe(1);
-    expect(fake("managed").calls.provision).toBe(0);
-  });
-
-  it("falls back to managed capacity when the user's own account is full", async () => {
-    const { store, allocator, fake } = harness();
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-a");
-    store.addAccount({ id: "mine", label: "My Instabox", ownerUserId: "user-a", capacity: 1 });
-    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 1 });
-    // Their own single box is already taken by another of their bots.
-    store.addBot("bot-2");
-    store.botOwners.set("bot-2", "user-a");
-    store.addComputer({ accountId: "mine", externalId: "mine-box-1", metadata: { botId: "bot-2" } });
-
-    const result = await allocator.allocateForBot("bot-1");
-
-    expect(result.state).toBe("ready");
-    expect(fake("managed").calls.provision).toBe(1);
-  });
-
-  it("does not hand one user's account to another user's bot", async () => {
-    const { store, allocator, fake } = harness();
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-a");
-    store.addAccount({ id: "theirs", label: "Their Instabox", ownerUserId: "user-b", capacity: 5 });
-
-    const result = await allocator.allocateForBot("bot-1");
-
-    expect(result.state).toBe("blocked");
+    expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("mine");
     expect(fake("theirs").calls.provision).toBe(0);
-    expect((await store.botBinding("bot-1"))?.reason).toContain("no managed capacity");
   });
+});
 
-  it("says no managed computer is available rather than spinning when capacity is gone", async () => {
+describe("allocator — a bot never gets a second box", () => {
+  it("destroys the loser when two allocations race past the in-process lock", async () => {
+    const { store, allocator } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", capacity: 5 });
+
+    // Two processes would each pass their own lock; the store's atomic bind is
+    // what resolves it. Simulate that by clearing the binding between them.
+    const first = await allocator.allocateForBot("bot-1");
+    expect(first.state).toBe("ready");
+    await store.setBindingState("bot-1", "unbound", null);
+    const existing = (await store.botBinding("bot-1"))?.computer;
+    // The bot still holds a live box: a second allocation must reuse it, never
+    // create another, even though the binding state says otherwise.
+    expect(existing).not.toBeNull();
+
+    const second = await allocator.allocateForBot("bot-1");
+    expect(second.state).toBe("ready");
+    const computers = await store.listComputers();
+    expect(computers.filter((computer) => computer.status !== "deleted")).toHaveLength(1);
+  });
+});
+
+describe("allocator — destroy on bot delete, and the orphan path", () => {
+  it("destroys the box at the provider when the bot is deleted", async () => {
     const { store, allocator, fake } = harness();
     store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-new");
-    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 1 });
-    fake("managed").fail("provision", new ProviderError("no_capacity", "no host has room"), 99);
+    store.addAccount({ id: "a", capacity: 5 });
+    await allocator.allocateForBot("bot-1");
+    const box = (await store.botBinding("bot-1"))?.computer;
+    expect(box).not.toBeNull();
 
-    const result = await allocator.allocateForBot("bot-1");
+    await allocator.destroyForBot("bot-1");
 
-    expect(result.state).toBe("blocked");
-    expect(result.reason).toBe("No managed computer is available right now.");
-    // Blocked, not stuck: the binding carries the sentence the composer shows.
-    const binding = await store.botBinding("bot-1");
-    expect(binding?.state).toBe("blocked");
-    expect(binding?.reason).toBe("No managed computer is available right now.");
+    expect(fake("a").calls.destroy).toBe(1);
+    expect((await store.getComputer(box!.id))?.status).toBe("deleted");
+    expect(await store.listOrphans()).toHaveLength(0);
   });
 
+  it("records an orphan with everything a later delete needs when the provider refuses", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", capacity: 5 });
+    await allocator.allocateForBot("bot-1");
+    const box = (await store.botBinding("bot-1"))?.computer;
+    fake("a").fail("destroy", new ProviderError("unavailable", "provider is down"));
+
+    await allocator.destroyForBot("bot-1");
+
+    // The delete completed locally...
+    expect((await store.getComputer(box!.id))?.status).toBe("deleted");
+    // ...and the box that is still billing is on the record, in full.
+    const orphans = await store.listOrphans();
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0]).toMatchObject({
+      provider: "fake",
+      externalId: box!.externalId,
+      reason: "bot-delete",
+      accountId: "a",
+    });
+    expect(orphans[0]?.lastError).toContain("unavailable");
+  });
+
+  it("reaps the orphan once the provider answers again, and forgets it", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", capacity: 5 });
+    await allocator.allocateForBot("bot-1");
+    fake("a").fail("destroy", new ProviderError("unavailable", "provider is down"));
+    await allocator.destroyForBot("bot-1");
+    expect(await store.listOrphans()).toHaveLength(1);
+
+    const reaped = await allocator.reapOrphans();
+
+    expect(reaped).toEqual({ reaped: 1, failed: 0 });
+    expect(await store.listOrphans()).toHaveLength(0);
+  });
+
+  it("keeps the orphan and counts the attempt when it still will not go", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", capacity: 5 });
+    await allocator.allocateForBot("bot-1");
+    fake("a").fail("destroy", new ProviderError("unavailable", "down"), 2);
+    await allocator.destroyForBot("bot-1");
+
+    const reaped = await allocator.reapOrphans();
+
+    expect(reaped).toEqual({ reaped: 0, failed: 1 });
+    const orphans = await store.listOrphans();
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0]?.attempts).toBe(1);
+  });
+
+  it("destroys every box a deleted workspace still owns", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1", "ws-1");
+    store.addBot("bot-2", "ws-1");
+    store.botOwners.set("bot-1", "ws-1");
+    store.botOwners.set("bot-2", "ws-1");
+    store.addAccount({ id: "a", capacity: 5, managed: false, ownerUserId: "ws-1" });
+    await allocator.allocateForBot("bot-1");
+    await allocator.allocateForBot("bot-2");
+
+    const summary = await allocator.destroyForWorkspace("ws-1");
+
+    expect(summary.destroyed).toBe(2);
+    expect(fake("a").calls.destroy).toBe(2);
+  });
+});
+
+describe("allocator — capability requirements", () => {
   it("allocates on an Agent37-only deployment when the caller asks for nothing", async () => {
     // The default must not take a working provider out of the pool. A box with no
     // framebuffer still runs commands and moves files, so a bot that never looks
@@ -697,21 +780,61 @@ describe("allocator — managed and user-supplied accounts", () => {
     expect(fake("ibx").calls.provision).toBe(1);
     expect(fake("a37").calls.provision).toBe(1);
   });
+});
 
-  it("reports every account being full by name, not as a single provider's failure", async () => {
+describe("allocator — an unknown plan limit defers to the provider", () => {
+  it("does not cap a user account at one box when its capacity is unknown", async () => {
     const { store, allocator, fake } = harness();
+    store.addBot("bot-1", "ws-1");
+    store.addBot("bot-2", "ws-1");
+    store.botOwners.set("bot-1", "ws-1");
+    store.botOwners.set("bot-2", "ws-1");
+    // capacity 0 is "the deployment does not know this plan": the provider decides.
+    store.addAccount({ id: "mine", capacity: 0, managed: false, ownerUserId: "ws-1" });
+
+    const first = await allocator.allocateForBot("bot-1");
+    const second = await allocator.allocateForBot("bot-2");
+
+    expect(first.state).toBe("ready");
+    expect(second.state).toBe("ready");
+    // Both bots got a box from the same account rather than the second being
+    // refused on a limit the deployment invented.
+    expect(fake("mine").calls.provision).toBe(2);
+  });
+
+  it("still honours a capacity the account actually states", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1", "ws-1");
+    store.addBot("bot-2", "ws-1");
+    store.botOwners.set("bot-1", "ws-1");
+    store.botOwners.set("bot-2", "ws-1");
+    store.addAccount({ id: "small", capacity: 1, managed: false, ownerUserId: "ws-1" });
+
+    expect((await allocator.allocateForBot("bot-1")).state).toBe("ready");
+    const second = await allocator.allocateForBot("bot-2");
+
+    expect(second.state).toBe("blocked");
+    expect(fake("small").calls.provision).toBe(1);
+  });
+});
+
+describe("allocator — recovering from a box the provider no longer has", () => {
+  it("rebinds a bot whose box was marked deleted, instead of blocking forever", async () => {
+    const { store, allocator } = harness();
     store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-new");
-    store.addAccount({ id: "ibx", label: "A Instabox", managed: true, capacity: 1 });
-    store.addAccount({ id: "a37", label: "B Agent37", managed: true, capacity: 1 });
-    fake("ibx").fail("provision", new ProviderError("quota", "full"), 99);
-    fake("a37").fail("provision", new ProviderError("quota", "full"), 99);
+    store.addAccount({ id: "a", capacity: 5 });
+    await allocator.allocateForBot("bot-1");
+    const lost = (await store.botBinding("bot-1"))!.computer!;
 
-    const result = await allocator.allocateForBot("bot-1");
+    // The provider lost the box: the sweep marks the row deleted but the bot's
+    // link is still the one the unique index sees.
+    await store.updateComputer(lost.id, { status: "deleted" });
 
-    expect(result.state).toBe("blocked");
-    expect(result.reason).toBe("Every computer account is full right now.");
-    expect(fake("ibx").calls.provision).toBe(1);
-    expect(fake("a37").calls.provision).toBe(1);
+    const result = await allocator.ensureReady("bot-1");
+
+    expect(result.ok).toBe(true);
+    expect(result.computerId).not.toBe(lost.id);
+    const live = (await store.listComputers()).filter((computer) => computer.status !== "deleted");
+    expect(live).toHaveLength(1);
   });
 });

@@ -1,3 +1,4 @@
+import type { PoolAvailability } from "./failures.ts";
 import type {
   AccountPatch,
   AccountRecord,
@@ -8,6 +9,8 @@ import type {
   ComputerStore,
   CreateComputerInput,
   LeaseRecord,
+  OrphanReason,
+  OrphanRecord,
 } from "./types.ts";
 
 interface MemoryBinding {
@@ -22,24 +25,27 @@ interface MemoryBinding {
 export class MemoryComputerStore implements ComputerStore {
   readonly accounts = new Map<string, AccountRecord>();
   readonly computers = new Map<string, ComputerRecord>();
-  readonly bots = new Set<string>();
+  readonly bots = new Map<string, string>();
   readonly bindings = new Map<string, MemoryBinding>();
   readonly leases = new Map<string, LeaseRecord>();
+  readonly orphans = new Map<string, OrphanRecord>();
   #counter = 0;
+  #orphanSeq = 0;
 
-  addBot(botId: string): void {
-    this.bots.add(botId);
+  /** Register a bot with the workspace it belongs to. */
+  addBot(botId: string, workspaceId = "ws-1"): void {
+    this.bots.set(botId, workspaceId);
   }
 
   addAccount(input: Partial<AccountRecord> & { id: string }): AccountRecord {
     const account: AccountRecord = {
+      ownerUserId: null,
+      managed: false,
       provider: "fake",
       label: input.id,
       encryptedCredential: "memory",
       status: "active",
       capacity: 5,
-      managed: false,
-      ownerUserId: null,
       parkedUntil: null,
       lastError: null,
       ...input,
@@ -56,6 +62,17 @@ export class MemoryComputerStore implements ComputerStore {
 
   async listAccounts(): Promise<AccountRecord[]> {
     return [...this.accounts.values()].map((account) => ({ ...account }));
+  }
+
+  async poolAvailabilityFor(botId: string): Promise<PoolAvailability> {
+    void botId;
+    const workspaceId = this.bots.get(botId);
+    return {
+      managedPool: [...this.accounts.values()].some(
+        (account) => account.managed && account.status === "active",
+      ),
+      planMissing: workspaceId === "ws-noplan",
+    };
   }
 
   async updateAccount(id: string, patch: AccountPatch): Promise<void> {
@@ -86,6 +103,10 @@ export class MemoryComputerStore implements ComputerStore {
     return this.bots.has(botId);
   }
 
+  async botWorkspaceId(botId: string): Promise<string | null> {
+    return this.bots.get(botId) ?? null;
+  }
+
   /** Owners are optional in the in-memory store; tests set them when they care. */
   readonly botOwners = new Map<string, string>();
 
@@ -113,6 +134,26 @@ export class MemoryComputerStore implements ComputerStore {
       return;
     }
     this.bindings.set(botId, { botId, state, reason, computerId: null, updatedAt: new Date().toISOString() });
+  }
+
+  /**
+   * Same rule as the Postgres unique index: a bot with a live box cannot be
+   * given a second one, and the loser is told so instead of silently winning.
+   */
+  async tryBindComputer(botId: string, computer: ComputerRecord): Promise<boolean> {
+    const existing = this.bindings.get(botId);
+    if (existing?.computerId) {
+      const held = this.computers.get(existing.computerId);
+      if (held && held.status !== "deleted") return false;
+    }
+    this.bindings.set(botId, {
+      botId,
+      state: "ready",
+      reason: null,
+      computerId: computer.id,
+      updatedAt: new Date().toISOString(),
+    });
+    return true;
   }
 
   async bindComputer(botId: string, computer: ComputerRecord): Promise<void> {
@@ -147,6 +188,48 @@ export class MemoryComputerStore implements ComputerStore {
     return null;
   }
 
+  async listOrphans(): Promise<OrphanRecord[]> {
+    return [...this.orphans.values()].map((orphan) => ({ ...orphan }));
+  }
+
+  async recordOrphan(input: {
+    accountId: string | null;
+    provider: string;
+    externalId: string;
+    reason: OrphanReason;
+    botId?: string | null;
+    lastError: string;
+  }): Promise<void> {
+    // A monotonic counter, not the map size: size shrinks when a row is reaped, so
+    // `size + 1` would reuse an existing id and silently overwrite a machine that
+    // is still billing. The real store uses a uuid; this keeps the same guarantee.
+    const id = `orphan-${++this.#orphanSeq}`;
+    this.orphans.set(id, {
+      id,
+      accountId: input.accountId,
+      provider: input.provider,
+      externalId: input.externalId,
+      reason: input.reason,
+      botId: input.botId ?? null,
+      attempts: 0,
+      lastError: input.lastError,
+      lastAttemptAt: null,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  async markOrphanAttempt(id: string, error: string | null): Promise<void> {
+    const orphan = this.orphans.get(id);
+    if (!orphan) return;
+    orphan.attempts += 1;
+    orphan.lastError = error;
+    orphan.lastAttemptAt = new Date().toISOString();
+  }
+
+  async deleteOrphan(id: string): Promise<void> {
+    this.orphans.delete(id);
+  }
+
   async listLeases(): Promise<LeaseRecord[]> {
     return [...this.leases.values()].map((lease) => ({ ...lease }));
   }
@@ -172,6 +255,7 @@ export class MemoryComputerStore implements ComputerStore {
     return {
       id: `computer-${this.#counter}`,
       accountId: input.accountId ?? null,
+      workspaceId: input.workspaceId ?? null,
       provider: input.provider ?? "fake",
       externalId: input.externalId,
       status: input.status ?? "awake",
