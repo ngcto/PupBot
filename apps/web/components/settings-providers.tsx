@@ -14,10 +14,43 @@ function kindLabel(kind: string): string {
   return "OpenAI chat";
 }
 
+function compactTokens(tokens: number | null): string | null {
+  if (!tokens) return null;
+  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(1))}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
+}
+
 /**
- * Settings > Providers. A provider is configured once here — kind, key, base URL
- * — and every bot then picks this provider plus a model, so no bot dialog has to
- * ask for a key again.
+ * Where the numbers under a provider came from. A value the catalogue supplied
+ * is badged, so a filled 200k never reads as something the user typed.
+ */
+function DetailLine({ endpoint }: { endpoint: EndpointView }) {
+  const context = compactTokens(endpoint.contextWindow);
+  const bits: string[] = [];
+  if (context) bits.push(`${context} context`);
+  if (endpoint.modelId) bits.push(endpoint.modelId);
+  if (bits.length === 0) return null;
+  const auto = endpoint.detailSources.includes("contextWindow");
+  return (
+    <p className="mt-0.5 truncate text-sm text-ink-faint">
+      {bits.join(" · ")}
+      {auto ? (
+        <span
+          className="ml-1.5 rounded-pill bg-raised-3 px-1.5 py-0.5 text-xs text-ink-muted"
+          title="Filled from models.dev because it was empty. A value you type is never replaced."
+        >
+          auto
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/**
+ * Settings > Providers. A provider is configured once here — which one, its key,
+ * and a base URL only when it is a custom gateway — and every bot then picks this
+ * provider plus a model, so no bot dialog has to ask for a key again.
  */
 export function ProvidersPanel({ endpoints }: { endpoints: EndpointView[] }) {
   const router = useRouter();
@@ -32,7 +65,11 @@ export function ProvidersPanel({ endpoints }: { endpoints: EndpointView[] }) {
     setProbingId(endpoint.id);
     setError(null);
     try {
-      const result = await probeProviderEndpoint({ endpointId: endpoint.id, kind: endpoint.kind as never });
+      const result = await probeProviderEndpoint({
+        endpointId: endpoint.id,
+        kind: endpoint.kind as never,
+        builtinId: endpoint.builtinId,
+      });
       setProbes((current) => ({ ...current, [endpoint.id]: result }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "the provider could not be reached");
@@ -82,7 +119,8 @@ export function ProvidersPanel({ endpoints }: { endpoints: EndpointView[] }) {
           <div className="px-4 py-6" data-testid="providers-empty">
             <p className="text-body text-ink">No provider yet.</p>
             <p className="mt-1 text-body text-ink-secondary">
-              Add one to start a bot — OpenAI, Anthropic, or any OpenAI-compatible base URL.
+              Pick a provider and paste its key. OpenRouter, OpenCode Go, Vercel AI Gateway and
+              Ollama Cloud work as-is; anything else goes under Custom.
             </p>
           </div>
         ) : (
@@ -99,15 +137,19 @@ export function ProvidersPanel({ endpoints }: { endpoints: EndpointView[] }) {
                           {kindLabel(endpoint.kind)}
                         </span>
                       </p>
+                      {/* A built-in's address is fixed, so it is never printed;
+                          a custom gateway's is, so it can be told apart. */}
                       <p className="mt-0.5 truncate text-sm text-ink-muted">
-                        {endpoint.baseUrl ?? endpoint.builtinName ?? "Built-in provider"}
+                        {endpoint.baseUrl ?? "Built-in provider"}
                       </p>
+                      <DetailLine endpoint={endpoint} />
                       <p className="mt-0.5 text-sm text-ink-faint">
                         {endpoint.modelCount === null
                           ? "Model list not read yet"
                           : `${endpoint.modelCount} model${endpoint.modelCount === 1 ? "" : "s"} listed`}
                         {" · "}
                         {endpoint.hasKey ? "key stored" : "no key"}
+                        {endpoint.ready ? "" : " · needs a key for a bot to use it"}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
