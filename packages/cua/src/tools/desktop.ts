@@ -231,6 +231,37 @@ function positionArgs(position: ActionPosition): Record<string, unknown> {
   return { x: position.x, y: position.y };
 }
 
+/**
+ * Whether these args name something to act on.
+ *
+ * `ActionPosition` is a compile-time union, so our own callers cannot get this wrong —
+ * but a **program** can. Code mode dispatches untyped JSON, and a model that passes the
+ * native schema's word (`target`) instead of the program's (`token`) sends
+ * `element_token: undefined, x: undefined, y: undefined`. Measuring that in the
+ * benchmark's fixture, the action came back `effect: "confirmed"`, `verified: true`,
+ * `target: ""` — a verified success for a click that never happened.
+ *
+ * The driver may refuse such a call, and it should not be relied on to: it is another
+ * process, its behaviour varies by version, and a surface that reports an invented
+ * success is worse than one that reports a refusal. So the check is here, at the
+ * boundary, and it refuses rather than confirming anything.
+ */
+function namesATarget(args: Record<string, unknown>): boolean {
+  const token = args.element_token;
+  if (typeof token === "string" && token.trim() !== "") return true;
+  return typeof args.x === "number" && typeof args.y === "number";
+}
+
+/**
+ * The tools where an unnamed target is a real failure.
+ *
+ * Only these three: each is an action on *one exact element*, so the caller has to say
+ * which. `set_value` and `type_text` legitimately reach the window's focused field with
+ * no token, and asserting otherwise here broke the vault fill sink, which fills a
+ * window-scoped target from a snapshot it read itself.
+ */
+const NEEDS_A_TARGET = new Set(["click", "double_click", "right_click"]);
+
 async function act(
   driver: CuaDriver,
   tool: string,
@@ -238,6 +269,19 @@ async function act(
   options: ActOptions,
 ): Promise<CuaActionResult> {
   const started = Date.now();
+  if (NEEDS_A_TARGET.has(tool) && !namesATarget(args)) {
+    return {
+      ok: false,
+      verified: false,
+      effect: "refused",
+      refusal: {
+        code: "missing_target",
+        message: `${tool} needs an element token from a fresh observation, or window x and y`,
+      },
+      durationMs: Date.now() - started,
+      raw: {},
+    };
+  }
   const reply = await driver.call(
     tool,
     { ...args, ...(options.delivery ? { delivery_mode: options.delivery } : {}) },
