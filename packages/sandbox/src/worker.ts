@@ -2,6 +2,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { QuickJS } from "quickjs-wasi";
 import type { JSValueHandle } from "quickjs-wasi";
 import { lineFromStack, preludeFor, programOf } from "./sandbox.ts";
+import { previewOf } from "./sandbox.ts";
 import type { CallRecord, SandboxFailure } from "./sandbox.ts";
 import type { WorkerIn, WorkerOut } from "./protocol.ts";
 
@@ -182,6 +183,9 @@ async function main(): Promise<void> {
     waiting.delete(message.id);
     entry.record.ok = message.ok;
     entry.record.ms = Date.now() - startedAt - message.startedAt;
+    const preview = previewOf(message.ok ? message.value : message.message);
+    entry.record.preview = preview.text;
+    if (preview.truncated) entry.record.truncated = true;
     if (message.ok) {
       entry.deferred.resolve(vm.hostToHandle(message.value));
     } else {

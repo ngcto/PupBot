@@ -189,6 +189,95 @@ describe("discovery without a second prompt surface", () => {
   });
 });
 
+describe("the trace a silent program gets", () => {
+  const observe = (value: unknown) => ({
+    name: "observeWindow",
+    description: "Read a window.",
+    when: ["what is in a window"],
+    category: "observe" as const,
+    cost: "cheap" as const,
+    execute: async () => value,
+  });
+
+  it("shows the observation the program made and could not see", async () => {
+    // The defect this fixes: a model that observed a tree and forgot text() had the
+    // information and could not see it, so "printed nothing" was a shrug where it
+    // should be a transcript.
+    const outcome = await runCodeMode(
+      { code: `const w = await tools.observeWindow({ windowId: "w2" });` },
+      { tools: [observe({ rows: [{ token: "t1", role: "button", label: "Send" }] })] },
+    );
+    expect(outcome.text).toContain("observeWindow");
+    expect(outcome.text).toContain("t1");
+    expect(outcome.text).toContain("What your calls returned");
+  });
+
+  it("says nothing when the program printed its answer", async () => {
+    // The cap that matters most: a trace on success is how a code-mode surface
+    // quietly doubles its token cost.
+    const outcome = await runCodeMode(
+      { code: `const w = await tools.observeWindow({}); text("rows=" + w.rows.length);` },
+      { tools: [observe({ rows: [1, 2, 3] })] },
+    );
+    expect(outcome.text).toContain("rows=3");
+    expect(outcome.text).not.toContain("What your calls returned");
+  });
+
+  it("traces exactly three calls out of five, and says how many it omitted", async () => {
+    const outcome = await runCodeMode(
+      {
+        code: `
+        await tools.observeWindow({ n: 1 });
+        await tools.observeWindow({ n: 2 });
+        await tools.observeWindow({ n: 3 });
+        await tools.observeWindow({ n: 4 });
+        await tools.observeWindow({ n: 5 });
+        `,
+      },
+      { tools: [observe({ ok: 1 })] },
+    );
+    const traced = outcome.text.split("\n").filter((line) => line.startsWith("- observeWindow")).length;
+    expect(traced).toBe(3);
+    expect(outcome.text).toContain("2 earlier omitted");
+  });
+
+  it("gives at most 200 characters of a 10k-row result, and marks it truncated", async () => {
+    const rows = Array.from({ length: 10_000 }, (_, i) => ({ token: `t${i}`, label: `row ${i}` }));
+    const outcome = await runCodeMode(
+      { code: `const w = await tools.observeWindow({ windowId: "w1" });` },
+      { tools: [observe({ rows })] },
+    );
+    const line = outcome.text.split("\n").find((l) => l.startsWith("- observeWindow"))!;
+    // 200 characters of preview, plus the "- observeWindow: " prefix and the marker.
+    expect(line.length).toBeLessThan(320);
+    expect(line).toContain("[truncated]");
+    // The whole render must stay near the cap: the trace is not a route to the result.
+    expect(outcome.text.length).toBeLessThan(900);
+  });
+
+  it("keeps the whole trace under its own limit even with three long previews", async () => {
+    const outcome = await runCodeMode(
+      { code: `await tools.observeWindow({}); await tools.observeWindow({}); await tools.observeWindow({});` },
+      { tools: [observe("x".repeat(900))] },
+    );
+    expect(outcome.text.length).toBeLessThan(1100);
+  });
+
+  it("names a failed call as failed, so the model can tell which one to fix", async () => {
+    const outcome = await runCodeMode(
+      {
+        code: `
+        try { await tools.missing({}); } catch {}
+        await tools.observeWindow({});
+        `,
+      },
+      { tools: [observe({ rows: [1] })] },
+    );
+    // A throwing call still records, and its message is the preview.
+    expect(outcome.text).toContain("observeWindow");
+  });
+});
+
 describe("what a failure looks like to the model", () => {
   it("keeps the output produced before a stall, and says it is a program error", () => {
     const result: SandboxResult = {

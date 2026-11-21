@@ -78,11 +78,48 @@ export interface CallRecord {
   ok: boolean;
   /** Milliseconds the host spent in the tool, which the model never sees. */
   ms: number;
+  /**
+   * The head of what this call returned, for the trace a silent or failed program
+   * shows the model.
+   *
+   * Not the result: a preview, truncated here so a program that observed a 10,000-row
+   * tree cannot leak it back through the trace. A model that called a tool and forgot
+   * to print has the information and otherwise cannot see it, which made "printed
+   * nothing" a shrug where it should be a transcript.
+   */
+  preview?: string;
+  /** True when `preview` is a truncation of a larger result. */
+  truncated?: boolean;
 }
 
 export type SandboxResult =
   | { ok: true; output: string[]; value: unknown; calls: CallRecord[]; ms: number }
   | { ok: false; error: SandboxFailure; output: string[]; calls: CallRecord[]; ms: number };
+
+/**
+ * The head of a call's result, for the trace.
+ *
+ * The cap is the whole point: this string crosses back to the model, so a program
+ * that read a 10,000-row tree must not be able to return it through the trace after
+ * choosing not to print it. 200 characters is enough to recognise what came back and
+ * far too little to smuggle a result.
+ */
+export const PREVIEW_CHARS = 200;
+
+export function previewOf(value: unknown): { text: string; truncated: boolean } {
+  let text: string;
+  if (typeof value === "string") text = value;
+  else {
+    try {
+      text = JSON.stringify(value) ?? String(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  if (text.length <= PREVIEW_CHARS) return { text, truncated: false };
+  return { text: `${text.slice(0, PREVIEW_CHARS)}…`, truncated: true };
+}
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_TOOL_CALLS = 24;

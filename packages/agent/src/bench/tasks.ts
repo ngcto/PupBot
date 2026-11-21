@@ -167,7 +167,7 @@ export const TASKS: Task[] = [
   {
     id: 8,
     prompt:
-      "On the page, type \"quarterly\" into the search field and confirm the value landed, without taking a screenshot.",
+      "On the page there are two empty text fields. Type \"quarterly\" into the first one and confirm the value landed, without taking a screenshot.",
     property: "Acting and verifying without an image, whose cost is unmeasurable",
     needs: ["browserType", "readPage"],
     attemptable: needsTools,
