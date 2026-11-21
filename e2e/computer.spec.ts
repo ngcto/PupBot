@@ -44,22 +44,35 @@ test("a bot with no computer chats, and nothing is provisioned by opening it", a
   await expect(page.getByText("hello")).toBeVisible();
 });
 
-test("one account per provider, and the second is refused in words", async ({ page }) => {
+test("one account per provider, and the second is not offered", async ({ page }) => {
   await signUp(page);
   await openComputerSettings(page);
 
-  const panel = page.getByTestId("computer-account-instabox");
-  await expect(panel).toHaveCount(0);
+  const panel = page.getByTestId("computer-panel");
+  await expect(panel).toBeVisible();
+  /*
+   * The deployment's own pool is listed too, so the thing to count is this
+   * user's accounts, not every row: a fresh sign-up owns none.
+   */
+  await expect(page.getByTestId("computer-connect")).toBeVisible();
+  const mine = page.getByRole("button", { name: /^Disconnect / });
+  await expect(mine).toHaveCount(0);
 
-  // Connect one Instabox account.
-  await page.getByLabel("Computer provider API key").fill("ibk_e2e_fake_key");
-  await page.getByRole("button", { name: "Connect" }).click();
-  await expect(page.getByTestId("computer-account-instabox")).toBeVisible({ timeout: 20_000 });
+  // Connect one Instabox account through the panel's own flow.
+  await page.getByTestId("computer-connect").click();
+  await page.getByLabel("API key").fill("ibk_e2e_fake_key");
+  await page.getByRole("button", { name: "Save key" }).click();
 
-  // The picker no longer offers Instabox, because this workspace already has it.
-  // Trying the same provider again is what a confused person would do, so the
-  // guard has to answer in a sentence rather than by silently failing.
-  const providerSelect = page.getByLabel("Computer provider");
-  const options = await providerSelect.locator("option").allTextContents().catch(() => []);
+  await expect(page.getByRole("button", { name: /^Disconnect / })).toHaveCount(1, { timeout: 30_000 });
+
+  /*
+   * The provider is no longer on offer for a second account: `canConnect` is
+   * false for one this user already holds, so a confused person cannot even
+   * pick it. That is the guard, and it is what keeps the refusal out of the
+   * person's way rather than making them read an index name.
+   */
+  await page.getByTestId("computer-connect").click();
+  const options = await page.getByLabel("Provider").locator("option").allTextContents().catch(() => []);
   expect(options.map((option) => option.trim())).not.toContain("Instabox");
 });
+

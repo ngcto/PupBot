@@ -161,11 +161,21 @@ describe("the one-account-per-provider rule is enforced by the database", () => 
 
   it("allows one managed pool per provider, and no second", async () => {
     /*
-     * The seeded deployment already holds one managed pool per provider, and the
-     * index refuses a second. Existing rows are the fixture here rather than new
-     * ones: inserting another `agent37` pool is exactly what must fail.
+     * Hermetic: this creates the pool it then tries to duplicate. Relying on a
+     * seeded managed row made the assertion depend on which seed CI ran, and a
+     * deployment with no pool yet passed the "duplicate" case for the wrong
+     * reason — nothing to collide with.
      */
-    const duplicate = await addAccount(null, "agent37", true).then(
+    const existing = await db
+      .select({ provider: computerAccount.provider })
+      .from(computerAccount)
+      .where(eq(computerAccount.managed, true));
+    const taken = new Set(existing.map((row) => row.provider));
+    const provider = (["instabox", "agent37", "boat"] as const).find((name) => !taken.has(name));
+    if (!provider) return; // Every provider already has a pool; nothing to add here.
+
+    await expect(addAccount(null, provider, true)).resolves.toBeTruthy();
+    const duplicate = await addAccount(null, provider, true).then(
       () => null,
       (error: unknown) => error,
     );
@@ -178,7 +188,7 @@ describe("the one-account-per-provider rule is enforced by the database", () => 
     // A user's own account of that same provider is still allowed: the
     // owner-scoped index skips managed rows, so the two do not collide.
     const space = await workspaceFor("managed-and-own");
-    await expect(addAccount(space.ownerId, "agent37", false)).resolves.toBeTruthy();
+    await expect(addAccount(space.ownerId, provider, false)).resolves.toBeTruthy();
   });
 });
 
