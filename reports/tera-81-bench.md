@@ -142,6 +142,92 @@ program's trace is empty.
    several cells read "fail — and here is why it passed". The reason now comes from a rep that agrees
    with the verdict, and every verdict carries `(n/m)`.
 
+## The disclosure curve: three variants measured, and only the full index works
+
+| | B (26 schemas) | C inline (1,877) | **E names (227)** | **D lazy (146)** |
+|---|---|---|---|---|
+| Cells passed | **6/11** | 5/11 | 1/11 | 1/11 |
+| Turns | 31 | 29 | 22 | 17 |
+| Input tokens | 43,701 | 50,623 | 25,095 | **20,994** |
+
+**Cheaper is not better, and the curve does not flatten — it falls off a cliff.** Dropping from 1,877
+to 227 tokens costs four of five passing cells; dropping to 146 costs the rest. The two cheap
+variants are the two worst arms ever measured here.
+
+**Names failed differently from lazy, and the difference is instructive.** Arm D concluded there was
+nothing it could do and never called anything. Arm E *did* reach for the tools — and called them as if
+they were top-level tools rather than capabilities inside the program:
+
+> "The environment lists `listApps` and `listWindows` as available, but calling them fails in this
+> session (`listApps` returned "there is no tool called `listApps`")"
+
+That refusal is real: those names are not registered in the outer tool loop, only inside the
+sandbox. So a bare list of names is **ambiguous about how to use them**, and the ambiguity costs more
+than the tokens saved. The inline index is not just larger — each entry carries its cost and a
+situation phrase, which together say "this is a capability, here is when to reach for it".
+
+## The lazy-index experiment: measured, and it lost decisively
+
+The open question was whether the index should travel inline (1,877 tokens) or be fetched by
+`searchTools` inside the program (146 tokens). The arithmetic favoured lazy by 1,731 tokens. It is
+now measured as a fourth arm, **D**, on the same eleven tasks, same model, three reps.
+
+| | B (26 schemas) | C (inline, 1,877) | **D (lazy, 146)** |
+|---|---|---|---|
+| Cells passed | **6/11** | 5/11 | **1/11** |
+| Turns | 31 | 29 | 17 |
+| Input tokens | 43,701 | 50,623 | **20,994** |
+
+**D is the cheapest arm ever measured and the worst.** It used 20,994 input tokens against C's
+50,623 — a saving of more than half — and passed one task out of eleven. The saving is real and the
+capability is gone.
+
+**The mechanism is not a bug in `searchTools`.** Verified: `armD()` is wired correctly, its
+description is 494 characters against C's 3,748, and `searchTools({ query: "which windows exist" })`
+run in-program returns five tools. The model never made the call. Its own words, from task 1:
+
+> "I don't have access to any tools that can inspect running apps or the frontmost window. The
+> available tool set only includes `codemode`, and tool discovery returned no app/window inspection
+> tools."
+
+And from task 8:
+
+> "I can't navigate to web pages or type into text fields — no browser, web, or computer-use tools are
+> available (only `codemode`)."
+
+Every one of those runs said "only `codemode`" — the model read the prompt, saw one tool with no
+capabilities listed, and concluded there was nothing it could do. It did not search. The discovery
+instructions are present in the prompt and `searchTools` works; the model simply does not reach for a
+search when it has no evidence that searching would find anything.
+
+**So the answer to the original question is: inline wins, and not narrowly.** The 1,731 tokens were
+buying something specific and nameable — **evidence that a capability exists**. A model cannot search
+for what it does not know might be there.
+
+This was the most useful number in the benchmark until names-only was measured, and between them they
+close the question. Lazy proved that a model cannot search for what it does not know exists.
+Names-only proved that a model told only *that* tools exist will call them wrongly. **The fixed cost
+is not instructions and not evidence alone: it is a description precise enough to use.**
+
+## The lesson that generalises
+
+**A code-mode surface's fixed cost is not its instructions — it is the evidence it carries that
+capabilities exist, at the precision needed to use them.**
+
+Three variants isolate the three parts, each measured at 1,877, 227 and 146 tokens:
+
+| Carries | Tokens | Cells | What failed |
+|---|---|---|---|
+| Instructions, names, descriptions, situation phrases | 1,877 | 5/11 | — |
+| Instructions and names | 227 | 1/11 | Named tools are called as top-level tools, because a name does not say *how* |
+| Instructions only | 146 | 1/11 | The model concludes it has no capabilities and never searches |
+
+Shortening the surface works only down to the point where a model can still tell what a capability
+is for and how to reach it. Below that, every token saved is bought from the pass rate. Anyone
+building the next agent with a code-mode surface should read this as: do not prune the capability
+description to save prompt space unless you have measured what the pruning costs — and do not assume a
+search tool compensates for a prompt that says nothing.
+
 ## What this does not tell you
 
 - Nothing about real CUA: latencies, refusals, or tree shapes. That is the named second experiment
@@ -154,9 +240,9 @@ program's trace is empty.
 - Nothing conclusive about wall clock as a property of the code: these are four cores on one box, and
   the two wall columns are reported separately so a reader can see what the tools cost in time apart
   from what the model cost.
-- **The index-shape question is not closed.** The trace fix changed arm C's pass count from 3 to 4,
-  and the remaining gap is dominated by a fixed 1,877-token index that this run did not test the
-  alternative to.
+- **The index-shape question is now closed for lazy.** D at 146 tokens passed 1/11 against C's 5/11,
+  so discovery without evidence-of-existence does not work. The untested middle is names-only at 227
+  tokens.
 
 ## Reproducing it
 

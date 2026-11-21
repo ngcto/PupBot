@@ -17,7 +17,14 @@ import type { RunTool, ToolContext } from "../tools.ts";
 import { fixtureImplementations, freshWorld, treeFor, WINDOWS } from "./fixtures.ts";
 import type { WorldState } from "./fixtures.ts";
 
-export type Arm = "a" | "b" | "c";
+/**
+ * `d` is code mode with the index dropped and discovery by `searchTools`.
+ *
+ * It exists as a separate arm rather than a replacement for `c` so the inline and lazy
+ * surfaces are measured side by side on the same tasks, against the same B numbers.
+ * Reporting only the lazy variant would lose the evidence that laziness helps.
+ */
+export type Arm = "a" | "b" | "c" | "d" | "e";
 
 /**
  * The token task 9 asks for, which the fixture refuses once.
@@ -135,6 +142,20 @@ export function armB(): ArmBuild {
  * and return value — nothing else, which is the whole claim.
  */
 export function armC(): ArmBuild {
+  return codeModeArm("c", "inline");
+}
+
+/** Arm D: the same 26, discovered rather than listed. */
+export function armD(): ArmBuild {
+  return codeModeArm("d", "lazy");
+}
+
+/** Arm E: the names only — evidence that a capability exists, without what it does. */
+export function armE(): ArmBuild {
+  return codeModeArm("e", "names");
+}
+
+function codeModeArm(arm: "c" | "d" | "e", disclosure: "inline" | "lazy" | "names"): ArmBuild {
   const world = freshWorld();
   world.staleToken = STALE_TOKEN;
   const impl = fixtureImplementations(world);
@@ -155,7 +176,7 @@ export function armC(): ArmBuild {
     },
   }));
 
-  const schema = codemodeSchema(dispatchable, "host");
+  const schema = codemodeSchema(dispatchable, "host", { disclosure });
   const tool: RunTool = {
     schema: { name: schema.name, description: schema.description, parameters: schema.parameters },
     handler: async (input, context: ToolContext) => {
@@ -169,12 +190,14 @@ export function armC(): ArmBuild {
     },
   };
 
-  return { arm: "c", tools: [tool], world, log };
+  return { arm, tools: [tool], world, log };
 }
 
 export function buildArm(arm: Arm): ArmBuild {
   if (arm === "a") return armA();
   if (arm === "b") return armB();
+  if (arm === "d") return armD();
+  if (arm === "e") return armE();
   return armC();
 }
 

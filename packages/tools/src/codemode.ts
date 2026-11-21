@@ -25,7 +25,7 @@
  *    "it timed out" needs to know which three actions had already landed.
  */
 
-import { availableIndex, declarationsFor, renderIndex, searchIndex } from "@terabot/tools";
+import { availableIndex, declarationsFor, namesOf, renderIndex, searchIndex } from "@terabot/tools";
 import type { ToolEntry, ToolPlacement } from "@terabot/tools";
 import { runProgram } from "@terabot/sandbox";
 import type { CallRecord, SandboxResult, SandboxTool, ToolCallContext } from "@terabot/sandbox";
@@ -61,20 +61,53 @@ export interface CodeModeOptions {
  * 1,771 is index and 106 instructions; 146 with the instructions and no index, for
  * a search-only variant. `verify-index.mts` prices both through a real `tools` block.
  */
-export function codemodeSchema(tools: ToolEntry[], placement: ToolPlacement = "host") {
+export interface CodeModeSchemaOptions {
+  /**
+   * Whether the capability index travels in the tool description.
+   *
+   * `inline` (the default) is 1,877 tokens on the 26-entry surface and costs no turn.
+   * `lazy` is 146: the index is dropped and a program calls `searchTools` to find what
+   * it needs, which costs one call inside the sandbox rather than a model round trip.
+   * `names` is 227: the names alone, comma-joined, with no descriptions. It is evidence
+   * that a capability exists without saying what it does, which is the smallest thing
+   * that might work — `lazy` at 146 failed because the model read a prompt with nothing
+   * in it and concluded there was nothing it could do.
+   *
+   * Measured on the same eleven tasks at three reps, with the full 26-entry surface:
+   * **inline 5/11 cells, names 1/11, lazy 1/11.** Names failed because a name does not
+   * say how to use it — the model called `listApps` as a top-level tool and got a real
+   * refusal. Lazy failed because a model cannot search for what it does not know exists.
+   *
+   * `inline` is therefore the default. `lazy` and `names` stay constructible because
+   * they are the evidence for what the 1,731 tokens buy; a default recorded without its
+   * alternatives is a decision nobody can revisit.
+   */
+  disclosure?: "inline" | "lazy" | "names";
+}
+
+export function codemodeSchema(
+  tools: ToolEntry[],
+  placement: ToolPlacement = "host",
+  options: CodeModeSchemaOptions = {},
+) {
   const index = availableIndex(tools, placement);
+  const instructions = [
+    "Run JavaScript that calls tools. Call one as `await tools.<name>(args)`.",
+    "Use `text(value)` to show something to the user of this tool, or `return` a value.",
+    "Nothing you do not print reaches you: a tool's full result is yours to inspect and filter in code.",
+    "Use `await tools.searchTools({ query })` to find a tool by the situation you are in,",
+    "and `await tools.describeTool({ name })` for its exact signature.",
+  ];
+  const description = [
+    ...instructions,
+    "",
+    // Lazy keeps the discovery instructions — which are what make a search-only
+    // surface usable — and drops only the index itself.
+    ...disclosureLines(index, options.disclosure ?? "inline"),
+  ].join("\n");
   return {
     name: "codemode",
-    description: [
-      "Run JavaScript that calls tools. Call one as `await tools.<name>(args)`.",
-      "Use `text(value)` to show something to the user of this tool, or `return` a value.",
-      "Nothing you do not print reaches you: a tool's full result is yours to inspect and filter in code.",
-      "Use `await tools.searchTools({ query })` to find a tool by the situation you are in,",
-      "and `await tools.describeTool({ name })` for its exact signature.",
-      "",
-      "Available here:",
-      renderIndex(index),
-    ].join("\n"),
+    description,
     parameters: {
       type: "object",
       properties: {
@@ -86,6 +119,22 @@ export function codemodeSchema(tools: ToolEntry[], placement: ToolPlacement = "h
       required: ["code"],
     },
   };
+}
+
+/**
+ * What the schema says about which tools exist.
+ *
+ * Three answers, each measured or being measured. `inline` lists every tool with what it
+ * does; `names` lists the names only; `lazy` lists nothing and points at `searchTools`.
+ */
+function disclosureLines(index: ToolEntry[], disclosure: "inline" | "lazy" | "names"): string[] {
+  if (disclosure === "lazy") {
+    return ["The tools available here are listed by `searchTools`; nothing is listed in this prompt."];
+  }
+  if (disclosure === "names") {
+    return ["Available here (call `searchTools` for what each one does):", namesOf(index).join(", ")];
+  }
+  return ["Available here:", renderIndex(index)];
 }
 
 /**
