@@ -11,7 +11,8 @@ import {
   run,
   usageEvent,
 } from "@terabot/db";
-import { builtinNeedsKey, builtinProvider, providerHintForBaseUrl } from "@terabot/providers";
+import { serverEnv } from "@terabot/config";
+import { builtinProvider, endpointUsableForBot, providerHintForBaseUrl } from "@terabot/providers";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { listConnectionsFor } from "./apps.ts";
 import { listComputerAccounts, providerAvailability } from "./computer-accounts.ts";
@@ -25,6 +26,19 @@ import type {
   ShellUser,
   UsageView,
 } from "./types.ts";
+
+/**
+ * Whether the deployment's own credentials authenticate this row, so it needs no
+ * stored key. Mirrors the server action's rule; the two must agree or the dialog
+ * offers a provider the save path then refuses.
+ */
+function gatewayAuthenticatedByDeployment(builtinId: string | null, baseUrl: string): boolean {
+  if (builtinId !== "vercel-ai-gateway") return false;
+  const configured = serverEnv().AI_GATEWAY_BASE_URL;
+  if (!configured) return true;
+  const normalise = (value: string) => value.replace(/\/+$/, "");
+  return normalise(baseUrl) === normalise(configured);
+}
 
 function botQuery(workspaceId: string) {
   const db = database();
@@ -184,8 +198,13 @@ export async function loadShellData(input: {
       modelCount: row.modelList?.length ?? null,
       hasKey: row.hasKey,
       providerHint: providerHintForBaseUrl(builtin?.baseUrl ?? row.baseUrl) ?? null,
-      // A built-in with no key cannot answer, so bot creation must not offer it.
-      ready: !builtinNeedsKey({ builtinId: row.builtinId, hasKey: row.hasKey }),
+      // A built-in with no key cannot answer, so bot creation must not offer it;
+      // one the deployment itself authenticates is keyless by design and stays.
+      ready: endpointUsableForBot({
+        builtinId: row.builtinId,
+        hasKey: row.hasKey,
+        deploymentAuthenticated: gatewayAuthenticatedByDeployment(row.builtinId, row.baseUrl),
+      }),
       detailSources: (row.autoFilledFields ?? []) as string[],
     };
   });

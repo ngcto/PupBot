@@ -14,9 +14,9 @@ import {
 } from "@terabot/db";
 import {
   builtinForBaseUrl,
-  builtinNeedsKey,
   builtinProvider,
   createGateway,
+  endpointUsableForBot,
   endpointConfigForRow,
   listEndpointModels,
   ModelListingError,
@@ -25,6 +25,7 @@ import {
   sourcesAfterUserEdit,
 } from "@terabot/providers";
 import type { DetailField, EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
+import { serverEnv } from "@terabot/config";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
@@ -33,7 +34,7 @@ import {
 } from "../lib/computer-accounts.ts";
 import { allocateComputerInline, inlineComputers, sweepComputersInline } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
-import { endpointConfigFor, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
+import { detailColumnsFor, endpointConfigFor, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
 import type { EndpointDetailSource } from "../lib/endpoint-config.ts";
 import {
   assertPublicDestination,
@@ -100,6 +101,7 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
         id: modelEndpoint.id,
         modelId: modelEndpoint.modelId,
         builtinId: modelEndpoint.builtinId,
+        baseUrl: modelEndpoint.baseUrl,
         hasKey: sql<boolean>`${modelEndpoint.encryptedKey} is not null`,
       })
       .from(modelEndpoint)
@@ -109,7 +111,9 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
     // A built-in with no key cannot answer, so it must not be bound to a bot —
     // the dialog already hides it, and a stale form must fail with the reason
     // rather than create a bot whose first message errors.
-    if (builtinNeedsKey(chosen)) throw new Error("that provider has no key yet; add its key in Settings → Providers");
+    if (!usableForBot(chosen)) {
+      throw new Error("that provider has no key yet; add its key in Settings → Providers");
+    }
     endpointId = chosen.id;
     modelId = clean(input.modelId ?? "", 200) || chosen.modelId || null;
   } else {
@@ -118,12 +122,13 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
         id: modelEndpoint.id,
         modelId: modelEndpoint.modelId,
         builtinId: modelEndpoint.builtinId,
+        baseUrl: modelEndpoint.baseUrl,
         hasKey: sql<boolean>`${modelEndpoint.encryptedKey} is not null`,
       })
       .from(modelEndpoint)
       .where(eq(modelEndpoint.workspaceId, workspace.id))
       .orderBy(asc(modelEndpoint.createdAt));
-    const fallback = candidates.find((row) => !builtinNeedsKey(row));
+    const fallback = candidates.find((row) => usableForBot(row));
     endpointId = fallback?.id ?? null;
     modelId = fallback?.modelId ?? null;
   }
@@ -343,6 +348,28 @@ export interface EndpointInput {
   /** Optional provider default; the first id the provider lists is used when omitted. */
   modelId?: string;
   apiKey?: string;
+}
+
+/**
+ * Whether the deployment's own credentials authenticate this row, so it needs no
+ * stored key. `ensureWorkspace` seeds the AI Gateway that way on a deployment that
+ * has one; every other row needs the key the user pasted.
+ */
+function deploymentAuthenticated(endpoint: { builtinId: string | null; baseUrl: string }): boolean {
+  if (endpoint.builtinId !== "vercel-ai-gateway") return false;
+  const configured = serverEnv().AI_GATEWAY_BASE_URL;
+  if (!configured) return true;
+  const normalise = (value: string) => value.replace(/\/+$/, "");
+  return normalise(endpoint.baseUrl) === normalise(configured);
+}
+
+/** A provider a bot may be created against. */
+function usableForBot(endpoint: { builtinId: string | null; baseUrl: string; hasKey: boolean }): boolean {
+  return endpointUsableForBot({
+    builtinId: endpoint.builtinId,
+    hasKey: endpoint.hasKey,
+    deploymentAuthenticated: deploymentAuthenticated(endpoint),
+  });
 }
 
 /** The catalogue provider a kind belongs to, for defaulting a model. */
@@ -703,7 +730,10 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
     builtinId: target.builtinId,
     model: "",
     session: PROBE_SESSION,
-    ...(apiKey ? { apiKey } : stored.apiKey ? { apiKey: stored.apiKey } : {}),
+    // A key being cleared is gone for the purpose of asking the provider what it
+    // serves, or an authenticated-only model would be chosen and then left as the
+    // default of a row that no longer has the key to reach it.
+    ...(apiKey ? { apiKey } : !input.clearKey && stored.apiKey ? { apiKey: stored.apiKey } : {}),
   });
   const modelId = retargeted ? await defaultModelFor(db, effective) : endpoint.modelId;
 
@@ -726,10 +756,26 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
   });
 
   // Fields the user typed now are theirs; anything else that is still
-  // catalogue-sourced keeps its badge.
+  // catalogue-sourced keeps its badge. When the fill had something to say it is
+  // the authority on provenance — it carries earlier badges forward *and* records
+  // what it just filled, which the stored list alone cannot.
   const sources = retargeted
     ? (filled?.sources ?? [])
-    : sourcesAfterUserEdit(storedSources(endpoint), input.userSetFields ?? []);
+    : sourcesAfterUserEdit(filled?.sources ?? storedSources(endpoint), input.userSetFields ?? []);
+
+  const detailColumns = {
+    ...detailColumnsFor({
+      retargeted,
+      filled,
+      current: {
+        contextWindow: endpoint.contextWindow,
+        pricing: endpoint.pricing,
+        toolSupport: endpoint.toolSupport,
+        reasoningCapability: endpoint.reasoningCapability,
+      },
+    }),
+    autoFilledFields: sources,
+  };
 
   await db
     .update(modelEndpoint)
@@ -741,11 +787,7 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
       modelId,
       modelCatalogId: match.row?.id ?? null,
       catalogMatch: match.match,
-      contextWindow: filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
-      pricing: filled?.details.pricing ?? match.row?.pricing ?? null,
-      toolSupport: filled?.details.toolSupport ?? null,
-      reasoningCapability: filled?.details.reasoning ?? null,
-      autoFilledFields: sources,
+      ...detailColumns,
       ...(retargeted ? { modelList: null, modelListFetchedAt: null, modelListEtag: null } : {}),
       ...(apiKey ? { encryptedKey: encryptSecret(apiKey) } : input.clearKey ? { encryptedKey: null } : {}),
     })
@@ -815,12 +857,21 @@ export async function probeProviderEndpoint(input: {
     if (!endpoint) return { models: [], note: "that provider is not in this workspace", test: null };
     const stored = await endpointConfigFor(db, endpoint);
     const apiKey = input.apiKey?.trim() || stored.apiKey;
-    const draftBuiltin = builtinProvider(clean(input.builtinId ?? "", 60)) ?? builtinProvider(endpoint.builtinId);
+    const draftBaseUrl = clean(input.baseUrl ?? "", 300);
+    const draftBuiltinId = clean(input.builtinId ?? "", 60);
+    // The saved built-in is inherited only when the draft names no target at
+    // all — an ordinary "Test" on a saved row. A draft that switched to Custom
+    // or Anthropic sends a URL and no id, and must be probed where it says, not
+    // against the provider it used to be.
+    const draftBuiltin = draftBuiltinId
+      ? builtinProvider(draftBuiltinId)
+      : draftBaseUrl
+        ? undefined
+        : builtinProvider(endpoint.builtinId);
     builtinId = draftBuiltin?.id ?? null;
     let baseUrl: string;
     try {
-      const draftUrl = clean(input.baseUrl ?? "", 300) || stored.baseUrl;
-      baseUrl = assertPublicEndpointUrl(draftBuiltin?.baseUrl ?? draftUrl);
+      baseUrl = assertPublicEndpointUrl(draftBuiltin?.baseUrl ?? (draftBaseUrl || stored.baseUrl));
     } catch (error) {
       return { models: [], note: error instanceof Error ? error.message : "that base URL is not allowed", test: null };
     }
@@ -836,7 +887,7 @@ export async function probeProviderEndpoint(input: {
     unchanged =
       config.baseUrl === stored.baseUrl &&
       config.kind === stored.kind &&
-      draftBuiltin?.id === (builtinProvider(endpoint.builtinId)?.id ?? null) &&
+      builtinId === (builtinProvider(endpoint.builtinId)?.id ?? null) &&
       !input.apiKey?.trim();
   } else {
     const builtin = builtinProvider(clean(input.builtinId ?? "", 60));

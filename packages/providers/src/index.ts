@@ -49,6 +49,7 @@ export {
   builtinForBaseUrl,
   builtinNeedsKey,
   builtinProvider,
+  endpointUsableForBot,
   builtinRequestHeaders,
   isBuiltinId,
 } from "./builtins.ts";

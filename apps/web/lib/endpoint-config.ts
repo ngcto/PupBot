@@ -77,6 +77,49 @@ export interface DetailsFill {
   sources: DetailField[];
 }
 
+/** The detail columns a save writes. */
+export interface DetailColumns {
+  contextWindow: number | null;
+  pricing: ModelDetails["pricing"];
+  toolSupport: boolean | null;
+  reasoningCapability: boolean | null;
+}
+
+/**
+ * What a save should store in the detail columns.
+ *
+ * A retargeted row starts blank, so its details are whatever the fill produced. An
+ * unchanged row is the case that bites: when its model is not in the catalogue the
+ * fill returns null, and writing that as `null` would discard a stored price or a
+ * deliberate "no tool calls" on a save that only changed the label.
+ */
+export function detailColumnsFor(input: {
+  /** True when the save points the row at a different target. */
+  retargeted: boolean;
+  /** The fill's result, or null when the model is not in the catalogue. */
+  filled: DetailsFill | null;
+  /** The row as stored, for the unchanged-and-unmatched case. */
+  current: DetailColumns;
+}): DetailColumns {
+  if (input.retargeted) {
+    return {
+      contextWindow: input.filled?.details.contextWindow ?? null,
+      pricing: input.filled?.details.pricing ?? null,
+      toolSupport: input.filled?.details.toolSupport ?? null,
+      reasoningCapability: input.filled?.details.reasoning ?? null,
+    };
+  }
+  if (input.filled) {
+    return {
+      contextWindow: input.filled.details.contextWindow ?? null,
+      pricing: input.filled.details.pricing ?? null,
+      toolSupport: input.filled.details.toolSupport ?? null,
+      reasoningCapability: input.filled.details.reasoning ?? null,
+    };
+  }
+  return input.current;
+}
+
 /**
  * The gap-only fill for one endpoint's model: what the user set is left alone and
  * only an empty field is filled from models.dev. A field an earlier fill supplied

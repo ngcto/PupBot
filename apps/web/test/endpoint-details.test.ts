@@ -10,7 +10,7 @@ import {
 import type { Database } from "@terabot/db";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { detailsOf, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
+import { detailColumnsFor, detailsOf, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
 
 /**
  * The gap-only rule, proved against a real database rather than against the pure
@@ -174,6 +174,31 @@ describe.skipIf(!databaseUrl)("gap-only auto-population in Postgres", () => {
     });
   });
 
+  it("keeps every detail of an unmatched endpoint, so a label-only save cannot wipe it", async () => {
+    await inRolledBackTransaction(async (tx) => {
+      // A custom gateway whose model models.dev has never seen: prices, a typed
+      // window and a deliberate "no tool calls" are all the row has.
+      const row = await endpointRow(tx, {
+        contextWindow: 32_000,
+        pricing: { input: 1, output: 2 },
+        toolSupport: false,
+        reasoningCapability: false,
+        modelId: "not-in-the-catalogue",
+      });
+
+      const fill = await fillEndpointDetails(tx, row, "not-in-the-catalogue");
+      expect(fill).toBeNull();
+      // The save path must fall back to the row's own values rather than null,
+      // which is what a label-only save would otherwise write.
+      expect(detailsOf(row)).toEqual({
+        contextWindow: 32_000,
+        pricing: { input: 1, output: 2 },
+        toolSupport: false,
+        reasoning: false,
+      });
+    });
+  });
+
   it("changes nothing when the model is not in the catalogue", async () => {
     await inRolledBackTransaction(async (tx) => {
       const row = await endpointRow(tx, { contextWindow: 32_000 });
@@ -209,6 +234,62 @@ describe.skipIf(!databaseUrl)("gap-only auto-population in Postgres", () => {
       const second = await fillEndpointDetails(tx, written!, CATALOGUE_MODEL);
       // Nothing new to fill, but the price still came from the catalogue.
       expect(second!.sources).toEqual(["contextWindow", "pricing", "toolSupport", "reasoning"]);
+    });
+  });
+});
+
+describe("what a save writes into the detail columns", () => {
+  const mine = {
+    contextWindow: 32_000,
+    pricing: { input: 1, output: 2 },
+    toolSupport: false,
+    reasoningCapability: false,
+  };
+
+  it("keeps every stored detail when an unchanged endpoint's model is unmatched", () => {
+    // The label-only save: the fill returns null because models.dev has never
+    // heard of this model, and writing that through would erase a typed price and
+    // a deliberate "no tool calls" for a change that only touched the name.
+    expect(detailColumnsFor({ retargeted: false, filled: null, current: mine })).toEqual(mine);
+  });
+
+  it("writes the fill's result when the model IS matched", () => {
+    // The fill has already applied the gap-only rule, so its details are the
+    // merged ones: the typed window is still there beside the filled price.
+    const columns = detailColumnsFor({
+      retargeted: false,
+      filled: {
+        details: { contextWindow: 32_000, pricing: { input: 3 }, toolSupport: true, reasoning: true },
+        sources: [],
+      },
+      current: mine,
+    });
+    expect(columns).toEqual({
+      contextWindow: 32_000,
+      pricing: { input: 3 },
+      toolSupport: true,
+      reasoningCapability: true,
+    });
+  });
+
+  it("never merges the old provider's details into a matched, unchanged row", () => {
+    // A matched row takes the fill's answer as-is; only the unmatched case falls
+    // back to what was stored.
+    const columns = detailColumnsFor({
+      retargeted: false,
+      filled: { details: { contextWindow: 200_000 }, sources: ["contextWindow"] },
+      current: mine,
+    });
+    expect(columns.pricing).toBeNull();
+  });
+
+  it("starts a retargeted row blank rather than inheriting the old provider's details", () => {
+    // The old provider's window and price say nothing about the new one.
+    expect(detailColumnsFor({ retargeted: true, filled: null, current: mine })).toEqual({
+      contextWindow: null,
+      pricing: null,
+      toolSupport: null,
+      reasoningCapability: null,
     });
   });
 });
