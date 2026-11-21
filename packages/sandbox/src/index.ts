@@ -160,3 +160,23 @@ export async function runProgram(
 }
 
 export { preludeFor };
+
+export {
+  DEFAULT_MAX_OUTPUT_CHARS,
+  DEFAULT_MAX_TOOL_CALLS,
+  DEFAULT_MEMORY_BYTES,
+  DEFAULT_TIMEOUT_MS,
+  lineFromStack,
+  programOf,
+  toIdentifier,
+} from "./sandbox.ts";
+export type {
+  CallRecord,
+  RunOptions,
+  SandboxErrorKind,
+  SandboxFailure,
+  SandboxMeta,
+  SandboxResult,
+  SandboxTool,
+  ToolCallContext,
+} from "./sandbox.ts";

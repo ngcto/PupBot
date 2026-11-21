@@ -59,8 +59,14 @@ export interface ToolEntry {
   signature?: string;
 }
 
-/** The index, filtered to where the program is running. */
-export function availableIndex(entries: ToolEntry[], placement: ToolPlacement = "host"): ToolEntry[] {
+/**
+ * The index, filtered to where the program is running.
+ *
+ * Generic in the entry type so a caller that carries more than an entry — a
+ * dispatchable tool with an `execute`, say — gets its own type back instead of a
+ * bare `ToolEntry` that has to be re-widened.
+ */
+export function availableIndex<T extends ToolEntry>(entries: T[], placement: ToolPlacement = "host"): T[] {
   if (placement === "anywhere") return entries;
   return entries.filter((entry) => (entry.placement ?? "anywhere") === "anywhere" || entry.placement === placement);
 }
@@ -113,7 +119,7 @@ export function declarationsFor(entries: ToolEntry[], names: string[]): string {
  * more than the same words scattered, because "fill a form" belongs to the batch
  * tool, not to the single-field one that shares the verb.
  */
-export function searchIndex(entries: ToolEntry[], query: string): ToolEntry[] {
+export function searchIndex<T extends ToolEntry>(entries: T[], query: string): T[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return entries;
 
@@ -149,3 +155,10 @@ export function searchIndex(entries: ToolEntry[], query: string): ToolEntry[] {
 export function namesOf(entries: ToolEntry[]): string[] {
   return entries.map((entry) => entry.name);
 }
+
+export {
+  codemodeSchema,
+  renderForModel,
+  runCodeMode,
+} from "./codemode.ts";
+export type { CodeModeOptions, CodeModeToolInput, DispatchableTool } from "./codemode.ts";
