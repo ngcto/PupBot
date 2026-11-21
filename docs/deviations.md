@@ -21,6 +21,17 @@ five starter avatars taken from the package with `getExample` (`mug`, `lightbulb
 - **Eyes, depth and ink are the definition's.** Each definition carries its own eye placement; we pass
   only colour, size, `motion: "idle"`, `time: 0` and `reducedMotion: true`, so nothing of ours
   overrides the package's geometry, depth (its default 6) or `#151515` ink.
+- **The glyph is turned 12° clockwise inside its frame.** The reference set reads toward the upper right,
+  so `render.ts` wraps the drawn groups in one `rotate(12 50 50)` about the middle of the 0..100 box —
+  the definitions themselves stay exactly the package's, so a re-vendor is still mechanical, and the
+  title and defs are untouched. The angle is measured from Ng's screenshot: its trace, rotation-matched
+  against the levelled revision of the same trace, comes out at 12.25° for `square`, 14° for `hexagon`,
+  11.25° for `cloud` and `pill`, 10° for `house` and 5–8° for the lobed shapes; the clean-edged shapes
+  cluster at 11–14° and the median of the eight is 11.6°, so 12° is the dominant tilt. Every glyph
+  still fits its frame at that angle: the widest drawn extent is `witch-hat` at 47.25 units from the
+  middle of a 50-unit half box, then `camera` 44.5, `chat` 42.75, `cloud` 42.5 — none needed shrinking.
+  Rotation preserves each glyph's distance from the middle, so `sprout` (50.33) and `witch-hat` (52.05)
+  reach past a 50-unit circle whether they are turned or not; the app draws no ring, so nothing clips.
 - **Colour is ours.** The eleven palette ids and `deriveAccent()` are unchanged; the default colour is
   `ember` (`#f9670e`), the palette's nearest entry to the package's starter orange `#ff6a1a`, and the
   contact sheet shows all 14 in both.

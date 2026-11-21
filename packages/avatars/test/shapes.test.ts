@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateAvatar } from "open-bot-avatar";
-import { SHAPES, DEFAULT_SHAPE, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
+import { SHAPES, DEFAULT_SHAPE, GLYPH_TILT_DEG, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
 
 const CONTRACT_ORDER = [
   "mug",
@@ -104,6 +104,16 @@ describe("avatar registry", () => {
       expect(renderAvatarSvg({ shape: id, color: "tomato", size: 48 })).toBe(first);
       expect(first.toLowerCase()).toContain(resolveColor("tomato"));
     }
+  });
+
+  it("tilts every glyph once, about the middle of the frame", () => {
+    for (const id of CONTRACT_ORDER) {
+      const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
+      const tilts = svg.match(/rotate\(/g) ?? [];
+      expect(tilts, id).toHaveLength(1);
+      expect(svg).toContain(`<g transform="rotate(${GLYPH_TILT_DEG} 50 50)">`);
+    }
+    expect(GLYPH_TILT_DEG).toBe(12);
   });
 
   it("leaves eye colour and depth to the package", () => {
