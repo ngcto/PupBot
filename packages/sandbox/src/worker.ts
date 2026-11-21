@@ -2,7 +2,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { QuickJS } from "quickjs-wasi";
 import type { JSValueHandle } from "quickjs-wasi";
 import { lineFromStack, preludeFor, programOf } from "./sandbox.ts";
-import type { CallRecord, SandboxFailure, SandboxTool } from "./sandbox.ts";
+import type { CallRecord, SandboxFailure } from "./sandbox.ts";
 import type { WorkerIn, WorkerOut } from "./protocol.ts";
 
 /**
