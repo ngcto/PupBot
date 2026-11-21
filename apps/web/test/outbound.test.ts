@@ -19,6 +19,30 @@ describe("outbound destination checks", () => {
     }
   });
 
+  /**
+   * On a host whose egress is a NAT64 gateway, `64:ff9b::/96` is read as IPv4,
+   * so a private tail reaches the internal network even though the literal is
+   * not a mapped address.
+   */
+  it("refuses NAT64 literals carrying a private IPv4", () => {
+    for (const host of [
+      "64:ff9b::7f00:1",
+      "64:ff9b::a00:1",
+      "64:ff9b::c0a8:10a",
+      "64:ff9b::a9fe:a9fe",
+      "64:ff9b:1::7f00:1",
+    ]) {
+      expect(isPrivateOrLocalHost(host), host).toBe(true);
+    }
+    expect(() => assertPublicEndpointUrl("http://[64:ff9b::7f00:1]:8080/v1")).toThrow(/private/);
+    expect(() => assertPublicEndpointUrl("http://[64:ff9b::a00:1]/v1")).toThrow(/private/);
+  });
+
+  it("still allows a NAT64 literal carrying a public IPv4", () => {
+    expect(isPrivateOrLocalHost("64:ff9b::808:808")).toBe(false);
+    expect(assertPublicEndpointUrl("http://[64:ff9b::808:808]/v1")).toContain("64:ff9b::808:808");
+  });
+
   it("refuses dotted private hosts, localhost and link-local IPv6", () => {
     for (const host of ["127.0.0.1", "10.0.0.1", "192.168.1.10", "169.254.169.254", "localhost", "::1", "fe80::1", "fc00::1"]) {
       expect(isPrivateOrLocalHost(host), host).toBe(true);

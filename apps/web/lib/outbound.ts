@@ -19,6 +19,27 @@ function parseIpv4(host: string): number[] | null {
   return parts.every((part) => part >= 0 && part <= 255) ? parts : null;
 }
 
+function toDotted(hi: number, lo: number): string {
+  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join(".");
+}
+
+/**
+ * `64:ff9b::/96` is the NAT64 well-known prefix and `64:ff9b:1::/48` its
+ * local-use sibling: on a host whose only egress is a NAT64 gateway, these
+ * literals are read by that gateway as IPv4, so a loopback or RFC 1918 tail
+ * reaches the internal network. Read the embedded address back out (RFC 6052)
+ * and let the caller judge it like any other IPv4.
+ */
+function ipv4FromNat64(hex: number[]): string | null {
+  if (hex[0] !== 0x64 || hex[1] !== 0xff9b) return null;
+  // The well-known prefix carries the address in its last 32 bits, so it can be
+  // read and judged like any other IPv4. The local-use 64:ff9b:1::/48 spreads
+  // the octets across the middle of the address; rather than trust a mapping
+  // that depends on the gateway, that whole range is refused.
+  if (hex.slice(2, 6).every((group) => group === 0)) return toDotted(hex[6] ?? 0, hex[7] ?? 0);
+  return "0.0.0.0";
+}
+
 /** `::ffff:7f00:1` and `::ffff:127.0.0.1` are both `127.0.0.1`. */
 function ipv4FromIpv6(host: string): string | null {
   if (!host.includes(":")) return null;
@@ -32,6 +53,8 @@ function ipv4FromIpv6(host: string): string | null {
   if (groups.length !== 8) return null;
   const hex = groups.map((group) => parseInt(group, 16));
   if (hex.some((value) => Number.isNaN(value) || value < 0 || value > 0xffff)) return null;
+  const nat64 = ipv4FromNat64(hex);
+  if (nat64) return nat64;
   // Only the IPv4-carrying shapes count: ::a.b.c.d, ::ffff:a.b.c.d and the
   // translated ::ffff:0:a.b.c.d all place the address in the last 32 bits.
   const first = hex.findIndex((value) => value !== 0);
@@ -41,8 +64,7 @@ function ipv4FromIpv6(host: string): string | null {
     (first === 4 && hex[4] === 0xffff && hex[5] === 0) ||
     first >= 6;
   if (!mapped) return null;
-  const [hi, lo] = [hex[6] ?? 0, hex[7] ?? 0];
-  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join(".");
+  return toDotted(hex[6] ?? 0, hex[7] ?? 0);
 }
 
 export function normalizeHost(hostname: string): string {
