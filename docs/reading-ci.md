@@ -89,6 +89,26 @@ Run those before believing a red test suite on a machine that has been asleep, a
 "environment, then green" when reporting it — never report an un-migrated database as a failing
 change, and never "fix" it in a pull request.
 
+## When a result looks wrong, ask whether the thing you measured would do that
+
+The pattern from four defects in one benchmark, three found by asking why a *number* looked wrong and
+the fourth by asking why a *behaviour* looked wrong:
+
+- A token column read `input_tokens: 0`. Suspicious, so I checked — an adapter was dropping the field,
+  and every row would have been a lie.
+- A task was failed by both arms in every rep. The transcripts said the model recovered correctly;
+  the scorer demanded something the fixture made impossible. **A validator that cannot pass looks
+  exactly like a capability that is missing.**
+
+The check is the same one this file already applies to CI: **before theorising about why something
+was refused or why a number is bad, confirm the request was made and that the thing you measured
+could have produced that result.** A model that ignored a refusal and a scorer that never let it pass
+produce identical output.
+
+Corollary worth keeping: if a fix would have looked like an improvement on re-test, that is a reason
+to distrust it, not to ship it. A prompt change made to solve a defect nobody demonstrated will
+"work" the second time, for the same wrong reason.
+
 ## What a green board does and does not mean
 
 A green board means the change is shippable. It does not mean the change does what was asked. For
