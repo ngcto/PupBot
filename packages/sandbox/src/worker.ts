@@ -1,8 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { QuickJS } from "quickjs-wasi";
 import type { JSValueHandle } from "quickjs-wasi";
-import { lineFromStack, preludeFor, programOf } from "./sandbox.ts";
-import { previewOf } from "./sandbox.ts";
+import { lineFromStack, preludeFor, programOf, previewOf, refusalOf } from "./sandbox.ts";
 import type { CallRecord, SandboxFailure } from "./sandbox.ts";
 import type { WorkerIn, WorkerOut } from "./protocol.ts";
 
@@ -186,6 +185,13 @@ async function main(): Promise<void> {
     const preview = previewOf(message.ok ? message.value : message.message);
     entry.record.preview = preview.text;
     if (preview.truncated) entry.record.truncated = true;
+    // A refusal resolves — it is information, not a failure — so it is recorded
+    // beside `ok` rather than in place of it. Losing this is what made a program
+    // that ignored `effect` indistinguishable from one whose action worked.
+    if (message.ok) {
+      const refused = refusalOf(message.value);
+      if (refused) entry.record.refused = refused;
+    }
     if (message.ok) {
       entry.deferred.resolve(vm.hostToHandle(message.value));
     } else {

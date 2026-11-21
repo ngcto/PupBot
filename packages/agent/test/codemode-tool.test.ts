@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RunTool } from "../src/tools.ts";
-import { codemodeApplies, codemodeTool } from "../src/codemode-tool.ts";
+import { codemodeApplies, codemodeTool, isCodeMode } from "../src/codemode-tool.ts";
 
 /**
  * The wire between a run's tools and code mode.
@@ -116,6 +116,21 @@ describe("code mode as a registered tool", () => {
       },
     });
     expect(emitted).toContain("tool_call");
+  });
+
+  /**
+   * A run that already offers `codemode` is not wrapped again.
+   *
+   * The registry keys by name, so wrapping a code-mode run in code mode collapsed the
+   * two into one entry and the model was left with a shell whose index listed only
+   * itself — every honest tool name came back "there is no tool called listWindows".
+   * The benchmark measured three arms through exactly that, so this is the guard that
+   * keeps a caller's own disclosure from being overwritten by the harness's.
+   */
+  it("detects a run that is already code mode", () => {
+    const click = recordingTool("click");
+    expect(isCodeMode([click.tool])).toBe(false);
+    expect(isCodeMode([codemodeTool([click.tool])!])).toBe(true);
   });
 
   it("refuses an empty program instead of running nothing", async () => {

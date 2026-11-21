@@ -1,5 +1,16 @@
 # TERA-81 three-arm benchmark — results
 
+> **CORRECTION, 2026-11-21 — the code-mode arms in this document were never code mode.**
+>
+> `executeRun` wraps a run's tools in a `codemode` tool; arms C, D and E already handed in a tool
+> named `codemode`, so the two collapsed in a registry keyed by name and the model got a shell whose
+> index listed only `codemode`. Every code-mode number here — arm C's 5/11, the whole disclosure
+> curve, the `names` and `lazy` findings — measures a wrapper inside a wrapper, not the surface.
+>
+> **Do not quote a code-mode arm from this document.** Arm B's numbers stand: it was never wrapped.
+> The fix, what it invalidates, and the partial re-run are in
+> [`reports/ngs-85-refusals.md`](ngs-85-refusals.md).
+
 **Read this first: the desktop and browser tools in every arm were deterministic fixtures of
 the same 26 capabilities, not a real driver.** `packages/cua` is still open (PR #38) and driving a
 real desktop needs a live GUI session, so both tool-using arms got identical, local, seeded

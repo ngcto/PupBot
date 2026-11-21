@@ -276,11 +276,70 @@ export function traceFor(result: SandboxResult): string | undefined {
   return lines.join("\n");
 }
 
+/** Total characters the refusal warning may add, whatever the refusals said. */
+export const REFUSAL_CHARS = 400;
+/** Refusals shown, newest last. A program refused five times is not told five times. */
+export const REFUSAL_CALLS = 3;
+
+/**
+ * The refusals the program walked past, as a warning rather than a log line.
+ *
+ * **Why this exists.** A refusal is not an error: the ladder in `@terabot/cua` answers
+ * `effect: "refused"` with a code, and a program is expected to branch on it. But a
+ * program that *doesn't* branch on it looks, from the outside, exactly like one whose
+ * action worked — it carries on, prints whatever it prints, and returns. The result is
+ * a confident answer built on an action that never happened, and the model has no way
+ * to know, because the refusal never left the sandbox.
+ *
+ * So this is reported, never raised: making a refusal throw would turn the one common,
+ * expected outcome into an exception and force every script into `try`. The ladder's
+ * contract is right and is not changed here. What changes is that the run says the
+ * program may have continued past something that mattered — which is a claim about the
+ * program's *output*, not a line item about a call — and says it even when the program
+ * printed something, because a printed answer is exactly the case where this misleads.
+ *
+ * Bounded like the trace: recent calls only, each refusal capped by the sandbox before
+ * it crosses, the whole warning capped again here, and nothing at all when there were
+ * no refusals. A program that never called a refusable tool pays nothing for this.
+ */
+export function refusalsFor(result: SandboxResult): string | undefined {
+  const refused = result.calls.filter((call) => call.refused !== undefined);
+  if (refused.length === 0) return undefined;
+
+  const shown = refused.slice(-REFUSAL_CALLS);
+  const omitted = refused.length - shown.length;
+  const which = shown.map((call) => call.name).join(", ");
+  const plural = refused.length === 1 ? "an action was" : `${refused.length} actions were`;
+  const printed = result.output.length > 0 || (result.ok && result.value !== undefined && result.value !== null);
+  const lines = [
+    `${plural} refused while your program ran (${which}${omitted > 0 ? `, ${omitted} earlier` : ""}).`,
+    printed
+      ? "A refusal is information, not a crash, so the program carried on past it. Unless you checked `effect` after each call, treat your output as unverified — it may describe a step that never happened."
+      : "A refusal is information, not a crash, so the program carried on past it and finished without saying so.",
+  ];
+
+  let used = 0;
+  const detail: string[] = [];
+  for (const call of shown) {
+    const code = call.refused?.code ? ` ${call.refused.code}` : "";
+    const message = call.refused?.message ? `: ${call.refused.message}` : "";
+    const line = `- ${call.name}${code}${message}`;
+    if (used + line.length > REFUSAL_CHARS) {
+      detail.push("- (more refusals, cut at the limit)");
+      break;
+    }
+    used += line.length;
+    detail.push(line);
+  }
+  return [...lines, ...detail].join("\n");
+}
+
 /**
  * What the model reads.
  *
  * Order matters: the program's output first, because that is the answer it asked
- * for; then a line naming the failure; then the call log, which is the only way the
+ * for; then the refusal warning, because it is the one thing that can invalidate that
+ * output; then a line naming the failure; then the call log, which is the only way the
  * model can tell "it did nothing" from "it did three things and stopped".
  */
 export function renderForModel(result: SandboxResult): string {
@@ -314,19 +373,31 @@ export function renderForModel(result: SandboxResult): string {
     );
   }
 
-  // The trace: only when the program printed nothing or failed. A successful program
-  // that printed its answer gets no trace at all, because a trace on success is how a
-  // code-mode surface quietly doubles its token cost.
-  if (!printed || !result.ok) {
+  // The refusal warning, on every run that has one — printed answer or not. Unlike the
+  // trace, this is not a debugging aid for a silent program: it is a claim about the
+  // output the model just read, so a program that printed something is the case it
+  // exists for.
+  const refusals = refusalsFor(result);
+  if (refusals) {
+    lines.push(refusals);
+  } else if (!printed || !result.ok) {
+    // The trace: only when the program printed nothing or failed, and only when there
+    // is no refusal warning to carry the important part. A successful program that
+    // printed its answer gets no trace at all, because a trace on success is how a
+    // code-mode surface quietly doubles its token cost.
     const trace = traceFor(result);
     if (trace) lines.push(trace);
   }
 
   if (result.calls.length > 0) {
     const failed = result.calls.filter((call) => !call.ok);
-    const summary = failed.length === 0
-      ? `${result.calls.length} tool call${result.calls.length === 1 ? "" : "s"} succeeded.`
-      : `${result.calls.length} tool call${result.calls.length === 1 ? "" : "s"}, ${failed.length} failed (${failed.map((call) => call.name).join(", ")}).`;
+    // A refusal resolves, so it is not "failed" — but calling it "succeeded" is the
+    // miscount that made a program which clicked nothing report three successes.
+    const refused = result.calls.filter((call) => call.refused !== undefined).length;
+    const parts = [`${result.calls.length} tool call${result.calls.length === 1 ? "" : "s"}`];
+    if (failed.length > 0) parts.push(`${failed.length} failed (${failed.map((call) => call.name).join(", ")})`);
+    if (refused > 0) parts.push(`${refused} refused`);
+    const summary = parts.length === 1 ? `${parts[0]} succeeded.` : `${parts.join(", ")}.`;
     lines.push(`[${summary} ${Math.round(result.ms)} ms in the sandbox; tool time is not shown because it is not what you pay for.]`);
   }
 

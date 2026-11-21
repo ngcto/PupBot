@@ -396,6 +396,106 @@ describe("what a failure looks like to the model", () => {
   });
 });
 
+describe("the refusal a program walked past", () => {
+  const refusing = (code = "stale_token") => ({
+    name: "click",
+    description: "Click one target.",
+    when: ["press a button"],
+    category: "act" as const,
+    cost: "cheap" as const,
+    execute: async (args: Record<string, unknown>) =>
+      args.tokenKnown === true
+        ? { effect: "confirmed", verified: true }
+        : {
+            effect: "refused",
+            verified: false,
+            refusal: { code, message: "that token is from an older snapshot" },
+            escalation: { recommended: "observe", reason: "re-read the window before acting" },
+          },
+  });
+
+  it("warns that the printed answer is unverified, because the program went past a refusal", async () => {
+    // The case this exists for: the program ignores `effect`, prints a confident
+    // sentence, and returns. Without this the answer is indistinguishable from one
+    // built on an action that happened.
+    const outcome = await runCodeMode(
+      { code: `await tools.click({ token: "t1x7" }); text("Clicked the invoice element.");` },
+      { tools: [refusing()] },
+    );
+    expect(outcome.text).toContain("Clicked the invoice element.");
+    expect(outcome.text).toMatch(/refused/);
+    expect(outcome.text).toMatch(/unverified/);
+    expect(outcome.text).toContain("stale_token");
+  });
+
+  it("still reports it when the program printed nothing, because silence is not an acknowledgement", async () => {
+    const outcome = await runCodeMode({ code: `await tools.click({ token: "t1x7" });` }, { tools: [refusing()] });
+    expect(outcome.text).toMatch(/refused/);
+    expect(outcome.text).toMatch(/finished without saying so/);
+  });
+
+  it("says nothing at all when no call was refused", async () => {
+    // The condition that keeps this free: a program that never met a refusal pays
+    // neither tokens nor attention for the machinery.
+    const outcome = await runCodeMode(
+      { code: `await tools.click({ tokenKnown: true }); return "done";` },
+      { tools: [refusing()] },
+    );
+    expect(outcome.text).not.toMatch(/refused/);
+    expect(outcome.text).toContain("1 tool call succeeded.");
+  });
+
+  it("does not count a refusal as a success in the call summary", async () => {
+    // The miscount that made a program which clicked nothing report that everything
+    // worked: a refusal resolves, so it is neither a failure nor a success.
+    const outcome = await runCodeMode({ code: `await tools.click({ token: "t1x7" }); return 1;` }, { tools: [refusing()] });
+    expect(outcome.text).not.toContain("1 tool call succeeded.");
+    expect(outcome.text).toContain("1 refused");
+  });
+
+  it("reports it even when the program recovered correctly, as information rather than a failure", async () => {
+    const outcome = await runCodeMode(
+      {
+        code: `
+const r = await tools.click({ token: "t1x7" });
+if (r.effect === "refused") { text("refused; re-reading the window instead"); }
+else { text("clicked"); }`,
+      },
+      { tools: [refusing()] },
+    );
+    expect(outcome.text).toContain("refused; re-reading the window instead");
+    expect(outcome.text).toMatch(/refused/);
+  });
+
+  it("bounds the list: three refusals shown, the rest counted", async () => {
+    const outcome = await runCodeMode(
+      { code: `for (let i = 0; i < 5; i += 1) { await tools.click({ token: "t" + i }); } return 1;` },
+      { tools: [refusing()] },
+    );
+    expect(outcome.text).toMatch(/5 actions were refused/);
+    expect(outcome.text).toMatch(/2 earlier/);
+  });
+
+  it("treats a tool that cannot refuse as having no refusal", async () => {
+    const outcome = await runCodeMode(
+      { code: `const w = await tools.observeWindow({ windowId: "w1" }); text(w.rows.length);` },
+      {
+        tools: [
+          {
+            name: "observeWindow",
+            description: "Read a window.",
+            when: ["what is in a window"],
+            category: "observe",
+            cost: "cheap",
+            execute: async () => ({ rows: [1, 2, 3], effect: "confirmed" }),
+          },
+        ],
+      },
+    );
+    expect(outcome.text).not.toMatch(/refused/);
+  });
+});
+
 describe("call reporting", () => {
   it("reports each call so the run log can show work the model did not pay for", async () => {
     const onCall = vi.fn();
