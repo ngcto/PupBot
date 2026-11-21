@@ -40,10 +40,20 @@ export type ToolPlacement = "host" | "box" | "anywhere";
 
 /**
  * A requirement a tool places on the box, in the vocabulary the computer contract
- * understands. `screen` is the one that exists today: a screenshot or desktop
- * tool cannot work on a provider that serves no framebuffer.
+ * understands.
+ *
+ * These are the same strings as `RequiredCapability` in `@terabot/computers`, on
+ * purpose. They were once different — a tool said `screen` while the allocator said
+ * `screenshot` — and the two were meant to be joined by a translator that no file
+ * ever contained, so a tool stating a need the allocator could not read would have
+ * been placed on a box that could not serve it, silently. Sharing the words removes
+ * that failure: `packages/computers/test/need-vocabulary.test.ts` is what keeps
+ * them the same, and it fails when a capability is added on one side only.
+ *
+ * This package does not depend on `@terabot/computers` and should not start: a
+ * shared vocabulary does not couple two packages, a translation layer does.
  */
-export type ToolNeed = "screen";
+export type ToolNeed = "exec" | "files" | "screenshot";
 
 export interface ToolEntry {
   /** The identifier a program calls: `tools.<name>(args)`. */
@@ -62,10 +72,13 @@ export interface ToolEntry {
    * What the box a program runs on must provide beyond running the program.
    *
    * Placement already answers "can this tool run here at all". This answers the
-   * different question the machine has to satisfy: `screen` means the tool reads
-   * the box's screen, so a provider with no framebuffer cannot serve a run that
-   * offers it. Stated on the tool because the tool is the only thing that knows
-   * what it does with a computer; the allocator reads it as `requires`.
+   * different question the machine has to satisfy: `screenshot` means the tool
+   * reads the box's screen, so a provider with no framebuffer cannot serve a run
+   * that offers it. Stated on the tool because the tool is the only thing that
+   * knows what it does with a computer; the allocator reads it as `requires`.
+   *
+   * The strings are the allocator's own, so no translation is needed or wanted —
+   * see `ToolNeed` for why. Collect them with `computerRequiresFor(entries)`.
    */
   needs?: ToolNeed[];
   /**
@@ -188,7 +201,6 @@ export function computerRequiresFor(entries: ToolEntry[]): ToolNeed[] {
   for (const entry of entries) for (const need of entry.needs ?? []) needs.add(need);
   return [...needs];
 }
-
 
 export {
   codemodeSchema,
