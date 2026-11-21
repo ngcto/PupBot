@@ -70,7 +70,7 @@ describe("conversation run protocol", () => {
       id: botId,
       workspaceId: space.id,
       name: "Test Tera",
-      avatar: { shape: "tera", color: "amber" },
+      avatar: { shape: "mug", color: "amber" },
       accentColor: "#f69412",
       instructions: "Test bot.",
       modelEndpointId: endpointId,
