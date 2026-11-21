@@ -43,6 +43,22 @@ export const catalogMatch = pgEnum("catalog_match", ["matched", "unmatched", "ma
  * only by the server from `OWNER_EMAILS`, never by a request.
  */
 export const userRole = pgEnum("user_role", ["owner", "member"]);
+/**
+ * Polar's subscription lifecycle, kept whole rather than flattened to a boolean:
+ * a past-due plan reads differently to a user than one that was never bought,
+ * and `revoked` has to stay distinguishable from `canceled` (still paid until
+ * the period ends).
+ */
+export const billingStatus = pgEnum("billing_status", [
+  "incomplete",
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "revoked",
+  "paused",
+]);
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
@@ -683,6 +699,47 @@ export const routine = pgTable(
   (t) => [index("routine_bot_idx").on(t.botId)],
 );
 
+/* ──────────────────────────────── billing ──────────────────────────── */
+
+/**
+ * One row per account that has started a checkout. The row is created when the
+ * checkout session is created, not when the webhook arrives, so a person who
+ * never returns from Polar is left `incomplete` rather than half-provisioned —
+ * and the next checkout attempt reuses the row instead of duplicating it.
+ */
+export const billingSubscription = pgTable(
+  "billing_subscription",
+  {
+    id: uuid("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Our own plan id from `POLAR_PLANS`, never Polar's product id. */
+    planId: text("plan_id").notNull(),
+    status: billingStatus("status").notNull().default("incomplete"),
+    /** Polar's ids, so a webhook can find this row and a support ticket can too. */
+    polarCustomerId: text("polar_customer_id"),
+    polarSubscriptionId: text("polar_subscription_id"),
+    polarCheckoutId: text("polar_checkout_id"),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    /**
+     * The last verified webhook event this row was built from. Polar retries, so
+     * the same event can arrive twice, and out-of-order delivery would otherwise
+     * let an older `subscription.updated` overwrite a newer state.
+     */
+    lastEventId: text("last_event_id"),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("billing_subscription_user_idx").on(t.userId),
+    index("billing_subscription_polar_sub_idx").on(t.polarSubscriptionId),
+    index("billing_subscription_customer_idx").on(t.polarCustomerId),
+  ],
+);
+
 /* ───────────────────────── attachments and usage ───────────────────── */
 
 export const attachment = pgTable(
@@ -759,6 +816,7 @@ export const schema = {
   secretRequest,
   skill,
   routine,
+  billingSubscription,
   attachment,
   attachmentBlob,
   usageEvent,

@@ -1,0 +1,25 @@
+{
+  "name": "@terabot/billing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@terabot/config": "workspace:*",
+    "@terabot/db": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "5.9.3",
+    "vitest": "5.1.1"
+  }
+}
