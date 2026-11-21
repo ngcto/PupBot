@@ -140,6 +140,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `...[origin/<base>]` is a real git range: turbo fails outright when
+          # the ref is missing from the clone, so the base has to be here.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -186,6 +190,10 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `...[origin/<base>]` is a real git range: turbo fails outright when
+          # the ref is missing from the clone, so the base has to be here.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
