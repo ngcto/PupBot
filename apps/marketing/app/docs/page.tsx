@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 const contents = [
   { id: "what-a-bot-is", label: "What a bot is" },
   { id: "connect-a-model", label: "Connect a model" },
-  { id: "computer", label: "Give it a computer" },
+  { id: "computer", label: "Connect a computer" },
   { id: "accounts", label: "Accounts and data" },
   { id: "status", label: "Status" },
 ] as const;
@@ -80,11 +80,11 @@ export default function DocsPage() {
         </section>
 
         <section id="computer">
-          <h2>Give it a computer</h2>
+          <h2>Connect a computer</h2>
           <div className="prose">
             <p>
               Every bot gets a cloud computer of its own. A bot without one is still visible in the sidebar, but its
-              composer is replaced with the reason and a <strong>Give it a computer</strong> button, so a missing
+              composer is replaced with the reason and a <strong>Connect a computer</strong> button, so a missing
               machine never looks like a broken chat.
             </p>
             <p>
@@ -92,9 +92,14 @@ export default function DocsPage() {
               shared with the rest of the workspace.
             </p>
             <p>
-              Computers are provisioned through a provider interface, and the adapter that talks to a real provider is
-              not connected in this build: what you get today is a stub that holds files in memory and runs no
-              commands. The section above describes the shape the feature ships with, not a working machine yet.
+              Provisioning goes through an allocator over a provider interface, with Instabox as the provider. It
+              creates a machine on request, sleeps it when it goes idle, renews its lease and starts it again when work
+              needs it; a failed wake replaces the box rather than leaving a dead one bound to the bot.
+            </p>
+            <p>
+              Running commands on that machine from a chat is not wired yet: the harness in this build sends your
+              message to the model and streams the reply, and tool calling is what comes next. The computer is real and
+              awake; it is not yet taking orders.
             </p>
           </div>
         </section>
@@ -124,8 +129,8 @@ export default function DocsPage() {
               </li>
               <li>Model endpoints are OpenAI-compatible chat completions. Anthropic and Responses endpoints are not wired.</li>
               <li>
-                Computers are provisioned through a provider interface, with a stub provider in the current build. A
-                real provider is connected before the first public build.
+                Computers are real Instabox machines, allocated per bot. The bot cannot run commands on one from a chat
+                yet; tool calling is the next piece.
               </li>
               <li>
                 Pricing is <Link href="/pricing">free while in development</Link>, and there is no paid plan.

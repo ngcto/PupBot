@@ -32,8 +32,7 @@ export const tiers: readonly Tier[] = [
     ],
     notes: [
       "Model usage is billed by your provider, at its rates.",
-      "Cloud computers come from the computer provider set up for your workspace.",
-      "Computers are provisioned through a provider interface; the current build uses a stub provider until a real one is connected.",
+      "Cloud computers come from Instabox, on the account set up for your workspace.",
       "No usage limits are published or enforced while the product is in development.",
     ],
   },
@@ -68,7 +67,7 @@ export const questions: readonly Question[] = [
   {
     question: "Where do the computers come from?",
     answer:
-      "Each bot gets a cloud computer of its own, separate from every other bot's, and the app shows whether it is awake. Provisioning goes through a provider interface; the current build uses a stub provider that runs no commands, so the machine is bound but not yet doing work.",
+      "Each bot gets an Instabox machine of its own, on the account set up for your workspace. The allocator creates it on request, pauses it when it goes idle and starts it again when work needs it, and the app shows the state. If no computer account is configured, the bot stays visible and its composer says why.",
   },
   {
     question: "Can I install it yet?",
@@ -92,7 +91,7 @@ export const steps: readonly Step[] = [
     body: "Open the bot's settings and add a model endpoint: base URL, model id and your provider key. Terabot talks to your endpoint; it does not come with model access of its own.",
   },
   {
-    title: "Give it a computer",
+    title: "Connect a computer",
     body: "Each bot gets a cloud computer of its own. Until it has one the bot is visible but its composer is blocked, with the reason and a one-click fix.",
   },
 ];
@@ -113,7 +112,7 @@ export const botParts: readonly BotPart[] = [
   },
   {
     title: "A computer",
-    body: "A cloud computer bound to that bot alone, listed in the rail with whether it is awake.",
+    body: "A cloud computer bound to that bot alone. It is created on request, slept when idle and started again when work needs it; the rail shows whether it is awake.",
   },
 ];
 

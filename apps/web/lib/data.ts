@@ -31,8 +31,11 @@ function botQuery(workspaceId: string) {
       lastMessagePreview: conversation.lastMessagePreview,
       isPrimary: conversation.isPrimary,
       computerId: computer.id,
+      computerExternalId: computer.externalId,
       computerProvider: computer.provider,
       computerStatus: computer.status,
+      computerState: botTable.computerState,
+      computerReason: botTable.computerReason,
     })
     .from(botTable)
     .leftJoin(conversation, eq(conversation.botId, botTable.id))
@@ -63,10 +66,14 @@ function toBotView(row: BotRow): BotView {
     conversationId: row.conversationId ?? "",
     lastMessagePreview: row.lastMessagePreview,
     isPrimary: row.isPrimary ?? false,
-    computer:
-      row.computerId && row.computerProvider && row.computerStatus
-        ? { id: row.computerId, provider: row.computerProvider, status: row.computerStatus }
-        : null,
+    computer: {
+      id: row.computerId,
+      externalId: row.computerExternalId,
+      provider: row.computerProvider,
+      status: row.computerStatus,
+      binding: (row.computerState as BotView["computer"]["binding"]) ?? "unbound",
+      reason: row.computerReason,
+    },
     endpointId: row.modelEndpointId,
   };
 }

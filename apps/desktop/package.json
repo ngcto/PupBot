@@ -1,0 +1,39 @@
+{
+  "name": "@terabot/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Terabot desktop \u2014 the hosted product in a hardened Electron window",
+  "author": "Terabot",
+  "homepage": "https://github.com/ngcto/Terabot",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "pnpm build && electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "pnpm build && electron-builder --config electron-builder.config.cjs --publish never",
+    "package:mac": "pnpm build && electron-builder --mac --config electron-builder.config.cjs --publish never",
+    "package:win": "pnpm build && electron-builder --win --config electron-builder.config.cjs --publish never",
+    "package:linux": "pnpm build && electron-builder --linux --config electron-builder.config.cjs --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^26.6.6",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "eslint": "^9.39.5",
+    "playwright-core": "^1.65.1",
+    "tsup": "^9.0.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1"
+  },
+  "desktopName": "terabot.desktop"
+}

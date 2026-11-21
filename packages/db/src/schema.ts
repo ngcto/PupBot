@@ -24,7 +24,14 @@ export const endpointKind = pgEnum("endpoint_kind", [
   "anthropic-messages",
   "chatgpt-oauth",
 ]);
-export const computerStatus = pgEnum("computer_status", ["provisioning", "awake", "asleep", "error", "deleted"]);
+export const computerStatus = pgEnum("computer_status", [
+  "provisioning",
+  "awake",
+  "asleep",
+  "waking",
+  "error",
+  "deleted",
+]);
 export const computerAccountStatus = pgEnum("computer_account_status", ["active", "draining", "error"]);
 export const catalogMatch = pgEnum("catalog_match", ["matched", "unmatched", "manual"]);
 
@@ -141,6 +148,10 @@ export const bot = pgTable(
     hidden: boolean("hidden").notNull().default(false),
     unread: boolean("unread").notNull().default(false),
     status: text("status").notNull().default("active"),
+    /** unbound | binding | ready | blocked: what the composer reads. */
+    computerState: text("computer_state").notNull().default("unbound"),
+    /** Why chat is blocked, in words the UI shows verbatim. */
+    computerReason: text("computer_reason"),
     position: integer("position").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -303,6 +314,9 @@ export const computerAccount = pgTable("computer_account", {
   encryptedCredential: text("encrypted_credential").notNull(),
   status: computerAccountStatus("status").notNull().default("active"),
   capacity: integer("capacity").notNull().default(1),
+  /** Do not start a box on this account before this instant (rate limits). */
+  parkedUntil: timestamp("parked_until", { withTimezone: true }),
+  lastError: text("last_error"),
   usage: jsonb("usage").$type<Record<string, unknown>>(),
   createdAt: createdAt(),
 });
@@ -318,9 +332,24 @@ export const computer = pgTable(
     specs: jsonb("specs").$type<Record<string, unknown>>(),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorCode: text("last_error_code"),
     createdAt: createdAt(),
   },
   (t) => [index("computer_account_idx").on(t.accountId)],
+);
+
+export const computerLease = pgTable(
+  "computer_lease",
+  {
+    id: text("id").primaryKey(),
+    computerId: uuid("computer_id")
+      .notNull()
+      .references(() => computer.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("computer_lease_computer_idx").on(t.computerId, t.expiresAt)],
 );
 
 export const botComputer = pgTable(
@@ -463,6 +492,7 @@ export const schema = {
   modelEndpoint,
   computerAccount,
   computer,
+  computerLease,
   botComputer,
   connector,
   connectorAccount,
