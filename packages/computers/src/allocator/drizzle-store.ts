@@ -83,11 +83,20 @@ export class DrizzleComputerStore implements ComputerStore {
       .limit(1);
 
     /*
-     * Billing is not wired yet (Polar lands in a later pass), so there is no
-     * entitlement to read and `planMissing` stays false: every deployment pool is
-     * treated as usable. When the billing package lands, this is the one place
-     * that asks it, and until then nobody is told to buy something that does not
-     * exist yet.
+     * KNOWN-INCOMPLETE (TERA-71, billing/Polar): `planMissing` is hardcoded false.
+     *
+     * There is no entitlement to read yet, so every deployment pool is treated as
+     * usable. The consequence is concrete: on a Polar-gated deployment a user with
+     * no plan is never told they need one — they are told the pool is busy, which
+     * is a different problem with a different fix. That is a wrong answer, not an
+     * unfinished feature, and it is why this is called out rather than left as a
+     * quiet default.
+     *
+     * This one return is the seam. When billing lands it asks for an entitlement
+     * for this bot's owner and sets `planMissing` from it; nothing above this line
+     * has to change, because `classifyFailure` already turns a missing plan into
+     * the `no_plan` obstacle with its own wording and its own "choose a plan"
+     * action. `no_plan` is already proven against a supplied `PoolAvailability`.
      */
     return { managedPool: managed.length > 0, planMissing: false };
   }
