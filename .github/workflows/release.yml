@@ -71,14 +71,16 @@ jobs:
             version="${version#v}"
             tag="v$version"
           fi
-          # Refuse nonsense before five jobs find out the hard way.
-          printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' \
-            || { echo "::error::'$version' is not a semver version"; exit 1; }
+          # Strict semver 2.0: MAJOR.MINOR.PATCH with optional -prerelease and
+          # +build. Refuse anything else before five jobs find out the hard way.
+          printf '%s' "$version" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$' \
+            || { echo "::error::'$version' is not a semver 2.0 version"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           # A version with a suffix (0.2.0-rc.1) is a prerelease.
-          if printf '%s' "$version" | grep -qE '[-+]'; then
+          if printf '%s' "$version" | grep -q -- '-'; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::'$version' is a prerelease; every artifact name carries that suffix."
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi

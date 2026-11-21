@@ -38,9 +38,9 @@ if (!input) {
   process.exit(1);
 }
 
-// Same rule the workflow applies before it builds anything.
-if (!/^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test(input)) {
-  console.error(`"${input}" is not a semver version`);
+// Same rule the workflow applies before it builds anything: strict semver 2.0.
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(input)) {
+  console.error(`"${input}" is not a semver 2.0 version`);
   process.exit(1);
 }
 
