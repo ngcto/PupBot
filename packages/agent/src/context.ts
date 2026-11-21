@@ -1,5 +1,5 @@
-import type { MessagePart } from "@pupbot/db";
-import type { ChatMessage } from "@pupbot/providers";
+import type { MessagePart } from "@terabot/db";
+import type { ChatMessage } from "@terabot/providers";
 
 export interface ContextBot {
   name: string;

@@ -12,7 +12,7 @@ for (const candidate of [resolve(process.cwd(), "../../.env"), resolve(process.c
 }
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@pupbot/ui", "@pupbot/avatars", "@pupbot/db", "@pupbot/config", "@pupbot/composio"],
+  transpilePackages: ["@terabot/ui", "@terabot/avatars", "@terabot/db", "@terabot/config", "@terabot/composio"],
   experimental: { externalDir: true },
   devIndicators: false,
 };

@@ -1,5 +1,5 @@
-import { resetEnvCache } from "@pupbot/config";
-import { loadEnv } from "@pupbot/config/load-env";
+import { resetEnvCache } from "@terabot/config";
+import { loadEnv } from "@terabot/config/load-env";
 import {
   appConnection,
   auth,
@@ -10,7 +10,7 @@ import {
   database,
   ensureWorkspace,
   newId,
-} from "@pupbot/db";
+} from "@terabot/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {

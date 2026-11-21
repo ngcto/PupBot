@@ -2,7 +2,7 @@
 
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, Share01Icon } from "@hugeicons/core-free-icons";
-import { Avatar } from "@pupbot/avatars/react";
+import { Avatar } from "@terabot/avatars/react";
 import {
   MenuItem,
   MenuPopup,
@@ -11,7 +11,7 @@ import {
   Tooltip,
   cn,
   toast,
-} from "@pupbot/ui";
+} from "@terabot/ui";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -30,12 +30,14 @@ export function Chat({
   initialMessages,
   activeRunId,
   onGiveComputer,
+  onManageProviders,
 }: {
   bot: BotView;
   apiUrl: string;
   initialMessages: MessageView[];
   activeRunId: string | null;
   onGiveComputer: () => void;
+  onManageProviders: () => void;
 }) {
   const router = useRouter();
   const { messages, streaming, error, send, sending, dismissError } = useConversationStream({
@@ -134,6 +136,7 @@ export function Chat({
         reply={reply}
         onCancelReply={() => setReply(null)}
         onGiveComputer={onGiveComputer}
+        onManageProviders={onManageProviders}
         pending={sending}
       />
     </div>

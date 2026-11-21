@@ -1,18 +1,22 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { config } from "dotenv";
 
 /**
- * CLI and server entry points run from a package folder, so look for the
- * workspace `.env` beside the entry point and one level up from the package.
- * Kept out of the main entry so the bundler never sees a dynamic file read.
+ * Loads the nearest workspace `.env` without overriding variables already set in
+ * the environment. Entry points may run from package or deeper script dirs, so
+ * walk up from cwd.
  */
 export function loadEnv(): void {
-  for (const candidate of [".env", "../../.env"]) {
-    const path = resolve(process.cwd(), candidate);
+  let dir = resolve(process.cwd());
+  for (;;) {
+    const path = resolve(dir, ".env");
     if (existsSync(path)) {
-      config({ path, quiet: true });
+      config({ path, override: false, quiet: true });
       return;
     }
+    const parent = dirname(dir);
+    if (parent === dir) return;
+    dir = parent;
   }
 }

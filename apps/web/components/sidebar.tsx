@@ -17,7 +17,7 @@ import {
   VoiceIcon,
   WindowsNewIcon,
 } from "@hugeicons/core-free-icons";
-import { Avatar } from "@pupbot/avatars/react";
+import { Avatar } from "@terabot/avatars/react";
 import {
   ContextMenuArea,
   ContextMenuItem,
@@ -30,7 +30,7 @@ import {
   Tooltip,
   cn,
   toast,
-} from "@pupbot/ui";
+} from "@terabot/ui";
 import { useState } from "react";
 import {
   deleteBot,

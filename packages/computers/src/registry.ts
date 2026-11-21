@@ -1,4 +1,4 @@
-import { decryptSecret } from "@pupbot/db";
+import { decryptSecret } from "@terabot/db";
 import { CredentialConfigError, ProviderError } from "./contract.ts";
 import type { ProviderFactory } from "./allocator/types.ts";
 import { FakeComputerProvider } from "./fake.ts";

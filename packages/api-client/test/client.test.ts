@@ -121,10 +121,10 @@ describe("session cookies", () => {
   it("joins the cookies the server issued into one header", () => {
     expect(
       serializeCookies([
-        { name: "pupbot.session_token", value: "abc.def" },
-        { name: "pupbot.session_data", value: "xyz" },
+        { name: "terabot.session_token", value: "abc.def" },
+        { name: "terabot.session_data", value: "xyz" },
       ]),
-    ).toBe("pupbot.session_token=abc.def; pupbot.session_data=xyz");
+    ).toBe("terabot.session_token=abc.def; terabot.session_data=xyz");
   });
 });
 
@@ -132,14 +132,14 @@ describe("sign in", () => {
   it("stores the session cookie and returns the user", async () => {
     const store = createMemorySessionStore();
     const { fetch, calls } = fakeFetch([
-      jsonResponse({ user, cookies: [{ name: "pupbot.session_token", value: "abc.def" }] }),
+      jsonResponse({ user, cookies: [{ name: "terabot.session_token", value: "abc.def" }] }),
     ]);
     const client = createApiClient({ baseUrl: "http://api.test/", session: store, fetch });
 
     const signedIn = await client.signIn({ email: "ng@example.com", password: "hunter2hunter2" });
 
     expect(signedIn.email).toBe("ng@example.com");
-    expect(await store.read()).toBe("pupbot.session_token=abc.def");
+    expect(await store.read()).toBe("terabot.session_token=abc.def");
     expect(calls[0]?.url).toBe("http://api.test/m/auth/sign-in");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(JSON.parse(calls[0]?.init?.body ?? "{}")).toEqual({
@@ -164,7 +164,7 @@ describe("requests", () => {
     const { fetch, calls } = fakeFetch([jsonResponse({ bots: [botJson()] })]);
     const client = createApiClient({
       baseUrl: "http://api.test",
-      session: createMemorySessionStore("pupbot.session_token=abc.def"),
+      session: createMemorySessionStore("terabot.session_token=abc.def"),
       fetch,
     });
 
@@ -172,11 +172,11 @@ describe("requests", () => {
 
     expect(bots).toHaveLength(1);
     expect(bots[0]?.avatar.shape).toBe("mug");
-    expect(calls[0]?.init?.headers?.cookie).toBe("pupbot.session_token=abc.def");
+    expect(calls[0]?.init?.headers?.cookie).toBe("terabot.session_token=abc.def");
   });
 
   it("clears the session and reports unauthorized once the server says so", async () => {
-    const store = createMemorySessionStore("pupbot.session_token=stale");
+    const store = createMemorySessionStore("terabot.session_token=stale");
     const onUnauthorized = vi.fn();
     const client = createApiClient({
       baseUrl: "http://api.test",
@@ -230,7 +230,7 @@ describe("requests", () => {
   });
 
   it("signs out even when the server call fails", async () => {
-    const store = createMemorySessionStore("pupbot.session_token=abc");
+    const store = createMemorySessionStore("terabot.session_token=abc");
     const client = createApiClient({
       baseUrl: "http://api.test",
       session: store,
@@ -259,7 +259,7 @@ describe("streaming a run", () => {
     const { fetch, calls } = fakeFetch([streamResponse(chunks)]);
     const client = createApiClient({
       baseUrl: "http://api.test",
-      session: createMemorySessionStore("pupbot.session_token=abc"),
+      session: createMemorySessionStore("terabot.session_token=abc"),
       fetch,
     });
 
@@ -278,7 +278,7 @@ describe("streaming a run", () => {
     expect(text.join("")).toBe("Hello");
     expect(calls[0]?.url).toBe("http://api.test/runs/run-1/events?after=3");
     expect(calls[0]?.init?.headers?.accept).toBe("text/event-stream");
-    expect(calls[0]?.init?.headers?.cookie).toBe("pupbot.session_token=abc");
+    expect(calls[0]?.init?.headers?.cookie).toBe("terabot.session_token=abc");
   });
 
   it("tells the caller when the runtime has no readable body", async () => {

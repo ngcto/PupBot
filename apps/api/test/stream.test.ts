@@ -1,6 +1,7 @@
-import { loadEnv } from "@pupbot/config/load-env";
-import { createApp } from "../src/app.ts";
-import { executeRun } from "@pupbot/agent";
+import { loadEnv } from "@terabot/config/load-env";
+
+loadEnv();
+import { executeRun } from "@terabot/agent";
 import {
   auth,
   bot,
@@ -14,10 +15,12 @@ import {
   run,
   runEvent,
   user,
-} from "@pupbot/db";
-import type { ModelGateway } from "@pupbot/providers";
+} from "@terabot/db";
+import type { Database } from "@terabot/db";
+import type { ModelGateway } from "@terabot/providers";
 import { and, asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createApp } from "../src/app.ts";
 
 /** Streams a few words with a gap, so a second message can land mid-sentence. */
 function slowGateway(words: string[], gapMs: number): ModelGateway {
@@ -32,19 +35,33 @@ function slowGateway(words: string[], gapMs: number): ModelGateway {
   };
 }
 
-loadEnv();
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Waits for a condition instead of a fixed sleep: on a busy CI box the run can
+ * take longer than any hard-coded delay to emit its first delta, and an
+ * interrupt that lands before that legitimately has no partial text.
+ */
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await predicate()) return;
+    await sleep(20);
+  }
+  throw new Error("timed out waiting for the run to start streaming");
+}
+
 describe("conversation run protocol", () => {
-  const app = createApp({ enqueue: async () => {} });
-  const db = database();
-  const email = `stream-${Date.now()}@pupbot.dev`;
+  let app: ReturnType<typeof createApp>;
+  let db: Database;
+  const email = `stream-${Date.now()}@terabot.dev`;
   let cookie = "";
   let conversationId = "";
   let botId = "";
 
   beforeAll(async () => {
+    app = createApp({ enqueue: async () => {} });
+    db = database();
     const signUp = await auth().api.signUpEmail({
       body: { email, password: "stream-test-password", name: "Stream Test" },
       returnHeaders: true,
@@ -69,8 +86,8 @@ describe("conversation run protocol", () => {
     await db.insert(bot).values({
       id: botId,
       workspaceId: space.id,
-      name: "Test Pup",
-      avatar: { shape: "pup", color: "amber" },
+      name: "Test Tera",
+      avatar: { shape: "mug", color: "amber" },
       accentColor: "#f69412",
       instructions: "Test bot.",
       modelEndpointId: endpointId,
@@ -80,7 +97,7 @@ describe("conversation run protocol", () => {
   }, 30_000);
 
   afterAll(async () => {
-    await db.delete(user).where(eq(user.email, email));
+    if (db) await db.delete(user).where(eq(user.email, email));
     await closeDatabase();
   });
 
@@ -139,7 +156,16 @@ describe("conversation run protocol", () => {
       abortPollMs: 20,
     });
 
-    await sleep(180);
+    await waitFor(async () => {
+      const rows = await db
+        .select({ seq: runEvent.seq })
+        .from(runEvent)
+        .where(and(eq(runEvent.runId, firstRun.runId), eq(runEvent.type, "text_delta")))
+        .limit(1);
+      return rows.length > 0;
+    });
+    // Let a couple more words land so the partial answer is clearly shorter.
+    await sleep(80);
 
     const second = await app.request(`/conversations/${conversationId}/messages`, {
       method: "POST",

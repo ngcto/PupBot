@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
  * marketplace flow runs with no live project and no real OAuth grant.
  *
  * It is the network edge, not a mock inside the app: the app runs its real
- * `@pupbot/composio` client against this server, so request shapes, status codes,
+ * `@terabot/composio` client against this server, so request shapes, status codes,
  * header auth and connection status transitions are exercised for real. State lives
  * in memory: auth configs, connected accounts, and which toolkit the catalogue has.
  *

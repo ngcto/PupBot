@@ -1,6 +1,6 @@
-import { serverEnv } from "@pupbot/config";
-import { ComposioClient, ComposioError, type AuthConfig } from "@pupbot/composio";
-import { appConnection, bot as botTable, botApp, database, newId } from "@pupbot/db";
+import { serverEnv } from "@terabot/config";
+import { ComposioClient, ComposioError, type AuthConfig } from "@terabot/composio";
+import { appConnection, bot as botTable, botApp, database, newId } from "@terabot/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { AppCard, AppList, AppState, ConnectedApp } from "./types.ts";
 

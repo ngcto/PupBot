@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DATABASE_URL: postgres://pupbot:pupbot@localhost:5432/pupbot
+  DATABASE_URL: postgres://terabot:terabot@localhost:5432/terabot
   BETTER_AUTH_SECRET: ci-only-secret-ci-only-secret-ci-only
   BETTER_AUTH_URL: http://localhost:3000
   API_URL: http://localhost:8787
@@ -26,13 +26,13 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: pupbot
-          POSTGRES_PASSWORD: pupbot
-          POSTGRES_DB: pupbot
+          POSTGRES_USER: terabot
+          POSTGRES_PASSWORD: terabot
+          POSTGRES_DB: terabot
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U pupbot -d pupbot"
+          --health-cmd "pg_isready -U terabot -d terabot"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -41,7 +41,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate

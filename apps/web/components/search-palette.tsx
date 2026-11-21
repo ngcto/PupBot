@@ -9,7 +9,7 @@ import {
   Settings01Icon,
   Sun03Icon,
 } from "@hugeicons/core-free-icons";
-import { Avatar } from "@pupbot/avatars/react";
+import { Avatar } from "@terabot/avatars/react";
 import type { BotView } from "../lib/types.ts";
 import { Command } from "cmdk";
 import { useEffect } from "react";

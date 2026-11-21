@@ -1,5 +1,5 @@
-import { COLORS, SHAPE_IDS, colorHex, deriveAccent } from "@pupbot/avatars";
-import { loadEnv } from "@pupbot/config/load-env";
+import { COLORS, SHAPE_IDS, colorHex, deriveAccent } from "@terabot/avatars";
+import { loadEnv } from "@terabot/config/load-env";
 import {
   auth,
   bot,
@@ -14,7 +14,7 @@ import {
   newId,
   run,
   user,
-} from "@pupbot/db";
+} from "@terabot/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
@@ -24,7 +24,7 @@ loadEnv();
 describe("mobile API surface", () => {
   const app = createApp({ enqueue: async () => {} });
   const db = database();
-  const email = `mobile-${Date.now()}@pupbot.dev`;
+  const email = `mobile-${Date.now()}@terabot.dev`;
   const password = "mobile-test-password";
   let cookie = "";
   let botId = "";
@@ -209,7 +209,7 @@ describe("mobile API surface", () => {
   });
 
   it("does not expose another workspace's bot", async () => {
-    const otherEmail = `mobile-other-${Date.now()}@pupbot.dev`;
+    const otherEmail = `mobile-other-${Date.now()}@terabot.dev`;
     const other = await auth().api.signUpEmail({
       body: { email: otherEmail, password, name: "Other" },
       returnHeaders: true,

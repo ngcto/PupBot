@@ -1,4 +1,4 @@
-import { serverEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
 import { and, eq } from "drizzle-orm";
 import { database } from "./client.ts";
 import { newId } from "./ids.ts";
@@ -20,9 +20,9 @@ async function seedStubEndpoint(workspaceId: string): Promise<void> {
     .insert(modelCatalog)
     .values({
       id: newId(),
-      provider: "pupbot",
-      modelId: "pup-stub",
-      name: "Pup stub (dev)",
+      provider: "terabot",
+      modelId: "tera-stub",
+      name: "Tera stub (dev)",
       contextWindow: 100_000,
       maxOutput: 8_192,
       pricing: { input: 0, output: 0 },
@@ -32,7 +32,7 @@ async function seedStubEndpoint(workspaceId: string): Promise<void> {
     })
     .onConflictDoUpdate({
       target: [modelCatalog.provider, modelCatalog.modelId],
-      set: { name: "Pup stub (dev)" },
+      set: { name: "Tera stub (dev)" },
     })
     .returning();
 
@@ -42,7 +42,7 @@ async function seedStubEndpoint(workspaceId: string): Promise<void> {
     kind: "openai-chat",
     label: "Local stub endpoint",
     baseUrl,
-    modelId: "pup-stub",
+    modelId: "tera-stub",
     modelCatalogId: catalog?.id ?? null,
     catalogMatch: "matched",
     contextWindow: 100_000,

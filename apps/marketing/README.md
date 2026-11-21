@@ -1,20 +1,20 @@
-# `@pupbot/marketing` — terabot's shop window
+# `@terabot/marketing` — terabot's shop window
 
 The public site: what Terabot is, what it costs, and where to download it. The product itself is
 not usable here; this app is landing, pricing, download, docs and the links across to sign-in.
 
 Built on the same stack as the rest of the repo (Next.js App Router, Tailwind v4, pnpm + Turborepo)
-and on the same design tokens: `app/globals.css` imports `@pupbot/ui/styles.css`, so the palette,
+and on the same design tokens: `app/globals.css` imports `@terabot/ui/styles.css`, so the palette,
 hairlines, radii and easings are the app's own, not a copy of them. Dark only.
 
 ## Run it
 
 ```bash
 pnpm install
-pnpm --filter @pupbot/marketing dev     # http://localhost:3001
-pnpm --filter @pupbot/marketing typecheck
-pnpm --filter @pupbot/marketing test
-pnpm --filter @pupbot/marketing build
+pnpm --filter @terabot/marketing dev     # http://localhost:3001
+pnpm --filter @terabot/marketing typecheck
+pnpm --filter @terabot/marketing test
+pnpm --filter @terabot/marketing build
 ```
 
 From the repo root, `pnpm build` / `pnpm typecheck` / `pnpm test` include this app through Turbo.
@@ -34,8 +34,8 @@ There are no secrets in this app and nothing server-side: every route is statica
 ## Deploying
 
 The deployable root is **`apps/marketing`**. Build command `pnpm build` from the repo root (or
-`pnpm --filter @pupbot/marketing build` from the root, with the output directory set to
-`apps/marketing/.next`); start with `pnpm --filter @pupbot/marketing start`. Set the two variables
+`pnpm --filter @terabot/marketing build` from the root, with the output directory set to
+`apps/marketing/.next`); start with `pnpm --filter @terabot/marketing start`. Set the two variables
 above to the real origins. Deployment itself belongs to `NGS-59`.
 
 ## Release URLs
@@ -63,7 +63,7 @@ an id. Publishing a build is a one-line edit, and the test refuses the half-fini
 Share cards live in `public/og` (generated, checked in). Regenerate them after a copy change:
 
 ```bash
-pnpm --filter @pupbot/marketing build
+pnpm --filter @terabot/marketing build
 node apps/marketing/scripts/make-og.mjs
 ```
 

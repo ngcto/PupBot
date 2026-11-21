@@ -2,7 +2,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { database, bot as botTable } from "@pupbot/db";
+import { database, bot as botTable } from "@terabot/db";
 import {
   describeError,
   disconnectConnection,

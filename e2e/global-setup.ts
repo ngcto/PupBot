@@ -10,7 +10,7 @@ const PID_FILE = join(process.cwd(), "e2e", ".worker.pid");
  * signal.
  */
 export default async function globalSetup() {
-  const child = spawn("pnpm", ["--filter", "@pupbot/worker", "dev"], {
+  const child = spawn("pnpm", ["--filter", "@terabot/worker", "dev"], {
     cwd: process.cwd(),
     // The suite's computers come from the fake pool: a live provider key in the
     // developer's environment would spend real quota and its capacity limit would

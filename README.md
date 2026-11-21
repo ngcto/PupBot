@@ -1,4 +1,4 @@
-# PupBot
+# Terabot
 
 Bots with their own cloud computers, in a chat window. Each bot is a named avatar with a
 conversation, a set of instructions, a model endpoint and a computer; you talk to it like a
@@ -10,7 +10,7 @@ gateway and the computer allocation are ours; the UI follows a measured referenc
 
 ## Run it
 
-Requirements: Node 24, pnpm 12, Docker.
+Requirements: Node 26, pnpm 12, Docker.
 
 ```bash
 pnpm install
@@ -21,7 +21,7 @@ pnpm db:seed                  # demo user, three bots, one conversation
 pnpm dev                      # web :3000 · api :8787 · worker (pg-boss)
 ```
 
-Sign in at http://localhost:3000 with `demo@pupbot.dev` / `pupbot-demo`. New accounts work too:
+Sign in at http://localhost:3000 with `demo@terabot.dev` / `terabot-demo`. New accounts work too:
 sign up, and the first bot dialog opens. In development a fresh workspace gets a local stub model
 endpoint, so chat streams with no API key at all.
 
@@ -36,7 +36,7 @@ Generate the two secrets with `openssl rand -base64 32`.
 | `pnpm e2e` | Playwright: sign up → bot → computer → streamed reply → blocked composer |
 | `pnpm db:generate` / `db:migrate` / `db:seed` | Drizzle schema and data |
 | `pnpm catalog:sync` | fetch models.dev and upsert `model_catalog` |
-| `pnpm --filter @pupbot/mobile start` | Expo dev server for the phone app |
+| `pnpm --filter @terabot/mobile start` | Expo dev server for the phone app |
 
 ## Mobile app
 
@@ -50,7 +50,7 @@ web app.
 
 `apps/marketing` is the public site: the landing page, pricing, the download page, a short docs page
 and the links across to sign-in. It is not the product. It runs on :3001 in development
-(`pnpm --filter @pupbot/marketing dev`) and is included in `pnpm dev`, `pnpm build`, `pnpm typecheck`
+(`pnpm --filter @terabot/marketing dev`) and is included in `pnpm dev`, `pnpm build`, `pnpm typecheck`
 and `pnpm test` from the root.
 
 Download buttons are driven by `apps/marketing/releases.ts`: a `null` URL renders "Coming soon"

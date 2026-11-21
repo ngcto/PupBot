@@ -5,6 +5,6 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgres://pupbot:pupbot@localhost:5432/pupbot",
+    url: process.env.DATABASE_URL ?? "postgres://terabot:terabot@localhost:5432/terabot",
   },
 });

@@ -3,15 +3,18 @@ import {
   bot as botTable,
   conversation as conversationTable,
   decryptSecret,
+  encryptSecret,
   message as messageTable,
+  modelCatalog,
   modelEndpoint,
   newId,
   run as runTable,
   runEvent,
   usageEvent,
-} from "@pupbot/db";
-import type { Database, MessagePart } from "@pupbot/db";
-import type { ModelEndpointConfig, ModelGateway } from "@pupbot/providers";
+} from "@terabot/db";
+import type { Database, MessagePart } from "@terabot/db";
+import { costAsDecimal, costOf, providerHintForBaseUrl } from "@terabot/providers";
+import type { ModelEndpointConfig, ModelGateway, ModelPricing } from "@terabot/providers";
 import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
@@ -19,6 +22,8 @@ import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
 export interface ResolvedEndpoint {
   config: ModelEndpointConfig;
   label: string;
+  /** USD per 1M tokens from `model_catalog`; null when the model is unmatched. */
+  pricing?: ModelPricing | null;
 }
 
 /** What the harness needs from the computer layer: wake before the first token. */
@@ -102,6 +107,34 @@ function textParts(text: string): MessagePart[] {
   return [{ type: "text", text }];
 }
 
+async function pricingForModel(
+  db: Database,
+  endpoint: { modelCatalogId: string | null; baseUrl: string },
+  model: string,
+): Promise<ModelPricing | null> {
+  if (endpoint.modelCatalogId) {
+    const rows = await db
+      .select({ pricing: modelCatalog.pricing, modelId: modelCatalog.modelId })
+      .from(modelCatalog)
+      .where(eq(modelCatalog.id, endpoint.modelCatalogId))
+      .limit(1);
+    if (rows[0]?.modelId === model && rows[0]?.pricing) return rows[0].pricing;
+  }
+
+  const hint = providerHintForBaseUrl(endpoint.baseUrl);
+  const rows = await db
+    .select({ pricing: modelCatalog.pricing, provider: modelCatalog.provider })
+    .from(modelCatalog)
+    .where(
+      hint
+        ? and(eq(modelCatalog.modelId, model), eq(modelCatalog.provider, hint))
+        : eq(modelCatalog.modelId, model),
+    )
+    .limit(20);
+  const priced = rows.filter((row) => row.pricing);
+  return priced[0]?.pricing ?? null;
+}
+
 async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<ResolvedEndpoint | null> {
   if (!botRow.modelEndpointId) return null;
   const rows = await db
@@ -112,6 +145,7 @@ async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<Res
   const endpoint = rows[0];
   if (!endpoint) return null;
 
+  const model = botRow.modelId ?? endpoint.modelId;
   let apiKey: string | undefined;
   if (endpoint.encryptedKey) {
     try {
@@ -123,10 +157,11 @@ async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<Res
 
   return {
     label: endpoint.label,
+    pricing: await pricingForModel(db, endpoint, model),
     config: {
       kind: endpoint.kind,
       baseUrl: endpoint.baseUrl,
-      model: botRow.modelId ?? endpoint.modelId,
+      model,
       apiKey,
     },
   };
@@ -266,6 +301,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   let stepIndex = 0;
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
+  let cacheReadTokens: number | undefined;
+  let cacheWriteTokens: number | undefined;
   let failure: string | undefined;
   let rotate: ReturnType<typeof setInterval> | undefined;
 
@@ -340,7 +377,17 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
       } else if (event.type === "usage") {
         inputTokens = event.inputTokens ?? inputTokens;
         outputTokens = event.outputTokens ?? outputTokens;
-        await events.append({ type: "usage", payload: { inputTokens, outputTokens } });
+        cacheReadTokens = event.cacheReadTokens ?? cacheReadTokens;
+        cacheWriteTokens = event.cacheWriteTokens ?? cacheWriteTokens;
+        await events.append({
+          type: "usage",
+          payload: {
+            inputTokens,
+            outputTokens,
+            ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+            ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+          },
+        });
       } else if (event.type === "error") {
         failure = event.message;
         break;
@@ -361,13 +408,40 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
 
   await flush(true).catch(() => {});
 
+  const cost = costOf(resolved.pricing ?? null, {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+  });
+  const costText = cost === null ? null : costAsDecimal(cost);
+
+  if (inputTokens || outputTokens || cacheReadTokens || cacheWriteTokens) {
+    await db.insert(usageEvent).values({
+      id: newId(),
+      botId: row.bot.id,
+      runId,
+      model: resolved.config.model,
+      inputTokens: (inputTokens ?? 0) + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0),
+      outputTokens: outputTokens ?? 0,
+      cost: costText,
+    });
+  }
+
   // An external abort (shutdown, job cancellation) is a cancellation, not a
   // complete answer, so the run is not saved as done.
   const status: RunOutcome["status"] =
     canceled || options.signal?.aborted ? "canceled" : failure ? "error" : "done";
 
   if (status === "error") {
-    await failRun(db, { runId, messageId: assistantMessageId, text, reason: failure ?? "unknown error", now });
+    await failRun(db, {
+      runId,
+      messageId: assistantMessageId,
+      text,
+      reason: failure ?? "unknown error",
+      now,
+      cost: costText,
+    });
     await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text, status: "error" } });
     await events.append({ type: "run.completed", payload: { status: "error", error: failure } });
     return { status, assistantMessageId, text, error: failure };
@@ -383,23 +457,13 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     inputTokens,
     outputTokens,
     model: resolved.config.model,
+    cost: costText,
   });
 
   await db
     .update(conversationTable)
     .set({ lastMessagePreview: text.slice(0, 160), updatedAt: now() })
     .where(eq(conversationTable.id, row.conversation.id));
-
-  if (inputTokens || outputTokens) {
-    await db.insert(usageEvent).values({
-      id: newId(),
-      botId: row.bot.id,
-      runId,
-      model: resolved.config.model,
-      inputTokens: inputTokens ?? 0,
-      outputTokens: outputTokens ?? 0,
-    });
-  }
 
   await events.append({ type: "message.completed", payload: { messageId: assistantMessageId, text, status: "complete" } });
   await events.append({ type: "run.completed", payload: { status } });
@@ -412,7 +476,13 @@ async function finishRun(
   db: Database,
   runId: string,
   status: "done" | "canceled",
-  extra: { now: () => Date; inputTokens?: number; outputTokens?: number; model?: string },
+  extra: {
+    now: () => Date;
+    inputTokens?: number;
+    outputTokens?: number;
+    model?: string;
+    cost?: string | null;
+  },
 ): Promise<void> {
   await db
     .update(runTable)
@@ -422,13 +492,21 @@ async function finishRun(
       ...(extra.inputTokens !== undefined ? { inputTokens: extra.inputTokens } : {}),
       ...(extra.outputTokens !== undefined ? { outputTokens: extra.outputTokens } : {}),
       ...(extra.model ? { model: extra.model } : {}),
+      ...(extra.cost !== undefined ? { cost: extra.cost } : {}),
     })
     .where(eq(runTable.id, runId));
 }
 
 async function failRun(
   db: Database,
-  input: { runId: string; messageId: string; text: string; reason: string; now: () => Date },
+  input: {
+    runId: string;
+    messageId: string;
+    text: string;
+    reason: string;
+    now: () => Date;
+    cost?: string | null;
+  },
 ): Promise<void> {
   await db
     .update(messageTable)
@@ -436,7 +514,12 @@ async function failRun(
     .where(eq(messageTable.id, input.messageId));
   await db
     .update(runTable)
-    .set({ status: "error", error: input.reason, finishedAt: input.now() })
+    .set({
+      status: "error",
+      error: input.reason,
+      finishedAt: input.now(),
+      ...(input.cost !== undefined ? { cost: input.cost } : {}),
+    })
     .where(eq(runTable.id, input.runId));
 }
 

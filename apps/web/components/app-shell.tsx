@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, toast } from "@pupbot/ui";
+import { Button, toast } from "@terabot/ui";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { giveComputer } from "../app/actions.ts";
@@ -25,6 +25,12 @@ export function AppShell({ data }: { data: ShellData }) {
   const [railOpen, setRailOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState(searchParams.get("apps") === "1");
+  const [settingsSection, setSettingsSection] = useState("general");
+
+  const openProviders = useCallback(() => {
+    setSettingsSection("providers");
+    setSettingsOpen(true);
+  }, []);
 
   const activeBot = data.activeBot;
   const settingsBot = useMemo(
@@ -106,6 +112,7 @@ export function AppShell({ data }: { data: ShellData }) {
           initialMessages={data.messages}
           activeRunId={data.activeRunId}
           onGiveComputer={onGiveComputer}
+          onManageProviders={openProviders}
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center justify-center bg-canvas">
@@ -125,7 +132,12 @@ export function AppShell({ data }: { data: ShellData }) {
         <Rail bot={activeBot} onClose={() => setRailOpen(false)} onConnect={onGiveComputer} />
       ) : null}
 
-      <CreateBotDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateBotDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        endpoints={data.endpoints}
+        onManageProviders={openProviders}
+      />
       <PrimaryBotDialog open={primaryOpen} onOpenChange={setPrimaryOpen} bots={data.bots} />
       <SearchPalette
         open={paletteOpen}
@@ -135,7 +147,16 @@ export function AppShell({ data }: { data: ShellData }) {
         onCreateBot={() => setCreateOpen(true)}
         onOpenSettings={(botId) => setSettingsBotId(botId)}
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={data.user} bots={data.bots} />
+      <SettingsDialog
+        key={settingsSection}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        user={data.user}
+        bots={data.bots}
+        usage={data.usage}
+        endpoints={data.endpoints}
+        initialSection={settingsSection}
+      />
       <AppsDialog open={appsOpen} onOpenChange={setAppsOpen} initialConnections={data.connections} />
       {settingsBot ? (
         <BotSettingsDialog
@@ -144,6 +165,7 @@ export function AppShell({ data }: { data: ShellData }) {
           connections={data.connections}
           open={Boolean(settingsBotId)}
           onOpenChange={(open) => setSettingsBotId(open ? settingsBotId : null)}
+          onManageProviders={openProviders}
         />
       ) : null}
     </div>

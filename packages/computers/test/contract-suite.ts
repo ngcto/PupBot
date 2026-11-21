@@ -14,7 +14,7 @@ export function contractSuite(label: string, make: () => Promise<ComputerProvide
 
     beforeAll(async () => {
       provider = await make();
-      ref = await provider.provision({ metadata: { "pupbot-test": "contract" } });
+      ref = await provider.provision({ metadata: { "terabot-test": "contract" } });
     }, 300_000);
 
     afterAll(async () => {
@@ -36,9 +36,9 @@ export function contractSuite(label: string, make: () => Promise<ComputerProvide
     });
 
     it("exec runs a command", async () => {
-      const result = await provider.exec(ref, "echo pupbot-contract");
+      const result = await provider.exec(ref, "echo terabot-contract");
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("pupbot-contract");
+      expect(result.stdout).toContain("terabot-contract");
       expect(result.timedOut).toBe(false);
     });
 
@@ -49,13 +49,13 @@ export function contractSuite(label: string, make: () => Promise<ComputerProvide
     });
 
     it("moves bytes in and out and lists a directory", async () => {
-      const path = "/data/home/pupbot-contract.txt";
+      const path = "/data/home/terabot-contract.txt";
       await provider.putFile(ref, path, "hello from the contract test");
       const bytes = await provider.getFile(ref, path);
       expect(new TextDecoder().decode(bytes)).toBe("hello from the contract test");
 
       const entries = await provider.list(ref, "/data/home");
-      expect(entries.some((entry) => entry.name === "pupbot-contract.txt")).toBe(true);
+      expect(entries.some((entry) => entry.name === "terabot-contract.txt")).toBe(true);
     });
 
     it("takes a screenshot of the desktop", async () => {
@@ -65,12 +65,12 @@ export function contractSuite(label: string, make: () => Promise<ComputerProvide
     });
 
     it("leases and releases activity, keeping the computer awake", async () => {
-      const lease = await provider.lease(ref, "pupbot-contract-lease", 60);
-      expect(lease.id).toBe("pupbot-contract-lease");
+      const lease = await provider.lease(ref, "terabot-contract-lease", 60);
+      expect(lease.id).toBe("terabot-contract-lease");
       expect(Date.parse(lease.expiresAt)).toBeGreaterThan(Date.now());
-      await provider.releaseLease(ref, "pupbot-contract-lease");
+      await provider.releaseLease(ref, "terabot-contract-lease");
       // Releasing an already absent lease is a no-op.
-      await provider.releaseLease(ref, "pupbot-contract-lease");
+      await provider.releaseLease(ref, "terabot-contract-lease");
     });
 
     it("lists the computers the account owns", async () => {
@@ -96,7 +96,7 @@ export function contractSuite(label: string, make: () => Promise<ComputerProvide
     });
 
     it("throws ProviderError, never a bare error, for unknown computers", async () => {
-      const missing: ComputerRef = { provider: provider.name, account: provider.account, id: "pupbot-no-such-box" };
+      const missing: ComputerRef = { provider: provider.name, account: provider.account, id: "terabot-no-such-box" };
       await expect(provider.status(missing)).rejects.toBeInstanceOf(ProviderError);
       await expect(provider.exec(missing, "true")).rejects.toBeInstanceOf(ProviderError);
       await provider.destroy(missing);

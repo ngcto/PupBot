@@ -1,6 +1,6 @@
-import { botStatusLine } from "@pupbot/api-client";
-import type { BotDetail } from "@pupbot/api-client";
-import { COLORS, SHAPES, colorHex } from "@pupbot/avatars";
+import { botStatusLine } from "@terabot/api-client";
+import type { BotDetail } from "@terabot/api-client";
+import { COLORS, SHAPES, colorHex } from "@terabot/avatars";
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react-native";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";

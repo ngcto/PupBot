@@ -22,7 +22,7 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: "pnpm --filter @pupbot/api dev",
+      command: "pnpm --filter @terabot/api dev",
       url: "http://localhost:8787/health",
       reuseExistingServer: true,
       timeout: 120_000,
@@ -32,7 +32,7 @@ export default defineConfig({
       env: { INSTABOX_API_KEY: "" },
     },
     {
-      command: "pnpm --filter @pupbot/web dev",
+      command: "pnpm --filter @terabot/web dev",
       url: "http://localhost:3000/sign-in",
       reuseExistingServer: true,
       timeout: 180_000,

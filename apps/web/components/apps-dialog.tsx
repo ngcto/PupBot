@@ -2,7 +2,7 @@
 
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Delete02Icon, Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
-import { Badge, Button, DialogContent, DialogRoot, cn, toast } from "@pupbot/ui";
+import { Badge, Button, DialogContent, DialogRoot, cn, toast } from "@terabot/ui";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useReducer, useRef } from "react";

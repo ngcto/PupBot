@@ -22,7 +22,6 @@ export const endpointKind = pgEnum("endpoint_kind", [
   "openai-chat",
   "openai-responses",
   "anthropic-messages",
-  "chatgpt-oauth",
 ]);
 export const computerStatus = pgEnum("computer_status", [
   "provisioning",
@@ -300,6 +299,9 @@ export const modelEndpoint = pgTable(
     modelCatalogId: uuid("model_catalog_id").references(() => modelCatalog.id, { onDelete: "set null" }),
     catalogMatch: catalogMatch("catalog_match").notNull().default("unmatched"),
     contextWindow: integer("context_window"),
+    /** Last `GET /models` answer from the endpoint itself, cached for the picker. */
+    modelList: jsonb("model_list").$type<Array<{ id: string; ownedBy?: string; created?: number }>>(),
+    modelListFetchedAt: timestamp("model_list_fetched_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [index("model_endpoint_workspace_idx").on(t.workspaceId)],
@@ -505,7 +507,8 @@ export const usageEvent = pgTable(
     model: text("model").notNull(),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
-    cost: numeric("cost", { precision: 12, scale: 6 }).notNull().default("0"),
+    /** USD for this call; null when the catalogue has no price for the model. */
+    cost: numeric("cost", { precision: 12, scale: 6 }),
     createdAt: createdAt(),
   },
   (t) => [index("usage_bot_idx").on(t.botId, t.createdAt)],

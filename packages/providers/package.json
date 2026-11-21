@@ -1,5 +1,5 @@
 {
-  "name": "@pupbot/providers",
+  "name": "@terabot/providers",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,15 +8,17 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
-    "@pupbot/config": "workspace:*",
+    "@terabot/config": "workspace:*",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "5.9.3",
-    "vitest": "5.1.1"
+    "vitest": "5.1.1",
+    "tsx": "^4.23.15"
   }
 }

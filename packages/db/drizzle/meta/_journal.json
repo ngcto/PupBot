@@ -26,8 +26,29 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1795242885880,
-      "tag": "0003_app_connections",
+      "when": 1795189614774,
+      "tag": "0003_yummy_apocalypse",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795233896497,
+      "tag": "0004_endpoint_model_list",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795233986793,
+      "tag": "0005_drop_chatgpt_endpoint_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795247731699,
+      "tag": "0006_app_connections",
       "breakpoints": true
     }
   ]

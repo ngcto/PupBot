@@ -1,10 +1,18 @@
+import { anthropicMessagesAdapter } from "./adapters/anthropic-messages.ts";
 import { openaiChatAdapter } from "./adapters/openai-chat.ts";
+import { openaiResponsesAdapter } from "./adapters/openai-responses.ts";
 import { UnsupportedEndpointError } from "./errors.ts";
 import type { EndpointKind, ModelEvent, StreamAdapter, StreamRequest } from "./types.ts";
 
 export interface ModelGateway {
   stream(request: StreamRequest): AsyncIterable<ModelEvent>;
 }
+
+export const defaultAdapters: Record<EndpointKind, StreamAdapter> = {
+  "openai-chat": openaiChatAdapter,
+  "openai-responses": openaiResponsesAdapter,
+  "anthropic-messages": anthropicMessagesAdapter,
+};
 
 /**
  * One entry point for every wire format we support. Adapters own the
@@ -13,7 +21,7 @@ export interface ModelGateway {
 export class Gateway implements ModelGateway {
   readonly #adapters: Map<EndpointKind, StreamAdapter>;
 
-  constructor(adapters: Partial<Record<EndpointKind, StreamAdapter>> = { "openai-chat": openaiChatAdapter }) {
+  constructor(adapters: Partial<Record<EndpointKind, StreamAdapter>> = defaultAdapters) {
     this.#adapters = new Map(Object.entries(adapters) as Array<[EndpointKind, StreamAdapter]>);
   }
 
