@@ -37,9 +37,16 @@ import { hostOf, type VaultService } from "./service.ts";
 /**
  * How far a fill got, in the driver's own vocabulary.
  *
- * These are `CuaEffect`'s values deliberately: a fill is an action like any other,
- * and a sink that could only answer "done" would flatten "the driver could not
- * confirm the app applied it" into a lie the model then repeats to the user.
+ * A fill is an action like any other, and a sink that could only answer "done"
+ * would flatten "the driver could not confirm the app applied it" into a lie the
+ * model then repeats to the user.
+ *
+ * **This is a copy, not an import.** Copied from `packages/cua`'s `CuaEffect`
+ * (`packages/cua/src/types.ts`); `packages/cua` is not on `main` yet, so depending on
+ * it here would break the build. When it lands, this becomes either an import or a
+ * type-level equality assertion against it — whichever the `ToolRuntime` that
+ * eventually owns the vocabulary prefers. Until then the two can drift, so a change
+ * to `CuaEffect` is a change to this line too.
  */
 export type FillEffect = "confirmed" | "unverifiable" | "suspected_noop" | "partial" | "refused";
 
