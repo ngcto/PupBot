@@ -220,6 +220,9 @@ importers:
       '@terabot/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@terabot/cua':
+        specifier: workspace:*
+        version: link:../../packages/cua
       '@terabot/db':
         specifier: workspace:*
         version: link:../../packages/db

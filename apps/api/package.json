@@ -21,6 +21,7 @@
     "@terabot/avatars": "workspace:*",
     "@terabot/computers": "workspace:*",
     "@terabot/config": "workspace:*",
+    "@terabot/cua": "workspace:*",
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",
     "@terabot/storage": "workspace:*",
