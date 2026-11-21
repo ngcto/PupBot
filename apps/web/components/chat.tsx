@@ -30,12 +30,14 @@ export function Chat({
   initialMessages,
   activeRunId,
   onGiveComputer,
+  onManageProviders,
 }: {
   bot: BotView;
   apiUrl: string;
   initialMessages: MessageView[];
   activeRunId: string | null;
   onGiveComputer: () => void;
+  onManageProviders: () => void;
 }) {
   const router = useRouter();
   const { messages, streaming, error, send, upload, sending, dismissError } = useConversationStream({
@@ -135,6 +137,7 @@ export function Chat({
         reply={reply}
         onCancelReply={() => setReply(null)}
         onGiveComputer={onGiveComputer}
+        onManageProviders={onManageProviders}
         pending={sending}
       />
     </div>

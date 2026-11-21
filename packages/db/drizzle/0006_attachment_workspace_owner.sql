@@ -1,3 +1,6 @@
+-- Idempotent on purpose: a database that ran the hosting branch before the
+-- renumber already has these objects, and drizzle re-runs this entry because its
+-- `when` is newer than that database's newest recorded row.
 CREATE TABLE IF NOT EXISTS "attachment_blob" (
 	"attachment_id" uuid PRIMARY KEY NOT NULL,
 	"bytes" "bytea" NOT NULL,

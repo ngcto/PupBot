@@ -23,6 +23,8 @@ interface ComposerProps {
   reply: { messageId: string; text: string } | null;
   onCancelReply: () => void;
   onGiveComputer: () => void;
+  /** Opens Settings > Providers when the bot has none yet. */
+  onManageProviders: () => void;
   pending?: boolean;
 }
 
@@ -38,6 +40,7 @@ export function Composer({
   reply,
   onCancelReply,
   onGiveComputer,
+  onManageProviders,
   pending,
 }: ComposerProps) {
   const [value, setValue] = useState("");
@@ -89,6 +92,28 @@ export function Composer({
     node.style.height = "auto";
     node.style.height = `${Math.min(node.scrollHeight, 200)}px`;
   }, [value]);
+
+  if (!bot.endpointId) {
+    return (
+      <div className="mx-auto w-[960px] max-w-full px-4 pb-[18px]">
+        <div
+          data-testid="composer-blocked"
+          className="rounded-lg border border-card bg-raised px-4 py-3.5"
+        >
+          <div className="flex items-center gap-3">
+            <Avatar shape={bot.shape as never} color={bot.color} size={32} title="" />
+            <div className="min-w-0 flex-1">
+              <p className="text-body text-ink">This bot has no provider yet.</p>
+              <p className="text-body text-ink-secondary">Connect one in Settings and it can start answering.</p>
+            </div>
+            <Button size="sm" variant="primary" className="h-8 px-3" onClick={onManageProviders}>
+              Add a provider
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (bot.computer.binding !== "ready") {
     return (

@@ -10,7 +10,7 @@ gateway and the computer allocation are ours; the UI follows a measured referenc
 
 ## Run it
 
-Requirements: Node 24, pnpm 12, Docker.
+Requirements: Node 26, pnpm 12, Docker.
 
 ```bash
 pnpm install

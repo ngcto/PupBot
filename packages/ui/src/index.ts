@@ -26,6 +26,8 @@ export { Tooltip } from "./components/tooltip.tsx";
 export { TabsRoot, TabsList, TabsTab, TabsPanel } from "./components/tabs.tsx";
 export { Switch } from "./components/switch.tsx";
 export { Select } from "./components/select.tsx";
+export { Combobox } from "./components/combobox.tsx";
+export type { ComboboxItem } from "./components/combobox.tsx";
 export type { SelectOption } from "./components/select.tsx";
 export { CollapsibleRoot, CollapsibleTrigger, CollapsiblePanel } from "./components/collapsible.tsx";
 export { Badge } from "./components/badge.tsx";

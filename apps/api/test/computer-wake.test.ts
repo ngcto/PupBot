@@ -48,7 +48,7 @@ async function fixture(name: string) {
     id: botId,
     workspaceId: space.id,
     name: "Wake Tera",
-    avatar: { shape: "tera", color: "amber" },
+    avatar: { shape: "mug", color: "amber" },
     accentColor: "#f69412",
     instructions: "Test bot.",
     modelEndpointId: endpointId,

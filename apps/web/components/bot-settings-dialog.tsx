@@ -15,36 +15,51 @@ import {
   toast,
 } from "@terabot/ui";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { addModelEndpoint, deleteBot, giveComputer, setBotFlags, updateBotSettings } from "../app/actions.ts";
+import { useEffect, useRef, useState } from "react";
+import { deleteBot, giveComputer, setBotFlags, testModelEndpoint, updateBotSettings } from "../app/actions.ts";
+import type { TestEndpointResult } from "../app/actions.ts";
 import type { BotView, EndpointView } from "../lib/types.ts";
 import { AvatarPicker } from "./avatar-picker.tsx";
+import { TestResultLine } from "./provider-form.tsx";
+import { ModelPicker } from "./model-picker.tsx";
 
 export function BotSettingsDialog({
   bot,
   endpoints,
   open,
   onOpenChange,
+  onManageProviders,
 }: {
   bot: BotView;
   endpoints: EndpointView[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Opens Settings > Providers; the bot dialog never takes a key itself. */
+  onManageProviders: () => void;
 }) {
   const router = useRouter();
   const [name, setName] = useState(bot.name);
   const [instructions, setInstructions] = useState(bot.instructions);
   const [shape, setShape] = useState<AvatarShapeId>(bot.shape as AvatarShapeId);
   const [color, setColor] = useState<AvatarColorId>(bot.color as AvatarColorId);
-  const [endpointId, setEndpointId] = useState<string | null>(bot.endpointId ?? bot.endpointId);
+  const [endpointId, setEndpointId] = useState<string | null>(bot.endpointId);
   const [modelId, setModelId] = useState(endpoints.find((entry) => entry.id === bot.endpointId)?.modelId ?? "");
   const [pending, setPending] = useState(false);
 
-  const [addingEndpoint, setAddingEndpoint] = useState(false);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [endpointModel, setEndpointModel] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [endpointResult, setEndpointResult] = useState<string | null>(null);
+  const [testingEndpoint, setTestingEndpoint] = useState(false);
+  const [endpointTest, setEndpointTest] = useState<TestEndpointResult | null>(null);
+  const [modelDetails, setModelDetails] = useState(false);
+  const testToken = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.localStorage.getItem("terabot:model-details") === "1") setModelDetails(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("terabot:model-details", modelDetails ? "1" : "0");
+  }, [modelDetails]);
 
   const accent = COLORS.find((entry) => entry.id === color)?.hex ?? bot.accentColor;
   const endpoint = endpoints.find((entry) => entry.id === endpointId);
@@ -98,95 +113,95 @@ export function BotSettingsDialog({
 
           <Group label="Model">
             <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <span className="text-body">Endpoint</span>
-              <Select
-                value={endpointId ?? undefined}
-                onValueChange={(value) => {
-                  setEndpointId(value);
-                  const next = endpoints.find((entry) => entry.id === value);
-                  if (next) setModelId(next.modelId);
-                }}
-                placeholder="Pick an endpoint"
-                options={endpoints.map((entry) => ({ value: entry.id, label: entry.label }))}
-              />
+              <span className="text-body">Provider</span>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={endpointId ?? undefined}
+                  onValueChange={(value) => {
+                    testToken.current += 1;
+                    setTestingEndpoint(false);
+                    setEndpointId(value);
+                    setEndpointTest(null);
+                    const next = endpoints.find((entry) => entry.id === value);
+                    if (next) setModelId(next.modelId);
+                  }}
+                  placeholder="Pick a provider"
+                  options={endpoints.map((entry) => ({ value: entry.id, label: entry.label }))}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!endpointId || testingEndpoint}
+                  onClick={async () => {
+                    if (!endpointId) return;
+                    const token = ++testToken.current;
+                    setTestingEndpoint(true);
+                    setEndpointTest(null);
+                    try {
+                      const result = await testModelEndpoint({ endpointId, modelId: modelId || undefined });
+                      // A slower response for an older endpoint/model must not
+                      // overwrite a newer selection's empty result.
+                      if (token === testToken.current) setEndpointTest(result);
+                    } finally {
+                      if (token === testToken.current) setTestingEndpoint(false);
+                    }
+                  }}
+                >
+                  {testingEndpoint ? "Testing…" : "Test"}
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center justify-between gap-4 border-t border-hairline px-4 py-3">
-              <span className="text-body">Model ID</span>
-              <Input
-                aria-label="Model ID"
-                className="h-8 w-[240px] text-right"
+            <div className="border-t border-hairline px-4 py-3">
+              <div className="mb-1.5 flex items-center justify-between">
+                <p className="text-sm text-ink-muted">Model</p>
+                <button
+                  type="button"
+                  className="text-sm text-ink-faint hover:text-ink"
+                  onClick={() => setModelDetails((value) => !value)}
+                >
+                  {modelDetails ? "Hide details" : "Details"}
+                </button>
+              </div>
+              <ModelPicker
                 value={modelId}
-                onChange={(event) => setModelId(event.target.value)}
+                onChange={(next) => {
+                  testToken.current += 1;
+                  setTestingEndpoint(false);
+                  setModelId(next);
+                  setEndpointTest(null);
+                }}
+                providerHint={endpoint?.providerHint ?? null}
+                details={modelDetails}
+                endpointId={endpoint?.id}
               />
             </div>
-            <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
-              <span className="text-body">Context</span>
-              <span className="text-body text-ink-muted">
-                {endpoint?.contextWindow ? `${endpoint.contextWindow.toLocaleString()} tokens` : "Unknown"}
-              </span>
-            </div>
-            <div className="border-t border-hairline p-4">
-              {addingEndpoint ? (
-                <div className="space-y-2">
-                  <Input
-                    aria-label="Base URL"
-                    placeholder="https://api.openai.com/v1"
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                  />
-                  <Input
-                    aria-label="Model to add"
-                    placeholder="gpt-5.6-sol"
-                    value={endpointModel}
-                    onChange={(event) => setEndpointModel(event.target.value)}
-                  />
-                  <Input
-                    aria-label="API key"
-                    type="password"
-                    placeholder="API key (kept encrypted)"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                  />
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={async () => {
-                        const result = await addModelEndpoint({
-                          label: endpointModel,
-                          kind: "openai-chat",
-                          baseUrl,
-                          modelId: endpointModel,
-                          apiKey: apiKey || undefined,
-                        });
-                        setEndpointId(result.endpointId);
-                        setModelId(endpointModel);
-                        setEndpointResult(
-                          result.match === "matched"
-                            ? `Matched in models.dev: ${result.modelName ?? endpointModel}, ${result.contextWindow?.toLocaleString() ?? "unknown"} tokens.`
-                            : "Saved, but models.dev has no entry for this model — it will work, context and pricing stay unknown.",
-                        );
-                        setAddingEndpoint(false);
-                        router.refresh();
-                      }}
-                    >
-                      Add endpoint
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAddingEndpoint(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
+            {endpointTest ? (
+              <div className="border-t border-hairline px-4 py-2">
+                <TestResultLine result={endpointTest} />
+              </div>
+            ) : null}
+            <div className="border-t border-hairline px-4 py-3">
+              {endpoints.length === 0 ? (
+                <p className="text-sm text-ink-muted">
+                  No provider configured yet.{" "}
+                  <button
+                    type="button"
+                    className="text-ink-secondary underline underline-offset-2 hover:text-ink"
+                    onClick={onManageProviders}
+                  >
+                    Add one in Settings → Providers
+                  </button>
+                  .
+                </p>
               ) : (
                 <button
                   type="button"
-                  className="text-body text-ink-secondary underline underline-offset-2 hover:text-ink"
-                  onClick={() => setAddingEndpoint(true)}
+                  className="text-sm text-ink-faint underline underline-offset-2 hover:text-ink"
+                  onClick={onManageProviders}
                 >
-                  Add a base URL + key + model
+                  Manage providers in Settings
                 </button>
               )}
-              {endpointResult ? <p className="mt-2 text-sm text-ink-muted">{endpointResult}</p> : null}
             </div>
           </Group>
 
