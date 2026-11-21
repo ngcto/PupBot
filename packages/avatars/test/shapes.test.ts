@@ -31,12 +31,6 @@ const RETIRED = [
   "antennae",
   "scallop",
   "shoulder",
-  "gear",
-  "oval",
-  "triangle",
-  "shield",
-  "puff",
-  "diamond",
 ] as const;
 
 describe("traced shapes", () => {
