@@ -13,6 +13,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.9",
     "@pupbot/agent": "workspace:*",
+    "@pupbot/avatars": "workspace:*",
     "@pupbot/computers": "workspace:*",
     "@pupbot/config": "workspace:*",
     "@pupbot/db": "workspace:*",
