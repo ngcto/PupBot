@@ -121,20 +121,22 @@ export class ComputerAllocator {
         if (!computer.accountId || computer.status === "deleted") continue;
         used.set(computer.accountId, (used.get(computer.accountId) ?? 0) + 1);
       }
-      // Every provider is tried before a bot is told no: a box it already lives
-      // on first (a wake, not a move), then the user's own key for this provider
-      // before the deployment's, then the least-full account. A managed account
-      // is never special-cased ahead of another.
+      // Every provider is tried before a bot is told no. The order is: the box
+      // the bot already lives on (a wake, not a move), then the user's *own*
+      // connected key, then the deployment's managed account, then a legacy row
+      // with no recorded owner, then least-full. A managed account is never
+      // special-cased ahead of a user's own, and a stub or leftover row never
+      // outranks a real deployment computer.
       const ordered = [...accounts].sort((a, b) => {
         const rank = (account: AccountRecord) => [
           hosted.has(account.id) ? 0 : 1,
-          account.managed ? 1 : 0,
+          accountClass(account, ownerUserId),
           (used.get(account.id) ?? 0) / Math.max(account.capacity, 1),
           account.label,
         ];
-        const [hostedA, managedA, ratioA, labelA] = rank(a) as [number, number, number, string];
-        const [hostedB, managedB, ratioB, labelB] = rank(b) as [number, number, number, string];
-        return hostedA - hostedB || managedA - managedB || ratioA - ratioB || labelA.localeCompare(labelB);
+        const [hostedA, classA, ratioA, labelA] = rank(a) as [number, number, number, string];
+        const [hostedB, classB, ratioB, labelB] = rank(b) as [number, number, number, string];
+        return hostedA - hostedB || classA - classB || ratioA - ratioB || labelA.localeCompare(labelB);
       });
 
       await this.store.setBindingState(botId, "binding", null);
@@ -917,6 +919,21 @@ export function eligibleAccounts(accounts: AccountRecord[], ownerUserId: string 
       account.status === "active" &&
       (account.managed || account.ownerUserId === null || account.ownerUserId === ownerUserId),
   );
+}
+
+/**
+ * A tiebreak class for ordering candidate accounts, lower first.
+ *
+ * `0` is the user's own connected key — it wins for their own bots. `1` is the
+ * deployment's managed account, which every bot may use. `2` is a row with no
+ * recorded owner: a seed or an operator's environment key, and the reason it
+ * sits last is that a development stub lives there, so it must never outrank a
+ * real deployment computer.
+ */
+function accountClass(account: AccountRecord, ownerUserId: string | null): number {
+  if (!account.managed && ownerUserId !== null && account.ownerUserId === ownerUserId) return 0;
+  if (account.managed) return 1;
+  return 2;
 }
 
 export function describeFailures(failures: Array<{ code: ProviderErrorCode; message: string }>): string {
