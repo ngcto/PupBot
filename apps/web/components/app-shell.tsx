@@ -57,12 +57,23 @@ export function AppShell({ data }: { data: ShellData }) {
     if (!activeBot) return;
     try {
       await giveComputer(activeBot.id);
-      toast("Computer attached");
       router.refresh();
-    } catch {
-      toast("Could not attach a computer — check CREDENTIAL_ENCRYPTION_KEY.");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not connect a computer.");
+      router.refresh();
     }
   }, [activeBot, router]);
+
+  const computerBinding = activeBot?.computer.binding;
+  const computerStatus = activeBot?.computer.status;
+
+  useEffect(() => {
+    // While a box is being allocated or woken, the server has the truth; ask it.
+    const working = computerBinding === "binding" || computerStatus === "waking" || computerStatus === "provisioning";
+    if (!working) return;
+    const timer = setInterval(() => router.refresh(), 1200);
+    return () => clearInterval(timer);
+  }, [computerBinding, computerStatus, router]);
 
   return (
     <div
@@ -106,7 +117,9 @@ export function AppShell({ data }: { data: ShellData }) {
         </div>
       )}
 
-      {activeBot && railOpen ? <Rail bot={activeBot} onClose={() => setRailOpen(false)} /> : null}
+      {activeBot && railOpen ? (
+        <Rail bot={activeBot} onClose={() => setRailOpen(false)} onConnect={onGiveComputer} />
+      ) : null}
 
       <CreateBotDialog open={createOpen} onOpenChange={setCreateOpen} />
       <PrimaryBotDialog open={primaryOpen} onOpenChange={setPrimaryOpen} bots={data.bots} />

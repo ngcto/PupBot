@@ -2,6 +2,12 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  # esbuild ships its binary per platform but its install script verifies it.
+  esbuild: true
+  # Only Squirrel installers need it; apps/desktop uses NSIS.
+  electron-winstaller: false
+
 overrides:
   '@pupbot/avatars>react': 19.3.0
 

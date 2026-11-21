@@ -178,4 +178,72 @@ describe("conversation run protocol", () => {
     const [nextRun] = await db.select().from(run).where(eq(run.id, secondRun.runId));
     expect(nextRun?.status).toBe("done");
   }, 45_000);
+
+  it("treats an external abort as a cancellation, not a finished answer", async () => {
+    const sent = await app.request(`/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ text: "take your time" }),
+    });
+    const { runId } = (await sent.json()) as { runId: string };
+
+    const controller = new AbortController();
+    const words = Array.from({ length: 60 }, (_, index) => `slow${index}`);
+    const running = executeRun({
+      db,
+      gateway: slowGateway(words, 40),
+      runId,
+      abortPollMs: 20,
+      signal: controller.signal,
+    });
+
+    await sleep(150);
+    controller.abort();
+
+    const outcome = await running;
+    expect(outcome.status).toBe("canceled");
+    expect(outcome.text.trim().length).toBeGreaterThan(0);
+
+    const [row] = await db.select().from(run).where(eq(run.id, runId));
+    expect(row?.status).toBe("canceled");
+  }, 30_000);
+
+  it("resumes a redelivered run on the assistant message the first attempt left", async () => {
+    const sent = await app.request(`/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ text: "answer even if I crash" }),
+    });
+    const { runId } = (await sent.json()) as { runId: string };
+
+    // What a worker killed mid-stream leaves behind: a running run and a
+    // streaming assistant message.
+    const staleId = newId();
+    await db.update(run).set({ status: "running" }).where(eq(run.id, runId));
+    await db.insert(message).values({
+      id: staleId,
+      conversationId,
+      runId,
+      role: "assistant",
+      parts: [{ type: "text", text: "half an ans" }],
+      status: "streaming",
+    });
+
+    const outcome = await executeRun({
+      db,
+      gateway: slowGateway(["resumed"], 1),
+      runId,
+      abortPollMs: 20,
+    });
+
+    expect(outcome.status).toBe("done");
+    expect(outcome.assistantMessageId).toBe(staleId);
+
+    const rows = await db
+      .select()
+      .from(message)
+      .where(and(eq(message.runId, runId), eq(message.role, "assistant")));
+    expect(rows).toHaveLength(1);
+    expect((rows[0]?.parts[0] as { text?: string } | undefined)?.text).toBe("resumed ");
+  }, 30_000);
 });
