@@ -537,27 +537,6 @@ describe("allocator — managed and user-supplied accounts", () => {
     expect((await store.botBinding("bot-1"))?.state).toBe("ready");
   });
 
-  it("gives a new user no computer when the deployment's only managed provider cannot screenshot", async () => {
-    // The default requirement is a product rule and it has a cost: an Agent37-only
-    // deployment cannot serve a screen-capable bot, so nobody gets a computer.
-    // That is the honest outcome and it is pinned here so it is a decision on
-    // record rather than a surprise — either the deployment also sets
-    // INSTABOX_API_KEY, or the run opts out with `requires: []`.
-    const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-new");
-    store.addAccount({ id: "managed", provider: "agent37", label: "Terabot's Agent37", managed: true, capacity: 1 });
-
-    const result = await allocator.allocateForBot("bot-1");
-
-    expect(result.state).toBe("blocked");
-    expect(result.reason).toContain("Terabot's Agent37");
-
-    // The escape hatch the default is designed around.
-    const relaxed = await allocator.allocateForBot("bot-1", { requires: [] });
-    expect(relaxed.state).toBe("ready");
-  });
-
   it("prefers the user's own account over a managed one for their own bot", async () => {
     const { store, allocator, fake } = harness();
     store.addBot("bot-1");
@@ -618,15 +597,14 @@ describe("allocator — managed and user-supplied accounts", () => {
     expect(binding?.reason).toBe("No managed computer is available right now.");
   });
 
-  it("gives a bot a box that can screenshot by default, ahead of one that cannot", async () => {
-    // Own-key-first is the old rule. The default requirement now outranks it: a
-    // run that will use a computer needs to see the screen, so a capable managed
-    // account beats the user's own framebuffer-less one.
+  it("allocates on an Agent37-only deployment when the caller asks for nothing", async () => {
+    // The default must not take a working provider out of the pool. A box with no
+    // framebuffer still runs commands and moves files, so a bot that never looks
+    // at a screen gets it — this is the case a screenshot-by-default rule broke.
     const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
     store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-1");
-    store.addAccount({ id: "mine", provider: "agent37", label: "My Agent37", capacity: 5, ownerUserId: "user-1" });
-    store.addAccount({ id: "managed", provider: "instabox", capacity: 5, managed: true });
+    store.botOwners.set("bot-1", "user-new");
+    store.addAccount({ id: "managed", provider: "agent37", label: "Terabot's Agent37", managed: true, capacity: 1 });
 
     const result = await allocator.allocateForBot("bot-1");
 
@@ -634,20 +612,34 @@ describe("allocator — managed and user-supplied accounts", () => {
     expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("managed");
   });
 
-  it("blocks with the product's own sentence when nothing connected can screenshot", async () => {
-    // This is the user-visible value of the whole finding: a person with only an
-    // Agent37 key is told what is missing and which account, not "no computer is
-    // available", which would send them to check capacity that is not the problem.
+  it("chooses a screenshot-capable account when the caller asks for a screen", async () => {
+    // Strictness belongs to the caller, which knows whether its tools can look.
+    // When it can, own-key-first no longer wins over a closer-but-incapable box.
+    const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-1");
+    store.addAccount({ id: "mine", provider: "agent37", label: "My Agent37", capacity: 5, ownerUserId: "user-1" });
+    store.addAccount({ id: "managed", provider: "instabox", capacity: 5, managed: true });
+
+    const result = await allocator.allocateForBot("bot-1", { requires: ["screenshot"] });
+
+    expect(result.state).toBe("ready");
+    expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("managed");
+  });
+
+  it("blocks with the product's own sentence when a run that reads the screen has no capable provider", async () => {
+    // This is the user-visible value of the capability check: a person whose only
+    // computer cannot do the job is told which account and why, and what to do —
+    // not "no computer is available", which sends them to check capacity.
     const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
     store.addBot("bot-1");
     store.botOwners.set("bot-1", "user-1");
     store.addAccount({ id: "mine", provider: "agent37", label: "My Agent37", capacity: 5, ownerUserId: "user-1" });
 
-    const result = await allocator.allocateForBot("bot-1");
+    const result = await allocator.allocateForBot("bot-1", { requires: ["screenshot"] });
 
     expect(result.state).toBe("blocked");
-    // The exact sentence, not just the pieces: this is what the person reads when
-    // their only computer cannot do the job, so a rewrite that loses the account
+    // The exact sentence, not just the pieces: a rewrite that loses the account
     // name or the remedy fails here.
     expect(result.reason).toBe(
       "No connected computer can do what this bot needs. " +
@@ -657,33 +649,19 @@ describe("allocator — managed and user-supplied accounts", () => {
     expect((await store.listComputers()).filter((row) => row.status !== "deleted")).toHaveLength(0);
   });
 
-  it("honours an explicit opt-out, so a shell-only run still uses a screenshot-less box", async () => {
-    // The default is a product rule, not a hard requirement: a task that never
-    // looks at the screen must still run on the only computer there is.
+  it("moves a bot onto a capable box when its run starts needing a screen, and destroys the old box", async () => {
     const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
     store.addBot("bot-1");
     store.botOwners.set("bot-1", "user-1");
     store.addAccount({ id: "mine", provider: "agent37", capacity: 5, ownerUserId: "user-1" });
-
-    const result = await allocator.allocateForBot("bot-1", { requires: [] });
-
-    expect(result.state).toBe("ready");
-    expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("mine");
-  });
-
-  it("moves a bot off a box that cannot meet the default, and destroys that box", async () => {
-    const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
-    store.addBot("bot-1");
-    store.botOwners.set("bot-1", "user-1");
-    store.addAccount({ id: "mine", provider: "agent37", capacity: 5, ownerUserId: "user-1" });
-    const first = await allocator.allocateForBot("bot-1", { requires: [] });
+    const first = await allocator.allocateForBot("bot-1");
     expect(first.state).toBe("ready");
     const before = (await store.botBinding("bot-1"))!.computer!;
     expect(before.accountId).toBe("mine");
 
-    // A capable account appears; the default requirement now has an answer.
+    // A capable account appears; a run that needs a screen now has an answer.
     store.addAccount({ id: "managed", provider: "instabox", capacity: 5, managed: true });
-    const moved = await allocator.allocateForBot("bot-1");
+    const moved = await allocator.allocateForBot("bot-1", { requires: ["screenshot"] });
 
     expect(moved.state).toBe("ready");
     expect((await store.botBinding("bot-1"))?.computer?.accountId).toBe("managed");
@@ -692,12 +670,12 @@ describe("allocator — managed and user-supplied accounts", () => {
     expect((await store.getComputer(before.id))?.status).toBe("deleted");
   });
 
-  it("reuses the box the bot already has when it meets the default", async () => {
+  it("reuses the box the bot already has when it already qualifies", async () => {
     const { store, allocator } = harnessWithCapabilities({ agent37CannotScreenshot: true });
     store.addBot("bot-1");
     store.addAccount({ id: "mine", provider: "instabox", capacity: 5 });
     const first = await allocator.allocateForBot("bot-1");
-    const again = await allocator.allocateForBot("bot-1");
+    const again = await allocator.allocateForBot("bot-1", { requires: ["screenshot"] });
 
     expect(again.computerId).toBe(first.computerId);
     expect((await store.listComputers()).filter((row) => row.status !== "deleted")).toHaveLength(1);

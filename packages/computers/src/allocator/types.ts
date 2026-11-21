@@ -137,20 +137,26 @@ export interface AllocateResult {
 export type RequiredCapability = "exec" | "files" | "screenshot";
 
 /**
- * What a bot's computer must be able to do unless a caller says otherwise.
+ * What a bot's computer must be able to do when the caller does not say.
  *
- * `screenshot` is the default because of what computer use is: a bot that drives
- * a desktop looks at the screen the same way a person does, so a box with no
- * framebuffer is not a smaller computer, it is the wrong one. A caller that
- * knows its run never needs to look — a shell-only task — passes `requires: []`
- * and is placed on anything.
+ * Nothing: a box that cannot screenshot can still run commands and move files,
+ * so it is a real computer for a bot that never looks. Refusing it by default
+ * would take a working provider out of the pool for every bot — the opposite of
+ * allocating across every provider so one being out of capacity does not stop
+ * a bot.
+ *
+ * Strictness belongs to the caller, which is the only place that knows whether
+ * the run's tools can look at a screen. A run with computer-use tools passes
+ * `["screenshot"]`; one that only shells out passes nothing.
  */
-export const DEFAULT_REQUIREMENTS: readonly RequiredCapability[] = ["screenshot"];
+export const DEFAULT_REQUIREMENTS: readonly RequiredCapability[] = [];
 
 export interface AllocateOptions {
   /**
    * Capabilities the box must have. Absent means `DEFAULT_REQUIREMENTS`, which
-   * is `["screenshot"]`; pass `[]` to accept a box that cannot show a screen.
+   * is empty — any provider is acceptable. A caller whose run includes a tool
+   * that reads the screen passes `["screenshot"]`, and is then placed only on a
+   * provider that has one, or blocked with a reason naming the gap.
    *
    * This lives on the placement call rather than in the run loop so the rule is
    * enforced where the choice of account is made: the run path only has to pass
@@ -164,10 +170,11 @@ export interface EnsureReadyOptions {
   leaseId?: string;
   timeoutMs?: number;
   /**
-   * Capabilities this run needs. Absent means `DEFAULT_REQUIREMENTS`; `[]`
-   * accepts a box that cannot show a screen. Checked against a box the bot
-   * already has, so a bot bound before the requirement existed fails with a
-   * reason naming the gap rather than at the first screenshot call.
+   * Capabilities this run needs. Absent means `DEFAULT_REQUIREMENTS`, which is
+   * empty. A run whose tools read the screen passes `["screenshot"]`, and it is
+   * then checked against a box the bot already has, so a bot bound before the
+   * requirement existed fails with a reason naming the gap rather than at the
+   * first screenshot call.
    */
   requires?: readonly RequiredCapability[];
 }
