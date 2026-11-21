@@ -531,6 +531,60 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Everything below writes to GitHub. It lives in its own job so a dry run
+      # skips it wholesale instead of surviving a set of per-step guards: a drill
+      # that needs updating every time a step is added is a drill that silently
+      # rots, and its failure looks like the release path being broken.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Release: the write half. Never runs on a dry run.
+  # ───────────────────────────────────────────────────────────────────────────
+  release:
+    name: release
+    needs: [meta, publish]
+    if: ${{ needs.meta.outputs.dry-run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+
+      # The installers were built once, in the build jobs; re-download rather than
+      # rebuild, so the bytes that get published are the bytes that were tested.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "*"
+          merge-multiple: true
+        continue-on-error: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Collect the assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.apk' \) -exec cp {} assets/ \;
+          count="$(find assets -type f | wc -l)"
+          [ "$count" -ge 1 ] || { echo "::error::no installers came through"; exit 1; }
+          ls -lh assets/ | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The release call goes through the action runtime's own client, holding the
       # job's token, instead of through `gh`. The probe cleared `gh` — it was
       # authenticating as `github-actions[bot]` with the minted `ghs_` token and no
@@ -539,7 +593,6 @@ jobs:
       # nothing between the runner and GitHub remains, and the refusal is GitHub's
       # alone. The response status is logged either way.
       - name: Create or update the release
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         uses: actions/github-script@v7
         env:
           VERSION: ${{ needs.meta.outputs.version }}
@@ -603,7 +656,6 @@ jobs:
       # assets that verifiably uploaded. A platform whose job failed is absent,
       # so its button keeps saying "Coming soon" instead of pointing at nothing.
       - name: Stamp the published version for the site
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
@@ -618,7 +670,6 @@ jobs:
       # `git add`. The stamped files exist only on this runner; telling someone to
       # add files they do not have would leave the site unchanged.
       - name: Publish the patch that updates the site
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
@@ -642,7 +693,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         with:
           name: release-site-patch
           path: release-site.patch
@@ -650,7 +700,6 @@ jobs:
           retention-days: 30
 
       - name: Print the download URLs
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
