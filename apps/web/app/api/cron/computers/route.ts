@@ -17,11 +17,14 @@ export const maxDuration = 300;
  * small and slow.
  */
 export async function GET(request: Request): Promise<Response> {
-  // Vercel signs its own cron calls with CRON_SECRET; without that check this
-  // endpoint would let anyone tear down computers.
+  // Fails closed: this endpoint sleeps boxes and tears down ownerless ones, so a
+  // deployment that forgot CRON_SECRET must refuse every caller rather than let
+  // anyone on the internet trigger it.
   const secret = serverEnv().CRON_SECRET;
-  const authorized = request.headers.get("authorization") === `Bearer ${secret}`;
-  if (secret && !authorized) return new Response("unauthorized", { status: 401 });
+  if (!secret) return new Response("cron is not configured", { status: 503 });
+  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
+    return new Response("unauthorized", { status: 401 });
+  }
 
   const allocator = new ComputerAllocator({
     store: new DrizzleComputerStore(),
