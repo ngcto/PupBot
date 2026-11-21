@@ -28,6 +28,11 @@ on:
         description: 'Version to build, without the leading "v" (for example 0.1.0)'
         required: true
         type: string
+      dry_run:
+        description: 'Build and probe without creating or uploading a release'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -58,6 +63,7 @@ jobs:
       api-configured: ${{ steps.targets.outputs.api-configured }}
       api-url: ${{ steps.targets.outputs.api-url }}
       sha: ${{ steps.v.outputs.sha }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -475,11 +481,15 @@ jobs:
 
       # Creating the release is idempotent: re-running a failed publish updates
       # the existing release and re-uploads (--clobber) instead of colliding.
-      # Diagnose, from the run's own token, what permissions it actually holds.
-      # "Resource not accessible by integration" says the API refused the token;
-      # it does not say why, and guessing produced two wrong theories already.
-      # This prints the identity, the granted scope headers and the effective
-      # repo permission, so the cause is visible in the log on every release.
+      #
+      # Diagnose what the failing call is actually made with. "Resource not
+      # accessible by integration" says the API refused the token; it does not
+      # say why, and three theories have been wrong already: workflow permissions
+      # being read-only (they are `write`), a per-repo override (the runner's own
+      # `GITHUB_TOKEN Permissions` block reports `Contents: write`), and a
+      # missing GH_TOKEN on the step (all five set it). So this prints the
+      # identity, the accepted-permission headers, which credential is on the
+      # wire, and the effective repo setting — evidence instead of a theory.
       - name: Probe the token's permissions
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -502,6 +512,23 @@ jobs:
             echo '```'
             gh api -i "repos/$GITHUB_REPOSITORY/releases" -X GET 2>&1 | grep -iE '^HTTP/|^x-accepted-github-permissions:|^x-oauth-scopes:|message' || true
             echo '```'
+            # The runner says this job's minted token holds `Contents: write`, and
+            # the same job still gets 403 on POST /releases — so find out which
+            # credential is actually on the wire. `gh` resolves GH_TOKEN, then
+            # GITHUB_TOKEN, then its own stored auth, then the git credential
+            # helper that actions/checkout leaves behind.
+            echo "**Which credential is on the wire?**"
+            echo '```'
+            env | grep -iE '^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN)=' | sed 's/=.*/=<set>/' || echo "(none set)"
+            gh auth status 2>&1 | sed -E 's/(token: ).*/\1<redacted>/' | head -20 || true
+            printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null \
+              | sed -E 's/^(password)=.*/\1=<redacted>/' || echo "(no persisted git credential)"
+            echo '```'
+            echo "**What does this job's token actually hold?**"
+            echo '```'
+            echo "GITHUB_TOKEN env var: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-absent}"
+            gh api "repos/$GITHUB_REPOSITORY/actions/permissions/workflow" 2>&1 | head -3 || true
+            echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Create or update the release
@@ -511,8 +538,16 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
           PRERELEASE: ${{ needs.meta.outputs.is-prerelease }}
           SHA: ${{ needs.meta.outputs.sha }}
+          DRY_RUN: ${{ needs.meta.outputs.dry-run }}
         run: |
           set -euo pipefail
+          # A dry run exists to answer "what does this token hold?" without
+          # leaving a public release behind. It stops here, after the probe.
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry_run is set; not creating or uploading a release."
+            echo "Dry run: the probe above is the output, and nothing was published." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Terabot $VERSION" --notes-file notes.md
           else
@@ -526,6 +561,7 @@ jobs:
       # assets that verifiably uploaded. A platform whose job failed is absent,
       # so its button keeps saying "Coming soon" instead of pointing at nothing.
       - name: Stamp the published version for the site
+        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
@@ -540,6 +576,7 @@ jobs:
       # `git add`. The stamped files exist only on this runner; telling someone to
       # add files they do not have would leave the site unchanged.
       - name: Publish the patch that updates the site
+        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
@@ -570,6 +607,7 @@ jobs:
           retention-days: 30
 
       - name: Print the download URLs
+        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
