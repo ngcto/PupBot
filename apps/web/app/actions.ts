@@ -188,7 +188,11 @@ export async function deleteBot(botId: string): Promise<void> {
   await runAllocator().destroyForBot(botId).catch((error: unknown) => {
     // The destroy path already records what it could not delete; reaching here
     // means the allocator itself failed, and a bot the user deleted must still go.
-    console.error(`[computers] destroying the box for ${botId} failed`, error);
+    //
+    // The label is a constant and the id is passed as an argument, never built
+    // into the string: `botId` comes from the client, and a format string that
+    // includes it is a log-injection and format-string hazard.
+    console.error("[computers] destroying the box for a deleted bot failed", botId, error);
   });
 
   await db.delete(botTable).where(eq(botTable.id, botId));
