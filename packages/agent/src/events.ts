@@ -8,6 +8,31 @@ export type RunStreamEvent =
   | { type: "text_delta"; payload: { text: string } }
   | { type: "reasoning_delta"; payload: { text: string } }
   | { type: "usage"; payload: { inputTokens?: number; outputTokens?: number } }
+  | {
+      /**
+       * A tool the bot ran. `result` is the text the model reads and is part of its
+       * context by design — which is why no tool ever puts a secret in it. The UI
+       * shows the name and status, not the payload.
+       */
+      type: "tool_call";
+      payload: { id: string; name: string; status: string; result?: string };
+    }
+  | {
+      /**
+       * The bot is asking the person for a credential it cannot obtain itself. The
+       * payload is the question and nothing else: a value the person submits travels
+       * into the vault, or into the submitting process's memory for one run, and
+       * never into an event.
+       */
+      type: "secret.request";
+      payload: {
+        requestId: string;
+        kind: "login" | "card" | "contact";
+        reason: string;
+        domain: string | null;
+        expiresAt: string;
+      };
+    }
   | { type: "message.completed"; payload: { messageId: string; text: string; status: "complete" | "error" } }
   | { type: "run.completed"; payload: { status: "done" | "canceled" | "error"; error?: string } };
 

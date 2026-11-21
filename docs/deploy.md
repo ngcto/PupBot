@@ -175,3 +175,41 @@ counts are what the product shows.
 - Deploys currently come from an upload of the branch tree (the deployment API, the same files
   `vercel deploy` sends). Push-to-deploy needs the Vercel GitHub App installed on `ngcto/Terabot`;
   the project has no Git connection yet.
+
+## The Vault on a hosted deployment
+
+The vault's two fill paths work the same in `inline` and `queue` mode: a bot reads a
+saved item by id, the server decrypts it, and the value is typed through the computer
+driver without entering the model's context. Nothing about that needs a shared
+process.
+
+**The ask-the-user card does.** A bot that calls `vault_request` finishes its turn
+waiting for a person to answer the card in the conversation. `apps/api/src/secret-bridge.ts`
+wakes that waiting run through an in-process promise, so:
+
+- **`RUN_MODE=inline`** (what this deployment uses): the run and the request that
+  submits the card are in the same process. The run waits up to three minutes and the
+  answer reaches it immediately.
+- **`RUN_MODE=queue`**: `apps/worker` runs the job and `apps/api` serves the submit, so
+  there is no shared memory. The waiter reports `expired` at once instead of
+  pretending, the card still renders and is still saved through the same encryption
+  path, and the person's answer reaches the model as the next user message rather
+  than as the tool result.
+
+### Named follow-up: a durable answer channel for `queue` mode
+
+Not built, and deliberately not. The failure it leaves: on a queue deployment a bot
+that asks for a credential cannot hear the answer mid-turn, so the run ends `expired`
+while the card stays answerable. The person's value is still saved correctly, but the
+bot has already been told nobody answered and will say so. Fixing it means a durable
+signal — a queue message or `LISTEN/NOTIFY` keyed by request id — delivered to whichever
+worker holds the run, plus resuming the tool step rather than replaying the turn, which
+is why it belongs with the run-control work rather than here. Inline mode, which this
+deployment uses, has none of this problem.
+
+A value provided with "Save to vault" unticked lives in the run process's memory for
+the duration of that run and is dropped when it ends. It is never written to Postgres
+— there is no column that could hold it — so a restarted or different process cannot
+serve it. That is why the one-shot case is correct under `inline` and degrades to
+"saved, or re-asked" under `queue`: a durable one-shot store would defeat the point of
+the checkbox.

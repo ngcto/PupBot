@@ -9,6 +9,7 @@ import {
   newId,
   run as runTable,
   runEvent,
+  toolCall as toolCallTable,
   usageEvent,
 } from "@terabot/db";
 import type { Database, MessagePart } from "@terabot/db";
@@ -18,6 +19,10 @@ import type { ModelEndpointConfig, ModelGateway, ModelPricing } from "@terabot/p
 import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
+import { createToolRegistry, schemasOf, summariseToolError } from "./tools.ts";
+import type { RunTool, ToolContext } from "./tools.ts";
+import { parseToolArguments } from "@terabot/providers";
+import type { ChatMessage } from "@terabot/providers";
 
 export interface ResolvedEndpoint {
   config: ModelEndpointConfig;
@@ -53,7 +58,21 @@ export interface ExecuteRunOptions {
    * hook should pass it through so those providers keep working.
    */
   resolveEndpoint?: (botRow: BotRow, session: string) => Promise<ResolvedEndpoint | null>;
+  /**
+   * Tools this run may use. A run with none streams a plain answer, exactly as
+   * before: the loop is the same code, just with nothing to call.
+   */
+  tools?: RunTool[];
   now?: () => Date;
+}
+
+/** A ceiling on tool steps per message, so a model in a loop cannot bill forever. */
+export const MAX_TOOL_STEPS = 8;
+
+interface CollectedCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 export interface BotRow {
@@ -290,6 +309,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   }
 
   const context = buildChatContext(row.bot, history);
+  // The conversation the loop grows: system prompt and transcript, then each
+  // assistant tool-call turn and its results.
+  const conversation: ChatMessage[] = [...context];
+  const registry = createToolRegistry(options.tools ?? []);
 
   const controller = new AbortController();
   const onExternalAbort = () => controller.abort();
@@ -312,6 +335,9 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   }, abortPollMs);
 
   let text = "";
+  // Text of the current model turn, which is what an assistant tool-call message
+  // carries: earlier turns already went out as their own messages.
+  let turnText = "";
   let reasoning = "";
   let pendingText = "";
   let pendingReasoning = "";
@@ -376,42 +402,144 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
         .catch(() => {});
     }, STEP_ROTATE_MS);
 
-    const stream = gateway.stream({
-      endpoint: resolved.config,
-      messages: context,
-      signal: controller.signal,
-    });
-
-    for await (const event of stream) {
+    // The tool loop. One iteration is one model turn; a turn that asks for tools
+    // runs them, appends the calls and their results, and streams again, so a model
+    // can act and then talk about what it did. Nothing here is tool-specific: the
+    // handlers come from `options.tools`, which is where the vault and the driver
+    // each register themselves.
+    for (let step = 0; ; step += 1) {
       if (controller.signal.aborted) break;
-
-      if (event.type === "text_delta") {
-        sawToken = true;
-        text += event.text;
-        pendingText += event.text;
-        await flush();
-      } else if (event.type === "reasoning_delta") {
-        reasoning += event.text;
-        pendingReasoning += event.text;
-        await flush();
-      } else if (event.type === "usage") {
-        inputTokens = event.inputTokens ?? inputTokens;
-        outputTokens = event.outputTokens ?? outputTokens;
-        cacheReadTokens = event.cacheReadTokens ?? cacheReadTokens;
-        cacheWriteTokens = event.cacheWriteTokens ?? cacheWriteTokens;
-        await events.append({
-          type: "usage",
-          payload: {
-            inputTokens,
-            outputTokens,
-            ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
-            ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
-          },
-        });
-      } else if (event.type === "error") {
-        failure = event.message;
+      if (step > MAX_TOOL_STEPS) {
+        failure = `the bot used more than ${MAX_TOOL_STEPS} tool steps on one message`;
         break;
       }
+
+      const toolSchemas = schemasOf(registry);
+      const calls: CollectedCall[] = [];
+      let turnFailed = false;
+
+      const stream = gateway.stream({
+        endpoint: resolved.config,
+        messages: conversation,
+        signal: controller.signal,
+        ...(toolSchemas.length > 0 ? { tools: toolSchemas } : {}),
+      });
+
+      for await (const event of stream) {
+        if (controller.signal.aborted) break;
+
+        if (event.type === "text_delta") {
+          sawToken = true;
+          text += event.text;
+          turnText += event.text;
+          pendingText += event.text;
+          await flush();
+        } else if (event.type === "reasoning_delta") {
+          reasoning += event.text;
+          pendingReasoning += event.text;
+          await flush();
+        } else if (event.type === "tool_call_start") {
+          sawToken = true;
+          const existing = calls.find((call) => call.id === event.id);
+          if (existing) existing.name = event.name || existing.name;
+          else calls.push({ id: event.id, name: event.name, arguments: "" });
+        } else if (event.type === "tool_call_delta") {
+          const call = calls.find((entry) => entry.id === event.id);
+          if (call) call.arguments += event.argumentsDelta;
+        } else if (event.type === "tool_call_end") {
+          const call = calls.find((entry) => entry.id === event.id);
+          if (call) {
+            call.arguments = event.arguments || call.arguments;
+            if (!call.name) call.name = event.arguments ? call.name : call.name;
+          } else {
+            calls.push({ id: event.id, name: "", arguments: event.arguments });
+          }
+        } else if (event.type === "usage") {
+          // Every turn of a tool loop is billed, so they add up rather than replace.
+          inputTokens = (inputTokens ?? 0) + (event.inputTokens ?? 0) || inputTokens;
+          outputTokens = (outputTokens ?? 0) + (event.outputTokens ?? 0) || outputTokens;
+          if (event.cacheReadTokens !== undefined) {
+            cacheReadTokens = (cacheReadTokens ?? 0) + event.cacheReadTokens;
+          }
+          if (event.cacheWriteTokens !== undefined) {
+            cacheWriteTokens = (cacheWriteTokens ?? 0) + event.cacheWriteTokens;
+          }
+          await events.append({
+            type: "usage",
+            payload: {
+              inputTokens,
+              outputTokens,
+              ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+              ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+            },
+          });
+        } else if (event.type === "error") {
+          failure = event.message;
+          turnFailed = true;
+          break;
+        }
+      }
+
+      if (turnFailed || controller.signal.aborted) break;
+
+      const usable = calls.filter((call) => call.name);
+      if (usable.length === 0) break;
+
+      // Whatever the model said before calling a tool is narration, and the next
+      // turn's answer continues the same bubble: separate them so a sentence does
+      // not run straight into the next one.
+      if (turnText.trim()) {
+        const gap = text.trim() ? "\n\n" : "";
+        text = `${text.trimEnd()}${gap}`;
+        pendingText = `${pendingText}${gap}`;
+        await flush(true);
+      }
+
+      // The assistant turn that asked for the tools is replayed with its calls, so
+      // the next request is a valid conversation rather than a bare tool result.
+      conversation.push({
+        role: "assistant",
+        content: turnText,
+        toolCalls: usable.map((call) => ({ id: call.id, name: call.name, arguments: call.arguments })),
+      });
+      turnText = "";
+
+      let stopAfterTools = false;
+      for (const call of usable) {
+        const outcome = await runToolCall({
+          db,
+          events,
+          registry,
+          call,
+          context: {
+            workspaceId: row.bot.workspaceId,
+            botId: row.bot.id,
+            conversationId: row.conversation.id,
+            runId,
+            signal: controller.signal,
+            emit: (event) => events.append(event),
+          },
+          runId,
+          now,
+        });
+        conversation.push({
+          role: "tool",
+          content: outcome.result,
+          toolCallId: call.id,
+          name: call.name,
+        });
+        if (outcome.endRun) {
+          stopAfterTools = true;
+          // A tool that ends the run has produced the answer; show it as the text.
+          if (!text.trim() && outcome.result.trim()) {
+            text = outcome.result;
+            pendingText = outcome.result;
+            await flush(true);
+          }
+        }
+      }
+
+      if (stopAfterTools) break;
     }
   } catch (error) {
     if (!controller.signal.aborted) {
@@ -487,6 +615,74 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
 
   void reasoning;
   return { status, assistantMessageId, text };
+}
+
+/**
+ * Runs one tool call and records it.
+ *
+ * A handler that throws is a tool result the model can read and act on, not a dead
+ * run: "that item is saved for github.com and this page is evil.test" is exactly
+ * what lets a model recover, and an exception would take the whole message down
+ * instead. The error text is the handler's own message, which every vault path
+ * writes without a secret in it.
+ */
+async function runToolCall(input: {
+  db: Database;
+  events: EventLog;
+  registry: ReturnType<typeof createToolRegistry>;
+  call: CollectedCall;
+  context: ToolContext;
+  runId: string;
+  now: () => Date;
+}): Promise<{ result: string; endRun: boolean }> {
+  const started = input.now();
+  const parsed = parseToolArguments(input.call.arguments);
+  const tool = input.registry.get(input.call.name);
+
+  await input.events.append({
+    type: "tool_call",
+    payload: { id: input.call.id, name: input.call.name, status: "running" },
+  });
+
+  let result: string;
+  let endRun = false;
+  let status = "ok";
+
+  if (!tool) {
+    status = "unknown_tool";
+    result = `there is no tool called "${input.call.name}"`;
+  } else if (!parsed.ok) {
+    status = "bad_arguments";
+    result = `that tool call could not be read: ${parsed.error}`;
+  } else {
+    try {
+      const outcome = await tool.handler(parsed.value, input.context);
+      result = outcome.result;
+      endRun = outcome.endRun ?? false;
+    } catch (error) {
+      status = "error";
+      result = summariseToolError(error);
+    }
+  }
+
+  const endedAt = input.now();
+  await input.db.insert(toolCallTable).values({
+    id: newId(),
+    runId: input.runId,
+    name: input.call.name,
+    input: parsed.ok ? parsed.value : { raw: input.call.arguments.slice(0, 500) },
+    output: { result, status },
+    status,
+    startedAt: started,
+    endedAt,
+  });
+
+  await input.events.append({
+    type: "tool_call",
+    payload: { id: input.call.id, name: input.call.name, status, result },
+  });
+
+  return { result, endRun };
 }
 
 async function finishMessage(

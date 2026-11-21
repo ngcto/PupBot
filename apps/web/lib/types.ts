@@ -147,8 +147,23 @@ export interface ShellUser {
   email: string;
 }
 
+/**
+ * An ask-the-user card that is still answerable. The question only: a value the
+ * person submits never travels through this shape.
+ */
+export interface PendingRequestView {
+  requestId: string;
+  kind: "login" | "card" | "contact";
+  reason: string;
+  /** The site a saved value would belong to, when the bot named one. */
+  domain: string | null;
+  expiresAt: string;
+}
+
 export interface ShellData {
   user: ShellUser;
+  /** A card the bot is waiting on, if any. */
+  pendingRequest: PendingRequestView | null;
   apiUrl: string;
   bots: BotView[];
   sections: SectionView[];

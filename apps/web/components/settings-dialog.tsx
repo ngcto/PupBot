@@ -32,6 +32,7 @@ import { authClient } from "../lib/auth-client.ts";
 import type { BotView, ComputerAccountView, EndpointView, ProviderAvailability, ShellUser, UsageView } from "../lib/types.ts";
 import { ComputerPanel } from "./computer-panel.tsx";
 import { ProvidersPanel } from "./settings-providers.tsx";
+import { VaultPanel } from "./settings-vault.tsx";
 
 const NAV = [
   { value: "general", label: "General", icon: Settings01Icon },
@@ -52,6 +53,7 @@ export function SettingsDialog({
   endpoints,
   computerAccounts,
   computerProviders,
+  apiUrl,
   initialSection = "general",
 }: {
   open: boolean;
@@ -62,6 +64,8 @@ export function SettingsDialog({
   endpoints: EndpointView[];
   computerAccounts: ComputerAccountView[];
   computerProviders: ProviderAvailability[];
+  /** Where the API lives; the Vault panel reads and writes through it. */
+  apiUrl: string;
   /** A link elsewhere in the app can land straight on a section. */
   initialSection?: string;
 }) {
@@ -192,17 +196,7 @@ export function SettingsDialog({
 
             <TabsPanel value="vault">
               <DialogTitle className="text-xl font-semibold">Vault</DialogTitle>
-              <GroupLabel>Secrets</GroupLabel>
-              <Card>
-                <div className="px-4 py-4">
-                  <p className="text-body text-ink-muted">
-                    No secrets yet. Values are never shown again after saving.
-                  </p>
-                  <Button size="sm" variant="secondary" className="mt-3" onClick={() => toast("Secrets land in P2.")}>
-                    Add secret
-                  </Button>
-                </div>
-              </Card>
+              <VaultPanel apiUrl={apiUrl} />
             </TabsPanel>
 
             <TabsPanel value="usage">

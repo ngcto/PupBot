@@ -1,0 +1,33 @@
+{
+  "name": "@terabot/vault",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./kinds": "./src/kinds.ts",
+    "./errors": "./src/errors.ts",
+    "./totp": "./src/totp.ts",
+    "./fill": "./src/fill.ts",
+    "./tools-run": "./src/tools-run.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@terabot/db": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "otplib": "^13.6.0",
+    "zod": "^4.1.12",
+    "@terabot/providers": "workspace:*",
+    "@terabot/agent": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "5.9.3",
+    "vitest": "5.1.1",
+    "@terabot/config": "workspace:*"
+  }
+}

@@ -9,6 +9,7 @@ import {
   message,
   modelEndpoint,
   run,
+  secretRequest,
   usageEvent,
 } from "@terabot/db";
 import { isGatewayAvailable, serverEnv } from "@terabot/config";
@@ -21,6 +22,7 @@ import type {
   ConnectedApp,
   EndpointView,
   MessageView,
+  PendingRequestView,
   SectionView,
   ShellData,
   ShellUser,
@@ -133,6 +135,7 @@ export async function loadShellData(input: {
 
   let messages: MessageView[] = [];
   let activeRunId: string | null = null;
+  let pendingRequest: PendingRequestView | null = null;
 
   if (activeBot) {
     const [messageRows, runRows] = await Promise.all([
@@ -158,6 +161,30 @@ export async function loadShellData(input: {
       runId: row.runId,
     }));
     activeRunId = runRows[0]?.id ?? null;
+
+    // A pending ask-the-user card outlives a page load, so it is read here rather
+    // than only from the run's event stream. The row holds the question; a value
+    // submitted to it is never part of this query.
+    const [pending] = await db
+      .select()
+      .from(secretRequest)
+      .where(
+        and(
+          eq(secretRequest.conversationId, activeBot.conversationId),
+          eq(secretRequest.status, "pending"),
+        ),
+      )
+      .orderBy(desc(secretRequest.createdAt))
+      .limit(1);
+    if (pending && pending.expiresAt.getTime() > Date.now()) {
+      pendingRequest = {
+        requestId: pending.id,
+        kind: pending.kind,
+        reason: pending.reason,
+        domain: null,
+        expiresAt: pending.expiresAt.toISOString(),
+      };
+    }
   }
 
   const endpointRows = await db
@@ -263,6 +290,7 @@ export async function loadShellData(input: {
   const connections: ConnectedApp[] = await listConnectionsFor(input.user.id);
 
   return {
+    pendingRequest,
     user: input.user,
     apiUrl: input.apiUrl,
     bots,

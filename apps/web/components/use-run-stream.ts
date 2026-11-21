@@ -15,6 +15,17 @@ export interface StreamingMessage {
   messageId: string | null;
   text: string;
   step: string | null;
+  /** A credential the bot is asking for, if one is pending in this run. */
+  request: PendingSecretRequest | null;
+}
+
+/** The question a card renders. It never carries a value. */
+export interface PendingSecretRequest {
+  requestId: string;
+  kind: "login" | "card" | "contact";
+  reason: string;
+  domain: string | null;
+  expiresAt: string;
 }
 
 interface StreamOptions {
@@ -47,7 +58,7 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
     (runId: string) => {
       if (sources.current.has(runId)) return;
       currentRun.current = runId;
-      setStreaming({ runId, messageId: null, text: "", step: null });
+      setStreaming({ runId, messageId: null, text: "", step: null, request: null });
 
       const source = new EventSource(`${apiUrl}/runs/${runId}/events?after=0`, { withCredentials: true });
       sources.current.set(runId, source);
@@ -69,6 +80,13 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
       source.addEventListener("text_delta", (event) => {
         const data = JSON.parse((event as MessageEvent).data) as { payload: { text: string } };
         patch((state) => ({ ...state, text: state.text + data.payload.text }));
+      });
+
+      // The bot asked for a credential. The event carries the question only, so the
+      // card can render from it without any value existing anywhere yet.
+      source.addEventListener("secret.request", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as { payload: PendingSecretRequest };
+        patch((state) => ({ ...state, request: data.payload }));
       });
 
       source.addEventListener("message.completed", (event) => {
@@ -212,5 +230,10 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
     [apiUrl, appendMessage, conversationId, sending, subscribe],
   );
 
-  return { messages, streaming, error, send, upload, sending, dismissError: () => setError(null) };
+  /** After a card resolves, its request is no longer pending. */
+  const clearRequest = useCallback(() => {
+    setStreaming((state) => (state ? { ...state, request: null } : state));
+  }, []);
+
+  return { messages, streaming, error, send, upload, sending, clearRequest, dismissError: () => setError(null) };
 }

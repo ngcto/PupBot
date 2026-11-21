@@ -18,6 +18,7 @@
     "@terabot/config": "workspace:*",
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",
+    "@terabot/vault": "workspace:*",
     "pg-boss": "^12.38.2"
   },
   "devDependencies": {
