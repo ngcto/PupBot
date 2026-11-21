@@ -531,37 +531,131 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Everything below writes to GitHub. It lives in its own job so a dry run
+      # skips it wholesale instead of surviving a set of per-step guards: a drill
+      # that needs updating every time a step is added is a drill that silently
+      # rots, and its failure looks like the release path being broken.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Release: the write half. Never runs on a dry run.
+  # ───────────────────────────────────────────────────────────────────────────
+  release:
+    name: release
+    needs: [meta, publish]
+    if: ${{ needs.meta.outputs.dry-run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+
+      # The installers were built once, in the build jobs; re-download rather than
+      # rebuild, so the bytes that get published are the bytes that were tested.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "*"
+          merge-multiple: true
+        continue-on-error: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Collect the assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.apk' \) -exec cp {} assets/ \;
+          count="$(find assets -type f | wc -l)"
+          [ "$count" -ge 1 ] || { echo "::error::no installers came through"; exit 1; }
+          ls -lh assets/ | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The release call goes through the action runtime's own client, holding the
+      # job's token, instead of through `gh`. The probe cleared `gh` — it was
+      # authenticating as `github-actions[bot]` with the minted `ghs_` token and no
+      # stored credential — so this is not expected to change the outcome. It is
+      # here to eliminate the client as a variable: if the API call still 403s,
+      # nothing between the runner and GitHub remains, and the refusal is GitHub's
+      # alone. The response status is logged either way.
       - name: Create or update the release
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.meta.outputs.tag }}
           VERSION: ${{ needs.meta.outputs.version }}
           PRERELEASE: ${{ needs.meta.outputs.is-prerelease }}
           SHA: ${{ needs.meta.outputs.sha }}
-          DRY_RUN: ${{ needs.meta.outputs.dry-run }}
-        run: |
-          set -euo pipefail
-          # A dry run exists to answer "what does this token hold?" without
-          # leaving a public release behind. It stops here, after the probe.
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "::notice::dry_run is set; not creating or uploading a release."
-            echo "Dry run: the probe above is the output, and nothing was published." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Terabot $VERSION" --notes-file notes.md
-          else
-            args=(--title "Terabot $VERSION" --notes-file notes.md --target "$SHA")
-            [ "$PRERELEASE" = "true" ] && args+=(--prerelease)
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${args[@]}"
-          fi
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber assets/*
+          NOTES_PATH: notes.md
+        with:
+          script: |
+            const fs = require("node:fs");
+            const { owner, repo } = context.repo;
+            const tag = ${{ toJSON(needs.meta.outputs.tag) }};
+            const version = process.env.VERSION;
+            const body = fs.readFileSync(process.env.NOTES_PATH, "utf8");
+            const octokit = github;
+
+            const attempt = async (label, fn) => {
+              try {
+                const response = await fn();
+                core.info(`${label}: ${response.status} ${response.statusText}`);
+                return response;
+              } catch (error) {
+                core.error(`${label}: ${error.status ?? "?"} ${error.message}`);
+                core.error(`accepted permissions: ${JSON.stringify(error.response?.headers?.["x-accepted-github-permissions"] ?? "none")}`);
+                throw error;
+              }
+            };
+
+            let existing = null;
+            try {
+              existing = (await octokit.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const release = existing
+              ? (await attempt("PATCH /releases", () => octokit.rest.repos.updateRelease({
+                  owner, repo, release_id: existing.id, tag_name: tag, name: `Terabot ${version}`, body,
+                }))).data
+              : (await attempt("POST /releases", () => octokit.rest.repos.createRelease({
+                  owner, repo, tag_name: tag, target_commitish: process.env.SHA,
+                  name: `Terabot ${version}`, body,
+                  prerelease: process.env.PRERELEASE === "true",
+                }))).data;
+
+            core.setOutput("release_id", String(release.id));
+            core.info(`release ${release.id} at ${release.html_url}`);
+
+            const uploadUrl = release.upload_url.replace(/\{.*$/, "");
+            for (const name of fs.readdirSync("assets")) {
+              const path = `assets/${name}`;
+              const data = fs.readFileSync(path);
+              await attempt(`POST upload ${name}`, () => octokit.request(`POST ${uploadUrl}`, {
+                headers: { "content-type": "application/octet-stream", "content-length": data.length },
+                data,
+                name,
+                label: name,
+              }));
+            }
 
       # The site reads one file: this release's version and the names of the
       # assets that verifiably uploaded. A platform whose job failed is absent,
       # so its button keeps saying "Coming soon" instead of pointing at nothing.
       - name: Stamp the published version for the site
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
@@ -576,7 +670,6 @@ jobs:
       # `git add`. The stamped files exist only on this runner; telling someone to
       # add files they do not have would leave the site unchanged.
       - name: Publish the patch that updates the site
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
@@ -607,7 +700,6 @@ jobs:
           retention-days: 30
 
       - name: Print the download URLs
-        if: ${{ needs.meta.outputs.dry-run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.meta.outputs.tag }}
