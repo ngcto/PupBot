@@ -48,6 +48,19 @@ describe("totpCode against RFC 6238", () => {
     expect(normaliseTotpSecret("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ===")).toBe(RFC_SEED);
   });
 
+  /**
+   * A stored secret is library input, not a constant. CodeQL flagged the anchored
+   * `/=+$/` that used to do this strip as a polynomial regex, and it was right: on a
+   * long run of `=` with no match it retries from every offset. Ten thousand
+   * characters is well past any real key and still has to finish instantly.
+   */
+  it("strips a long padding run without backtracking", () => {
+    const padded = `${"A".repeat(32)}${"=".repeat(10_000)}`;
+    const started = performance.now();
+    expect(normaliseTotpSecret(padded)).toBe("A".repeat(32));
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
   it("refuses a secret too short to be a key, without echoing it", () => {
     try {
       totpCode("ABC");

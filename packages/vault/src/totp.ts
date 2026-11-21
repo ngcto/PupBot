@@ -20,7 +20,10 @@ const ALGORITHM = "sha1";
 
 /** What the person typed, as the base32 the algorithm needs. */
 export function normaliseTotpSecret(raw: string): string {
-  return raw.replace(/[\s-]/g, "").toUpperCase().replace(/=+$/, "");
+  const stripped = raw.replace(/[\s-]/g, "").toUpperCase();
+  let end = stripped.length;
+  while (end > 0 && stripped[end - 1] === "=") end -= 1;
+  return stripped.slice(0, end);
 }
 
 export interface TotpCode {
