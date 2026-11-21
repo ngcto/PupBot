@@ -96,7 +96,7 @@ describe.skipIf(!databaseUrl)("a built-in's base URL stays on the server", () =>
   async function shell() {
     // The exact payload `app/page.tsx` passes to client components.
     return loadShellData({
-      user: { id: ids.userId, name: "Leak Test", email: "leak@terabot.test" },
+      user: { id: ids.userId, name: "Leak Test", email: "leak@terabot.test", role: "member" },
       workspaceId: ids.workspaceId,
       apiUrl: "http://localhost:4000",
     });

@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnv } from "@terabot/config/load-env";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDatabase } from "./client.ts";
+import { syncOwnerRoles } from "./roles.ts";
 
 loadEnv();
 
@@ -15,4 +16,14 @@ const folder = fileURLToPath(new URL("../drizzle", import.meta.url));
 
 await migrate(handle.db, { migrationsFolder: folder });
 console.log("migrations applied");
+
+// `OWNER_EMAILS` is the only way an account becomes the Owner. Reconciling it
+// here means a deployment establishes its Owner on migrate, before the app
+// serves a request, and a changed list takes effect on the next deploy.
+const owners = await syncOwnerRoles();
+if (owners.disabled) {
+  console.log("OWNER_EMAILS is not set: nobody was promoted, nobody was demoted");
+} else {
+  console.log(`owners synced: granted=${owners.granted} revoked=${owners.revoked}`);
+}
 await handle.close();

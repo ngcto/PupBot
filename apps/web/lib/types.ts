@@ -145,6 +145,8 @@ export interface ShellUser {
   id: string;
   name: string;
   email: string;
+  /** From the `user` row, never from the client: the Owner bypass is server-side. */
+  role: "owner" | "member";
 }
 
 /**

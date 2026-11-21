@@ -1,6 +1,6 @@
 import { executeRun } from "@terabot/agent";
 import { loadEnv } from "@terabot/config/load-env";
-import { RUN_QUEUE, closeDatabase, database, startBoss } from "@terabot/db";
+import { RUN_QUEUE, closeDatabase, database, startBoss, syncOwnerRolesOnce } from "@terabot/db";
 import type { RunJobData } from "@terabot/db";
 import { createGateway } from "@terabot/providers";
 import { SecretRequestService, VaultService, oneShotSecrets, vaultTools } from "@terabot/vault";
@@ -11,12 +11,22 @@ import { registerComputerJobs } from "./jobs/computers.ts";
 loadEnv();
 
 const gateway = createGateway();
+
+// The Owner is whoever `OWNER_EMAILS` names; reconcile on boot so a changed
+// list takes effect without a manual migration run.
+await syncOwnerRolesOnce()
+  .then((result) =>
+    result.disabled
+      ? undefined
+      : console.log(`[owners] granted=${result.granted} revoked=${result.revoked}`),
+  )
+  .catch((error: unknown) => console.error("[owners] sync failed", error));
 const boss = await startBoss({ maintain: true });
 const { allocator, runComputer } = createComputers();
 
 await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
   for (const job of jobs) {
-    const { runId } = job.data;
+    const { runId, userId } = job.data;
     try {
       // The same vault tools the inline path gets. The ask-the-user card cannot be
       // answered across processes, so this run does not wait for one: the card
@@ -28,6 +38,7 @@ await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
         signal: job.signal,
         computer: runComputer,
         tools: vaultTools({ db: database(), vault: new VaultService(database()), oneShot: oneShotSecrets() }),
+        ...(userId ? { userId } : {}),
       });
       console.log(`[run ${runId}] ${outcome.status} (${outcome.text.length} chars)`);
     } catch (error) {

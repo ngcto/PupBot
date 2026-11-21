@@ -40,7 +40,12 @@
     "VERCEL_OIDC_TOKEN",
     "EXPO_PUBLIC_API_URL",
     "CI",
-    "PLAYWRIGHT_BROWSERS_PATH"
+    "PLAYWRIGHT_BROWSERS_PATH",
+    "OWNER_EMAILS",
+    "POLAR_ACCESS_TOKEN",
+    "POLAR_WEBHOOK_SECRET",
+    "POLAR_SERVER",
+    "POLAR_PLANS"
   ],
   "globalDependencies": [
     "eslint.config.js",
