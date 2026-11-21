@@ -55,12 +55,24 @@ export function releaseAssetUrl(version: string, asset: string): string {
  * URL derivation and the tests read from the same place.
  */
 const assetNames = {
-  linux: (version: string) => `Terabot-${version}.AppImage`,
-  windows: (version: string) => `Terabot Setup ${version}.exe`,
+  // Every name here was produced by running the packager, not by reading its
+  // docs: `electron-builder --linux AppImage --x64` emits
+  // `Terabot-<version>-x86_64.AppImage`, and `${arch}` is `amd64` for the .deb.
+  // The installer is space-free on purpose (see electron-builder.config.cjs):
+  // a space in an asset name is stored as a dot by GitHub, which is a name the
+  // site could never match.
+  linux: (version: string) => `Terabot-${version}-x86_64.AppImage`,
+  windows: (version: string) => `Terabot-${version}-setup.exe`,
   android: (version: string) => `terabot-${version}.apk`,
   // electron-builder emits a .dmg per arch; nothing publishes one yet.
   macos: (version: string) => `Terabot-${version}-arm64.dmg`,
 } as const;
+
+/**
+ * Exposed for the test that holds these names to what the packager actually
+ * emits. Not part of the page's contract.
+ */
+export const assetNamesForTest = assetNames;
 
 /** A platform is only a link when its file was really uploaded for this version. */
 function published(

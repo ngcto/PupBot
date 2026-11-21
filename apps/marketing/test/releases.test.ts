@@ -77,21 +77,21 @@ describe("the URLs point at assets that were really published", () => {
     }
   });
 
-  it("uses the exact asset names the release workflow uploads", () => {
-    if (publishedVersion === null) return;
-    const version = publishedVersion;
-    const byId = new Map(releases.map((entry) => [entry.id, entry]));
-    // Produced by .github/workflows/release.yml. If a packaging step renames a
-    // file, this is what notices before a user gets a 404. A platform whose file
-    // the release does not carry is null, which the test above already covers.
-    const expected: Array<[string, string]> = [
-      ["linux", `/Terabot-${version}.AppImage`],
-      ["windows", `/Terabot%20Setup%20${version}.exe`],
-      ["android", `/terabot-${version}.apk`],
-    ];
-    for (const [id, suffix] of expected) {
-      const url = byId.get(id as never)?.url;
-      if (url) expect(url.endsWith(suffix)).toBe(true);
+  // Not gated on a release existing: these names are what the packager emits,
+  // checked by actually running it (electron-builder --linux AppImage --x64
+  // produced `Terabot-0.1.0-x86_64.AppImage`; the NSIS template is what keeps
+  // the installer space-free, because GitHub stores a space as a dot).
+  it("uses the exact asset names the packager produces", async () => {
+    const { assetNamesForTest } = await import("../releases.ts");
+    expect(assetNamesForTest.linux("1.2.3")).toBe("Terabot-1.2.3-x86_64.AppImage");
+    expect(assetNamesForTest.windows("1.2.3")).toBe("Terabot-1.2.3-setup.exe");
+    expect(assetNamesForTest.android("1.2.3")).toBe("terabot-1.2.3.apk");
+  });
+
+  it("uses a name with no space, which GitHub would store as a dot", async () => {
+    const { assetNamesForTest } = await import("../releases.ts");
+    for (const name of Object.values(assetNamesForTest)) {
+      expect(name("1.2.3")).not.toMatch(/\s/);
     }
   });
 

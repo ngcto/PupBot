@@ -54,6 +54,8 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       node-version: ${{ steps.node.outputs.version }}
       is-prerelease: ${{ steps.v.outputs.prerelease }}
+      app-configured: ${{ steps.targets.outputs.app-configured }}
+      api-configured: ${{ steps.targets.outputs.api-configured }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +85,30 @@ jobs:
           echo "Releasing $tag" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Same rule as CI: the repo declares its Node major, this file never does.
+      # The two shipped clients need a reachable origin to be more than a preview.
+      # Neither is a secret, so they are repository variables, not secrets.
+      - id: targets
+        name: Check the shipped origins
+        env:
+          APP_URL: ${{ vars.TERABOT_APP_URL }}
+          API_URL: ${{ vars.TERABOT_API_URL }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_URL:-}" ]; then
+            echo "app-configured=true" >> "$GITHUB_OUTPUT"
+            echo "Desktop wraps \`$APP_URL\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "app-configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TERABOT_APP_URL is unset: the desktop build is a PREVIEW that opens localhost:3000."
+          fi
+          if [ -n "${API_URL:-}" ]; then
+            echo "api-configured=true" >> "$GITHUB_OUTPUT"
+            echo "Android calls \`$API_URL\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "api-configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TERABOT_API_URL is unset: the APK is a PREVIEW that calls localhost, unreachable from a phone."
+          fi
+
       - id: node
         name: Resolve the Node version the repo declares
         run: |
@@ -130,6 +156,11 @@ jobs:
       # electron-builder is told `--publish never`; uploading is this workflow's
       # job, not the packager's, so nothing can publish by accident.
       - name: Package
+        env:
+          # The Electron main process reads TERABOT_APP_URL at launch and falls
+          # back to its documented localhost default when it is empty. The release
+          # body tells the user which of the two they got.
+          TERABOT_APP_URL: ${{ vars.TERABOT_APP_URL }}
         run: pnpm --filter @terabot/desktop exec electron-builder --linux AppImage deb --x64 --config electron-builder.config.cjs --publish never
 
       - name: List what came out
@@ -177,6 +208,8 @@ jobs:
       # and an account Ng has to create. The installer works; the first run shows
       # a "Windows protected your PC" prompt. The release body says so plainly.
       - name: Package
+        env:
+          TERABOT_APP_URL: ${{ vars.TERABOT_APP_URL }}
         run: pnpm --filter @terabot/desktop exec electron-builder --win nsis --x64 --config electron-builder.config.cjs --publish never
 
       - name: List what came out
@@ -223,17 +256,39 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
+      # No setup-android action: ubuntu-latest already ships the SDK, and
+      # android-actions/setup-android@v3 fails on this image's preinstalled
+      # cmdline-tools ("Wrong version in preinstalled sdkmanager").
+      - name: Point gradle at the preinstalled SDK
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$sdk" || { echo "::error::no Android SDK at $sdk"; exit 1; }
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "sdk: $sdk" | tee -a "$GITHUB_STEP_SUMMARY"
+          ls "$sdk/platforms" 2>/dev/null | tail -3 || true
 
       - name: Generate the native project
         working-directory: apps/mobile
+        env:
+          EXPO_PUBLIC_API_URL: ${{ vars.TERABOT_API_URL }}
         run: pnpm exec expo prebuild --platform android --no-install
 
       # `assembleRelease` with no signing config falls back to the debug key and
       # prints a warning; that is the intended, documented outcome here.
+      # `local.properties` is how gradle finds the SDK; it is generated (and
+      # gitignored), so it is written here rather than committed.
       - name: Assemble the APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon
+        env:
+          # `EXPO_PUBLIC_*` is inlined into the JS bundle at build time, which is
+          # why it has to be set here and not at runtime.
+          EXPO_PUBLIC_API_URL: ${{ vars.TERABOT_API_URL }}
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          ./gradlew assembleRelease --no-daemon
 
       - name: Locate the APK
         shell: bash
@@ -266,6 +321,14 @@ jobs:
       # token. Nothing else is granted.
       contents: write
     steps:
+      # The stamp step below runs a repo script, so this job needs the tree, not
+      # only the downloaded artifacts.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -283,6 +346,9 @@ jobs:
         env:
           VERSION: ${{ needs.meta.outputs.version }}
           TAG: ${{ needs.meta.outputs.tag }}
+          APP_CONFIGURED: ${{ needs.meta.outputs.app-configured }}
+          API_CONFIGURED: ${{ needs.meta.outputs.api-configured }}
+          APP_URL: ${{ vars.TERABOT_APP_URL }}
         run: |
           set -euo pipefail
           {
@@ -298,6 +364,21 @@ jobs:
             echo ""
             echo "- **Android** — \`.apk\`, **debug-signed**. Sideload it for testing: enable *Install unknown apps* for your browser or file manager. Not publishable to Google Play; that needs a release keystore."
             echo "- **iOS** — not built. Needs macOS, Xcode and a paid Apple Developer account. Nothing here claims otherwise."
+            echo ""
+            echo "### What this build points at"
+            echo ""
+            if [ "$APP_CONFIGURED" = "true" ]; then
+              echo "- Desktop wraps \`$APP_URL\`."
+            else
+              echo "- **Preview build.** \`TERABOT_APP_URL\` was not set when this was built, so the desktop app keeps its development default (\`http://localhost:3000\`) and needs that server running locally."
+            fi
+            if [ "$API_CONFIGURED" = "true" ]; then
+              echo "- Android calls the configured API origin."
+            else
+              echo "- **Preview build.** \`TERABOT_API_URL\` was not set, so the APK calls \`http://localhost:8787\`, which a phone cannot reach."
+            fi
+            echo ""
+            echo "Set either repository variable and re-run this tag to rebuild the same artifacts for real; nothing else changes."
             echo ""
             echo "### Notes"
             echo ""
