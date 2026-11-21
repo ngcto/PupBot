@@ -57,17 +57,28 @@ this workflow, **twelve** with `CodeQL`, and **thirteen** once a `Vercel` deploy
 are the counts observed on this repository, not a guess: one board read thirteen checks, of which
 twelve passed and `Vercel` did not. Count them before concluding something is missing.
 
-## A fresh machine has no database
+## `ECONNREFUSED ::1:5432` means the machine slept, not that `main` is red
 
-`@terabot/db` and `@terabot/computers` tests connect to the Postgres from `docker compose`. After a
-machine has slept, the container is gone and the failure is `connect ECONNREFUSED ::1:5432`, or an
-un-migrated schema such as:
+If `pnpm test` fails `@terabot/db` with:
+
+```
+Error: connect ECONNREFUSED ::1:5432
+Error: connect ECONNREFUSED 127.0.0.1:5432
+```
+
+then **the machine slept and its Docker containers are gone.** That is not a red `main`, not your
+branch, and not something to report to anyone as a failing change. A cloud machine stops its
+processes about two minutes after a run goes idle, so any morning's first `pnpm test` on a machine
+that has been asleep will show this.
+
+The same is true of an un-migrated schema, which fails later and more confusingly:
 
 ```
 column "managed" of relation "computer_account" does not exist
 ```
 
-Both are environment state, not code. The fix is the repo's own commands:
+Both are environment state. The fix is the repo's own commands, which are also the Setup's
+`postgres` and `migrate` entries:
 
 ```
 docker compose up -d postgres
