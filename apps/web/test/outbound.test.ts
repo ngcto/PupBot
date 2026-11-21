@@ -71,16 +71,26 @@ describe("outbound destination checks", () => {
  * an opaque "fetch failed". This asserts the dispatcher dispatches.
  */
 describe("publicOnlyFetch can actually dispatch", () => {
-  it("sends a real request through the guard and gets the origin's answer", async () => {
-    const { publicOnlyFetch } = await import("../lib/outbound.ts");
-    // `example.com` is IANA-reserved for documentation and always public.
-    const response = await publicOnlyFetch("https://example.com/", {
-      method: "GET",
-      signal: AbortSignal.timeout(20_000),
-    });
-    expect(response.status).toBeGreaterThan(0);
-    await response.body?.cancel().catch(() => undefined);
-  }, 30_000);
+  /**
+   * Opt in with OUTBOUND_LIVE=1. It reaches the network, so it stays out of the
+   * default suite: a machine with no egress would fail `pnpm test` for a reason
+   * that has nothing to do with the code. The private-address check below runs
+   * everywhere, because it makes no request at all.
+   */
+  it.skipIf(process.env.OUTBOUND_LIVE !== "1")(
+    "sends a real request through the guard and gets the origin's answer",
+    async () => {
+      const { publicOnlyFetch } = await import("../lib/outbound.ts");
+      // `example.com` is IANA-reserved for documentation and always public.
+      const response = await publicOnlyFetch("https://example.com/", {
+        method: "GET",
+        signal: AbortSignal.timeout(20_000),
+      });
+      expect(response.status).toBeGreaterThan(0);
+      await response.body?.cancel().catch(() => undefined);
+    },
+    30_000,
+  );
 
   it("still refuses a private destination before any request is made", async () => {
     const { publicOnlyFetch } = await import("../lib/outbound.ts");
