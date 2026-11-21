@@ -26,8 +26,9 @@ this machine on 2026-11-21, and the command or script is reproducible from the n
 ## 0. The short version
 
 1. Our tool surface is 26 functions today and grows. As schemas it costs **3,546 tokens per
-   request** (mine). As an index it costs **1,759** in full and **1,255** without result notes,
-   as names only **81**, and a code-mode tool with a one-line description **46**.
+   request** (mine). As an index it costs **1,877** in full (1,771 of index, 106 of instructions)
+   and **1,255** without result notes, as names only **81**, and a code-mode tool with a one-line
+   description **46** — or **146** with instructions and no index, which is the option arm C tests.
 2. The bigger number is not the schemas, it is results: a 10,000-row read is **294,592
    tokens** through the model and **149** filtered in code (mine). That ratio is the whole
    argument for code mode and it is about 2,000×, not 2×.
@@ -95,7 +96,18 @@ representative they are.
 | One `codemode` tool, one-line description (in a real `tools` block) | **46** |
 | One `codemode` tool + the index, no per-tool result notes | **1,255** |
 | One `codemode` tool + the index, 10 load-bearing result notes | **1,584** |
-| One `codemode` tool + the index, every result note (what `packages/tools` renders) | **1,759** |
+| One `codemode` tool + the index, every result note (index alone, one-line description) | **1,759** |
+| **One `codemode` tool as `packages/tools` actually ships it** (instructions + full index) | **1,877** |
+| Of that, the instructions alone (no index) | 146 |
+| Of that, the index body alone (no instructions) | 1,771 |
+| One `codemode` tool, instructions only, index fetched by `searchTools` | **146** |
+
+The shipped tool is 1,877, not 1,759. Both are the same index under a real `tools` block; the
+118-token difference is the five lines of instructions `codemodeSchema()` adds in front of it
+(146 tokens of header against 28 in the older one-line description). Token counts are not
+additive across a concatenation boundary, so 146 + 1,771 lands 40 over the measured 1,877 —
+the whole is the figure to quote. Both are produced by
+`reports/tera-81-measurements/verify-index.mts`, which is the committed check.
 
 **Variable cost, by result shape:**
 
@@ -162,7 +174,7 @@ Mechanism: the request carries a capability index (name, situation phrases, cost
 model asks for signatures only when it needs them. Anthropic describe a `detail` parameter on
 `search_tools` (name-only / name+description / full definition); LangChain call the same thing
 skills-style progressive disclosure and say the point is that upfront front-matter degrades
-performance before the agent starts. On our surface: 3,546 → 46 (bare) or 1,759 (with the full
+performance before the agent starts. On our surface: 3,546 → 146 (bare) or 1,877 (with the full
 index inline), i.e. a 2× to 77× reduction in the fixed term — and the index is where the
 situations live, which is what makes discovery work at all.
 
@@ -545,16 +557,19 @@ model ──1 tool──▶ codemode({ code })  ──▶ Sandbox (QuickJS/wasm,
                                      text()/return ──▶ one message, one event
 ```
 
-- **One primary tool** `codemode({ code })`, **46** tokens.
-- **The index travels with it**, at 1,759 tokens, because a model that has to make a discovery
-  call before it can act pays a turn for it. 1,759 cached tokens (≈176 token-equivalents at
-  Sonnet 5.5 cache-read pricing) is cheaper than one extra turn. **This is a deliberate
-  departure from "47 tokens"** and the reason is the turn, not the token.
-  *Measured:* index inline **1,759** vs bare **46**, with the breakdown of what the notes cost —
-  **504** tokens for every `resultNote`, **1,584** for the ten that prevent a wrong action, **1,255**
-  for none. Kept in full, because a note that stops one wrong click is worth more than the ~25
-  token-equivalents it costs at cache-read pricing. *Cheaper than:* one round trip, which costs the
-  whole replayed prefix again.
+- **One primary tool** `codemode({ code })`: 51 tokens with a one-line description, 146 with the
+  instructions the shipped schema carries.
+- **The index travels with it**, at **1,877** tokens as `codemodeSchema()` renders it — 1,771 of
+  index and 146 of instructions. 1,877 cached tokens (≈188 token-equivalents at Sonnet 5.5
+  cache-read pricing) is cheaper than one extra turn. **This is a deliberate departure from "47
+  tokens"** and the reason is the turn, not the token.
+  *Measured:* index inline **1,877**, the same index under a one-line description **1,759**, bare
+  with no index **146**. What the notes cost — **504** tokens for every `resultNote`, **1,584** for
+  the ten that prevent a wrong action, **1,255** for none.
+- **But the arithmetic no longer settles it.** Instructions-only plus a `searchTools` call inside
+  the program is **146** tokens, a saving of 1,731 for a call that costs no model turn. Whether a
+  model writes a useful query for a tool it has not seen is a behavioural question, so the inline
+  index stays for now and the benchmark's arm C decides it.
 - **Signatures on demand**: a `describe(names)` capability that returns pi-style declarations
   for the 2–5 tools a program actually wants, rendered per-capability rather than for all 26
   (my measurement: all 26 as declarations is 3,984 tokens, *worse* than raw schemas).
@@ -585,7 +600,7 @@ free to inject, and the cost lands on the host before any code runs. Two consequ
 
 ```
 zone 1 (cached, byte-stable):
-  tools:   codemode(code) + the 1,759-token capability index      ← breakpoint 1
+  tools:   codemode(code) + the 1,877-token capability index      ← breakpoint 1
   system:  bot instructions + harness rules + result-reading rules  ← breakpoint 2
   history: append-only, tool calls as one-line records              ← breakpoint 3 (sliding)
 zone 2 (rebuilt every turn, never cached):
@@ -886,9 +901,17 @@ with the implementation, not before it.
    the case that matters most and safer on escape. The cost is a runner on the box and a
    transport abstraction. **I recommend two, with the box placement built second** so we can
    ship the loop with one placement and measure the difference.
-2. **The index inline or fetched? — DECIDED: inline.** I propose inline (**1,759** tokens) because a discovery
-   call costs a whole turn. Cloudflare's codemode passes the whole API as TypeScript in the tool
+2. **The index inline or fetched? — REOPENED by measurement.** Inline as shipped is **1,877**;
+   instructions-only, with the index fetched by `searchTools` inside the program, is **146**. That
+   is a 1,731-token saving for one in-program call, which is nearly free because it runs in the
+   sandbox rather than as a model turn. The earlier "inline" call was made against 1,232, where
+   the trade was clear. At 1,877 against 146 it is a different trade and I am not re-deciding it
+   on the Captain's behalf. Cloudflare's codemode passes the whole API as TypeScript in the tool
    description, which is the same bet at a larger size.
+
+   What decides it is whether a model can phrase a useful `searchTools` query for a tool it has
+   not been told exists. That is a behavioural question the three-arm benchmark can answer and
+   arithmetic cannot, so it should not be settled before arm C runs.
 3. **Native tool calling for simple tools, alongside code mode?** Anthropic and pi both keep
    the plain tool path usable. I propose **code mode only** for the model-facing surface and
    native calling only as a fallback for endpoints whose function-calling is unreliable, since
