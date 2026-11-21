@@ -27,7 +27,7 @@ Set these on the Vercel project (Production and Preview). Only `DATABASE_URL`,
 | `RUN_MODE` | `inline` |
 | `DATABASE_POOL_MAX` | `3` — one Fluid instance per concurrent request, and the free tier caps connections |
 | `STUB_PROVIDER` | `false` |
-| `AI_GATEWAY_MODEL` | `reflection/beam-free` (default; the free tier refuses paid models with a 403) |
+| `AI_GATEWAY_MODEL` | `nvidia/nemotron-3.5-lightning-free` (default; the free tier refuses paid models with a 403) |
 
 Do **not** set `VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`: the platform injects the OIDC token,
 and the AI Gateway endpoint is keyless because that token authenticates it. Without a Vercel
@@ -81,7 +81,8 @@ database works for reads but the integration tests time out on the round trip.
 - The `pg-boss` catalogue sync job does not run here. `model_catalog` stays empty until
   `pnpm catalog:sync` is run against the hosted database.
 - Each signup gets an AI Gateway endpoint with `AI_GATEWAY_MODEL`; on a team without paid credits
-  that model must be one the free tier serves (`reflection/beam-free`, `reflection/beam`). Users can
+  that model must be one the free tier serves (`nvidia/nemotron-3.5-lightning-free`,
+  `recursive/flint-v1.0`). Users can
   still add their own endpoint in Settings › Models.
 - Deploys currently come from a file upload of the `p3/deploy` tree. Push-to-deploy needs the
   Vercel GitHub App installed on `ngcto/Terabot`; the project has no Git connection yet.
