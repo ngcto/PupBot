@@ -15,11 +15,11 @@ import type { ToolNeed } from "@terabot/tools";
  * vocabulary does not couple two packages the way an adapter would. This file is the
  * guard that keeps them shared.
  *
- * It lives in this package's tests because `apps/web` is the only tsconfig in the repo
- * that typechecks test files, since every package's include covers only its source dir, so a
- * type-level guard placed beside `packages/tools` or `packages/computers` would sit in
- * a file `tsc` never reads and could never fail. That was true of the first version of
- * this test, which passed against a deliberately broken vocabulary.
+ * It lives here, not beside the type, because `apps/web` is the only tsconfig in the
+ * repo that typechecks test files: every package's include covers only its source dir,
+ * so a type-level guard placed in `packages/tools` or `packages/computers` sits in a file
+ * `tsc` never reads and can never fail. That was true of the first version of this test,
+ * which passed against a deliberately broken vocabulary. See NGS-82 before moving it.
  */
 describe("the tool need vocabulary is the allocator's", () => {
   it("accepts a tool need wherever the allocator accepts a requirement", () => {
