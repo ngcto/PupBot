@@ -63,10 +63,23 @@ describe("detection", () => {
     expect(detection.solvable).toBe(false);
   });
 
-  it("falls back to an unnamed challenge when the page is clearly a holding page", () => {
-    const detection = detectCaptcha({ title: "Security check", frameUrls: ["https://verify.example.com/frame"] });
+  it("falls back to an unnamed challenge when a challenge frame is present", () => {
+    const detection = detectCaptcha({
+      title: "Security check",
+      frameUrls: ["https://verify.example.com/challenge/main"],
+    });
     expect(detection.primary?.kind).toBe("unknown_challenge");
     expect(detection.primary?.confidence).toBe("medium");
+    expect(detection.gated).toBe(true);
+  });
+
+  it("does not call a page gated on its title alone", () => {
+    // "Security check" as a title with nothing behind it is a hint; treating it
+    // as a gate would tell a model to solve a challenge that is not there.
+    const detection = detectCaptcha({ title: "Security check", frameUrls: [] });
+    expect(detection.primary).toBeUndefined();
+    expect(detection.gated).toBe(false);
+    expect(detection.signals[0]?.advisory).toBe(true);
   });
 
   it("says a clean page is clean", () => {
@@ -108,6 +121,14 @@ describe("the challenge ladder", () => {
       return { ok: true, token: "solved-token-value", provider: "2captcha", waitedSeconds: 12 };
     },
   };
+
+  /** A page with a challenge frame: a real gate, unlike a title alone. */
+  const humanPage = page({
+    title: "Are you a robot?",
+    refs: [
+      { ref: "p1:1", role: "iframe", name: "Challenge", value: null, actions: [], frame: "https://verify.example.com/challenge" },
+    ],
+  });
 
   it("puts the existing session first, because not losing the cookie is the cheapest rung", async () => {
     const assessment = await assessChallenge(gatedPage, { persistentProfile: true, solver: configuredSolver });
@@ -212,12 +233,12 @@ describe("the challenge ladder", () => {
     expect(assessment.injectScript).toBeUndefined();
   });
 
-  it("pauses for a person only when human assist is on", async () => {
-    const off = await assessChallenge(page({ title: "Are you a robot?" }), {});
+  it("pauses for a person only when human assist is on and something is actually gated", async () => {
+    const off = await assessChallenge(humanPage, {});
     expect(off.needsHuman).toBeUndefined();
     expect(off.paths).not.toContain("human");
 
-    const on = await assessChallenge(page({ title: "Are you a robot?" }), { humanAssist: true });
+    const on = await assessChallenge(humanPage, { humanAssist: true });
     expect(on.paths).toEqual(["human"]);
     expect(on.next).toBe("human");
     expect(on.needsHuman?.reason).toContain("gated by");
@@ -256,23 +277,26 @@ describe("the solver seam", () => {
   });
 
   it("creates a task, polls until ready, and returns the token", async () => {
-    const calls: string[] = [];
+    const calls: Array<{ url: string; body: unknown }> = [];
     let polls = 0;
-    const fakeFetch = (async (url: string | URL | Request) => {
+    // The **task API v2** shapes, as documented: JSON bodies on api.2captcha.com,
+    // `errorId` + `taskId` on creation, `status: processing|ready` on polling.
+    const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
       const href = String(url);
-      calls.push(href);
-      if (href.includes("createTask")) {
-        return new Response(JSON.stringify({ status: 1, taskId: 42 }), { status: 200 });
+      calls.push({ url: href, body: JSON.parse(String(init?.body ?? "{}")) });
+      if (href.endsWith("/createTask")) {
+        return new Response(JSON.stringify({ errorId: 0, taskId: 74372499131 }), { status: 200 });
       }
       polls += 1;
       return polls === 1
-        ? new Response(JSON.stringify({ status: 0, request: "CAPCHA_NOT_READY" }), { status: 200 })
-        : new Response(JSON.stringify({ status: 1, solution: { gRecaptchaResponse: "token-abc" } }), { status: 200 });
+        ? new Response(JSON.stringify({ errorId: 0, status: "processing" }), { status: 200 })
+        : new Response(
+            JSON.stringify({ errorId: 0, status: "ready", solution: { gRecaptchaResponse: "token-abc" } }),
+            { status: 200 },
+          );
     }) as unknown as typeof fetch;
 
     const solver = createSolver({ provider: "2captcha", apiKey: "test-key", timeoutSeconds: 30 }, fakeFetch);
-    // The poll interval is real time; keep the test's own budget honest by
-    // only asserting the first attempt's shape, then the eventual result.
     const result = await solver.solve({
       kind: "recaptcha_v2_checkbox",
       siteKey: "site-key",
@@ -283,16 +307,112 @@ describe("the solver seam", () => {
       expect(result.token).toBe("token-abc");
       expect(result.provider).toBe("2captcha");
     }
-    expect(calls[0]).toContain("createTask");
-    expect(calls.some((href) => href.includes("getTaskResult"))).toBe(true);
+
+    const create = calls[0]!;
+    // The one host that speaks the task API.
+    expect(create.url).toBe("https://api.2captcha.com/createTask");
+    const body = create.body as { clientKey: string; task: Record<string, unknown> };
+    expect(body.clientKey).toBe("test-key");
+    expect(body.task.type).toBe("RecaptchaV2TaskProxyless");
+    expect(body.task.websiteKey).toBe("site-key");
+    expect(body.task.websiteURL).toBe("https://app.example.com");
+    // No legacy form fields may ride along.
+    expect(body).not.toHaveProperty("method");
+
+    const poll = calls[1]!;
+    expect(poll.url).toBe("https://api.2captcha.com/getTaskResult");
+    expect(poll.body).toEqual({ clientKey: "test-key", taskId: 74372499131 });
   }, 20_000);
+
+  it("reports an unsolvable task by the vendor's error code, not by a numeric status", async () => {
+    const fakeFetch = (async () =>
+      new Response(
+        JSON.stringify({ errorId: 12, errorCode: "ERROR_CAPTCHA_UNSOLVABLE", errorDescription: "Workers could not solve" }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const solver = createSolver({ provider: "2captcha", apiKey: "k" }, fakeFetch);
+    const result = await solver.solve({ kind: "hcaptcha", siteKey: "s", pageUrl: "https://x" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("solver_error");
+      expect(result.message).toContain("ERROR_CAPTCHA_UNSOLVABLE");
+    }
+  });
+
+  it("bounds every request by the deadline, so a stalled solver cannot outlive it", async () => {
+    // A fetch that never resolves on its own and only rejects when aborted.
+    const fakeFetch = ((_url: string | URL | Request, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return;
+        signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      })) as unknown as typeof fetch;
+
+    const solver = createSolver({ provider: "2captcha", apiKey: "k", timeoutSeconds: 1 }, fakeFetch);
+    const started = Date.now();
+    const result = await solver.solve({ kind: "hcaptcha", siteKey: "s", pageUrl: "https://x" });
+    const elapsed = Date.now() - started;
+
+    expect(result.ok).toBe(false);
+    // The important part: it returned, near its own deadline, instead of hanging.
+    expect(elapsed).toBeLessThan(4000);
+  }, 10_000);
 
   it("never puts the key in the returned token or the failure message", async () => {
     const fakeFetch = (async () =>
-      new Response(JSON.stringify({ status: 0, request: "ERROR_WRONG_USER_KEY" }), { status: 200 })) as unknown as typeof fetch;
+      new Response(JSON.stringify({ errorId: 1, errorCode: "ERROR_WRONG_USER_KEY" }), {
+        status: 200,
+      })) as unknown as typeof fetch;
     const solver = createSolver({ provider: "2captcha", apiKey: "super-secret-key" }, fakeFetch);
     const result = await solver.solve({ kind: "hcaptcha", siteKey: "k", pageUrl: "https://x" });
     expect(JSON.stringify(result)).not.toContain("super-secret-key");
+  });
+});
+
+describe("loader-only signals stay advisory", () => {
+  it("does not call a page gated when only the reCAPTCHA library is loaded", () => {
+    // A login page that calls grecaptcha.execute on submit has the library, and
+    // nothing in the way. Saying "gated" here stops a working page being used.
+    const detection = detectCaptcha({
+      frameUrls: ["https://www.google.com/recaptcha/api.js?render=6Lc_siteKey000000000000000"],
+      title: "Sign in",
+      text: "Email Password Sign in",
+    });
+    expect(detection.signals[0]?.kind).toBe("recaptcha_v3");
+    expect(detection.signals[0]?.advisory).toBe(true);
+    expect(detection.gated).toBe(false);
+    expect(detection.primary).toBeUndefined();
+    expect(describeDetection(detection)).toContain("not gated");
+    expect(describeDetection(detection)).toContain("Continue normally");
+  });
+
+  it("turns the same loader into a gate once the challenge furniture is present", () => {
+    const detection = detectCaptcha({
+      frameUrls: [
+        "https://www.google.com/recaptcha/api.js?render=6Lc_siteKey000000000000000",
+        "https://www.google.com/recaptcha/api2/anchor?k=6Lc_checkboxKey00000000000",
+      ],
+      html: '<textarea id="g-recaptcha-response"></textarea>',
+    });
+    expect(detection.gated).toBe(true);
+    expect(detection.primary?.advisory).toBeUndefined();
+  });
+
+  it("treats a bare holding-page title as a hint, not a gate", () => {
+    const detection = detectCaptcha({ title: "Please wait", text: "" });
+    expect(detection.signals[0]?.kind).toBe("unknown_challenge");
+    expect(detection.signals[0]?.advisory).toBe(true);
+    expect(detection.gated).toBe(false);
+  });
+
+  it("still treats a challenge frame as a real gate", () => {
+    const detection = detectCaptcha({
+      title: "Please wait",
+      frameUrls: ["https://verify.example.com/challenge/frame"],
+    });
+    expect(detection.gated).toBe(true);
+    expect(detection.primary?.kind).toBe("unknown_challenge");
+    expect(detection.solvable).toBe(false);
   });
 });
 

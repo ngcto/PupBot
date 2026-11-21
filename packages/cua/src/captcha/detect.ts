@@ -26,6 +26,14 @@ interface Signature {
   /** The key this kind of widget publishes in its URL or a data attribute. */
   siteKeyFrom?: "url" | "attribute" | "callback";
   soft?: boolean;
+  /**
+   * True for a signature that only proves the *library* is loaded, not that a
+   * challenge is in the way. A page can carry reCAPTCHA's `api.js` purely to
+   * call `grecaptcha.execute` on a login button that is not currently showing a
+   * gate, and telling a model "this page is gated" then is worse than saying
+   * nothing: it stops a working page from being used.
+   */
+  loaderOnly?: boolean;
 }
 
 /**
@@ -36,7 +44,7 @@ interface Signature {
 const SIGNATURES: Signature[] = [
   {
     kind: "recaptcha_enterprise",
-    pattern: /recaptcha\/(?:enterprise|api2\/enterprise)\.js|recaptcha\.net\/(?:recaptcha\/)?enterprise/i,
+    pattern: /recaptcha\/(?:enterprise|api2\/enterprise)\.js/i,
     confidence: "high",
     siteKeyFrom: "url",
   },
@@ -57,6 +65,9 @@ const SIGNATURES: Signature[] = [
     pattern: /google\.com\/recaptcha\/api\.js|recaptcha\/api\.js|grecaptcha\.execute/i,
     confidence: "medium",
     siteKeyFrom: "url",
+    // A loaded script is the whole of this signature. It becomes a gate only
+    // when the page also shows challenge furniture — see `blockingEvidence`.
+    loaderOnly: true,
   },
   {
     kind: "hcaptcha",
@@ -81,6 +92,22 @@ const SIGNATURES: Signature[] = [
     pattern: /captcha\.awswaf\.com|awswaf/i,
     confidence: "high",
   },
+];
+
+/**
+ * Markers that a challenge is actually *in the way*: a rendered frame, a
+ * response field, or the holding page itself. Absent all of these, a loaded
+ * widget script is an advisory signal and not a gate.
+ */
+const BLOCKING_MARKERS = [
+  /\/recaptcha\/api2\/(?:anchor|bframe)/i,
+  /\/recaptcha\/enterprise/i,
+  /challenges\.cloudflare\.com\/turnstile\/v\d+\/bframe/i,
+  /newassets\.hcaptcha\.com\/c\/enterprise|hcaptcha\.com\/captcha/i,
+  /id=["']g-recaptcha-response["']/i,
+  /class=["'][^"']*g-recaptcha/i,
+  /id=["']h-captcha-response["']/i,
+  /name=["']cf-turnstile-response["']/i,
 ];
 
 /**
@@ -139,17 +166,25 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
   const urls = page.frameUrls ?? [];
   const haystack = [urls.join(" "), page.html ?? "", page.text ?? "", page.title ?? ""].join("\n");
   const signals: CaptchaSignal[] = [];
+  /** Something on this page proves a challenge is rendered, not just loaded. */
+  const blocking = urls.some((url) => BLOCKING_MARKERS.some((marker) => marker.test(url)))
+    || BLOCKING_MARKERS.some((marker) => marker.test(haystack));
 
   for (const signature of SIGNATURES) {
     const match = signature.pattern.exec(haystack);
     if (!match) continue;
     const source = urls.find((url) => signature.pattern.test(url)) ?? match[0];
+    // A loader-only signature is not a gate by itself: a page that merely calls
+    // `grecaptcha.execute` from a login button has a widget library loaded and
+    // nothing in the way.
+    const advisory = signature.loaderOnly === true && !blocking;
     signals.push({
       kind: signature.kind,
-      confidence: signature.confidence,
+      confidence: advisory ? "low" : signature.confidence,
       ...(siteKeyFromUrl(source) ? { siteKey: siteKeyFromUrl(source) } : {}),
       source,
       evidence: `matched ${signature.pattern.source} in a frame or script URL`,
+      ...(advisory ? { advisory: true } : {}),
     });
   }
 
@@ -178,16 +213,23 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
 
   if (signals.length === 0) {
     // Generic fallback: a page that says it is a challenge without naming one.
-    // This is the page an interstitial shows when it is a vendor we do not know,
-    // and calling it unknown is more useful than calling it clean.
+    // The title alone is only a hint — a clean page can be titled "Please wait"
+    // while it loads — so it is advisory unless a challenge frame backs it up.
     const title = page.title ?? "";
     const titleMatch = INTERSTITIAL_TITLES.find((pattern) => pattern.test(title));
-    const frameChallenge = urls.find((url) => /captcha|challenge|verify/i.test(url));
-    if (titleMatch || frameChallenge) {
+    const frameChallenge = urls.find((url) => /captcha|challenge/i.test(url));
+    if (frameChallenge) {
       signals.push({
         kind: "unknown_challenge",
-        confidence: titleMatch ? "medium" : "low",
-        evidence: titleMatch ? `page title matched ${titleMatch.source}` : `a frame URL looks like a challenge: ${frameChallenge}`,
+        confidence: "medium",
+        evidence: `a frame URL looks like a challenge: ${frameChallenge}`,
+      });
+    } else if (titleMatch) {
+      signals.push({
+        kind: "unknown_challenge",
+        confidence: "low",
+        evidence: `page title matched ${titleMatch.source}, with nothing on the page to confirm it`,
+        advisory: true,
       });
     }
   }
@@ -195,9 +237,12 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
   const order = { high: 0, medium: 1, low: 2 } as const;
   signals.sort((a, b) => order[a.confidence] - order[b.confidence]);
 
-  const primary = signals[0];
+  // A page is gated only by a signal that is not merely advisory.
+  const gating = signals.filter((signal) => signal.advisory !== true);
+  const primary = gating[0];
+
   return {
-    gated: signals.length > 0,
+    gated: gating.length > 0,
     signals,
     ...(primary ? { primary } : {}),
     // A token is only useful for a widget that takes one. An interstitial has no
@@ -213,7 +258,13 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
 
 /** A one-line statement a model can act on without reading the signals array. */
 export function describeDetection(detection: CaptchaDetection): string {
-  if (!detection.gated) return "This page is not gated by a challenge.";
+  if (!detection.gated) {
+    const advisory = detection.signals.find((signal) => signal.advisory);
+    if (advisory) {
+      return `This page is not gated by a challenge; it loads a ${advisory.kind} widget but nothing is blocking. Continue normally.`;
+    }
+    return "This page is not gated by a challenge.";
+  }
   const primary = detection.primary;
   if (!primary) return "This page is gated by a challenge.";
   const where = primary.siteKey ? ` (site key ${primary.siteKey})` : "";

@@ -248,14 +248,25 @@ export interface CaptchaSignal {
    * cadence may clear, rather than a hard gate that always needs a token.
    */
   soft?: boolean;
+  /**
+   * True when this is a hint rather than a gate: a widget library is loaded, or
+   * a title looks like a holding page, but nothing on the page is actually
+   * blocking. Advisory signals never make `gated` true on their own.
+   */
+  advisory?: boolean;
 }
 
 export interface CaptchaDetection {
   gated: boolean;
-  /** Every signal found, most confident first. Empty when the page is clean. */
+  /**
+   * Every challenge marker found, most confident first. An **advisory** signal
+   * (a loaded widget script with no challenge furniture, or a page title that
+   * merely looks like a holding page) appears here with
+   * `advisory: true` and does not by itself make the page gated.
+   */
   signals: CaptchaSignal[];
-  /** The one the caller should act on, if any. */
+  /** The signal the caller should act on, if any. */
   primary?: CaptchaSignal;
-  /** Whether a token from `run_solver` can be injected for this kind. */
+  /** Whether a token from a solver can be injected for this kind. */
   solvable: boolean;
 }

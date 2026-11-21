@@ -7,10 +7,10 @@ import type { CaptchaDetection, CaptchaKind, CaptchaSignal } from "../types.ts";
  * What is deliberately here, and what is deliberately not:
  *
  * - **The provider is configuration, not code.** One adapter is implemented
- *   (2captcha's task API, which is the widest-supported public interface), and
- *   the seam for others is `CaptchaSolver` — a two-method interface. A solver's
- *   terms are theirs; we do not bundle them, we do not pick one for a user, and
- *   we do not hardcode a key.
+ *   (2captcha's **task API v2**, which is the current interface), and the seam
+ *   for others is `CaptchaSolver` — a two-method interface. A solver's terms are
+ *   theirs; we do not bundle them, we do not pick one for a user, and we do not
+ *   hardcode a key.
  * - **No key, no solver.** Without `CAPTCHA_SOLVER_API_KEY` the function returns
  *   a clear "not configured" result, and the caller reports to its owner that a
  *   human is needed. It never silently pretends the challenge passed.
@@ -21,6 +21,20 @@ import type { CaptchaDetection, CaptchaKind, CaptchaSignal } from "../types.ts";
  * Scope, once and plainly: this exists so a bot can operate services its owner
  * already has an account on. It is not for mass account creation and not for
  * defeating a site's controls where you have no account.
+ *
+ * ## The wire protocol, as it actually is
+ *
+ * 2captcha has two incompatible interfaces and they are easy to conflate:
+ *
+ * - **Legacy** (`2captcha.com/in.php`, `/res.php`): form-encoded, numeric
+ *   `status`, a bare `OK|<token>` text response.
+ * - **Task API v2** (`api.2captcha.com/createTask`, `/getTaskResult`): JSON
+ *   bodies, `clientKey`, `errorId` + `taskId` on creation, and
+ *   `status: "processing" | "ready"` on polling.
+ *
+ * This adapter speaks **only** the task API. Mixing a form field into a JSON
+ * request, or reading a numeric status out of a string status, produces an
+ * adapter that looks plausible and cannot obtain a token with a real key.
  */
 
 /** Which solver API shape to speak. One implemented; the rest are the seam. */
@@ -31,7 +45,7 @@ export interface SolverConfig {
   apiKey: string;
   /** Overridable for tests, and for a compatible self-hosted endpoint. */
   baseUrl?: string;
-  /** How long to wait for a token, in seconds. */
+  /** How long to wait for a token, in seconds. Bounds every request too. */
   timeoutSeconds?: number;
 }
 
@@ -39,11 +53,11 @@ export interface SolverRequest {
   kind: CaptchaKind;
   siteKey: string;
   pageUrl: string;
-  /** The widget's own action, for reCAPTCHA v3, when the page names one. */
+  /** The widget's own action, for reCAPTCHA v3 and Cloudflare challenge pages. */
   action?: string;
   /** reCAPTCHA v3 score threshold the page is checking against. */
   minScore?: number;
-  /** Any extra key/value the vendor's API needs, such as `data-s`. */
+  /** Any extra key/value the vendor's API needs, such as `cData` or `pagedata`. */
   extra?: Record<string, string>;
 }
 
@@ -61,6 +75,12 @@ export interface CaptchaSolver {
   readonly configured: boolean;
   solve(request: SolverRequest, options?: { signal?: AbortSignal }): Promise<SolverResult>;
 }
+
+/** The task API's base. The legacy host (`2captcha.com`) is a different API. */
+const DEFAULT_BASE_URL = "https://api.2captcha.com";
+
+/** The task API asks for at least this long between polls. */
+const POLL_INTERVAL_MS = 5000;
 
 /** Read the deployment's solver configuration. Never throws on absence. */
 export function solverConfigFromEnv(env: NodeJS.ProcessEnv = process.env): SolverConfig | null {
@@ -81,16 +101,64 @@ const TASK_TYPES: Partial<Record<CaptchaKind, string>> = {
   recaptcha_v2_checkbox: "RecaptchaV2TaskProxyless",
   recaptcha_v2_invisible: "RecaptchaV2TaskProxyless",
   recaptcha_v3: "RecaptchaV3TaskProxyless",
-  recaptcha_enterprise: "RecaptchaV2TaskProxyless",
+  recaptcha_enterprise: "RecaptchaV2EnterpriseTaskProxyless",
   hcaptcha: "HCaptchaTaskProxyless",
   turnstile: "TurnstileTaskProxyless",
 };
 
 /**
- * A solver over one vendor's HTTP API, or a configured-but-disabled one.
+ * The body of a `createTask` call for our kind.
  *
- * The polling loop is bounded by the caller's timeout rather than by a fixed
- * number of attempts, because a vendor's own latency is not ours to predict.
+ * Exported so the request shape is assertable in a unit test without a network
+ * call, which is what stops the two protocols drifting back together.
+ */
+export function taskBody(request: SolverRequest, clientKey: string): Record<string, unknown> | null {
+  const type = TASK_TYPES[request.kind];
+  if (!type) return null;
+  return {
+    clientKey,
+    task: {
+      type,
+      websiteURL: request.pageUrl,
+      websiteKey: request.siteKey,
+      // v3 needs the page action and the score the page checks against. The task
+      // API names the action `pageAction`; sending `action` is silently ignored.
+      ...(request.kind === "recaptcha_v3"
+        ? { pageAction: request.action ?? "verify", minScore: request.minScore ?? 0.7 }
+        : {}),
+      ...(request.extra ?? {}),
+    },
+  };
+}
+
+interface CreateTaskReply {
+  errorId?: number;
+  errorCode?: string;
+  errorDescription?: string;
+  taskId?: number | string;
+}
+
+interface GetTaskResultReply {
+  errorId?: number;
+  errorCode?: string;
+  errorDescription?: string;
+  status?: string;
+  solution?: Record<string, unknown>;
+}
+
+/** The token in a `solution`, whichever field this task type uses. */
+export function tokenFromSolution(solution: Record<string, unknown> | undefined): string | undefined {
+  if (!solution) return undefined;
+  const value = solution.gRecaptchaResponse ?? solution.token;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * A solver over the task API, or a configured-but-disabled one.
+ *
+ * Every request is bounded by the deadline, not just the loop: a vendor that
+ * stalls mid-request must not leave `solve()` pending past its own advertised
+ * ceiling inside a run that has a wall clock.
  */
 export function createSolver(config: SolverConfig | null, fetchImpl: typeof fetch = fetch): CaptchaSolver {
   if (!config) {
@@ -109,15 +177,14 @@ export function createSolver(config: SolverConfig | null, fetchImpl: typeof fetc
     };
   }
 
-  const base = (config.baseUrl ?? "https://2captcha.com").replace(/\/+$/, "");
+  const base = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   const timeoutSeconds = config.timeoutSeconds ?? 180;
 
   return {
     provider: config.provider,
     configured: true,
     async solve(request, options = {}) {
-      const taskType = TASK_TYPES[request.kind];
-      if (!taskType) {
+      if (!TASK_TYPES[request.kind]) {
         return {
           ok: false,
           reason: "unsupported_kind",
@@ -129,60 +196,89 @@ export function createSolver(config: SolverConfig | null, fetchImpl: typeof fetc
       }
 
       const started = Date.now();
-      const create = new URLSearchParams({
-        key: config.apiKey,
-        method: "createTask",
-        json: "1",
-        task: JSON.stringify({
-          type: taskType,
-          websiteURL: request.pageUrl,
-          websiteKey: request.siteKey,
-          ...(request.kind === "recaptcha_v3"
-            ? { pageAction: request.action ?? "verify", minScore: request.minScore ?? 0.7 }
-            : {}),
-          ...(request.extra ?? {}),
-        }),
-      });
+      const deadline = started + timeoutSeconds * 1000;
+
+      const post = async (path: string, body: unknown): Promise<Record<string, unknown> | null> => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return null;
+        // The deadline rides on the request itself, so a stalled socket cannot
+        // outlive it; the caller's signal still cancels earlier.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), remaining);
+        const onCallerAbort = () => controller.abort();
+        options.signal?.addEventListener("abort", onCallerAbort, { once: true });
+        try {
+          const response = await fetchImpl(`${base}${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            return { errorId: -1, errorDescription: `HTTP ${response.status} from the solver` };
+          }
+          return (await response.json()) as Record<string, unknown>;
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          return {
+            errorId: -1,
+            errorDescription: error instanceof Error ? error.message : "the solver request failed",
+          };
+        } finally {
+          clearTimeout(timer);
+          options.signal?.removeEventListener("abort", onCallerAbort);
+        }
+      };
 
       try {
-        const created = await fetchImpl(`${base}/createTask`, {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: create.toString(),
-          ...(options.signal ? { signal: options.signal } : {}),
-        });
-        const createdBody = (await created.json()) as { status?: number; taskId?: number | string; request?: string };
-        if (createdBody.status !== 1 || createdBody.taskId === undefined) {
-          // `request` is the vendor's error code; the key is never echoed back.
+        const created = (await post("/createTask", taskBody(request, config.apiKey))) as CreateTaskReply | null;
+        if (!created) {
+          return { ok: false, reason: "timeout", message: `the solver did not accept a task within ${timeoutSeconds}s` };
+        }
+        if (created.errorId !== 0 || created.taskId === undefined) {
+          // `errorCode` is the vendor's vocabulary; the key is never echoed back.
           return {
             ok: false,
             reason: "solver_error",
-            message: `the solver refused the task: ${String(createdBody.request ?? "unknown")}`,
+            message: `the solver refused the task: ${created.errorCode ?? created.errorDescription ?? "unknown"}`,
           };
         }
 
-        const taskId = String(createdBody.taskId);
+        const taskId = created.taskId;
         for (;;) {
-          if (Date.now() - started > timeoutSeconds * 1000) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
             return {
               ok: false,
               reason: "timeout",
               message: `the solver did not return a token within ${timeoutSeconds}s`,
             };
           }
-          await sleep(5000, options.signal);
-          const poll = await fetchImpl(
-            `${base}/getTaskResult?${new URLSearchParams({ key: config.apiKey, taskId, json: "1" }).toString()}`,
-            options.signal ? { signal: options.signal } : {},
-          );
-          const pollBody = (await poll.json()) as {
-            status?: number;
-            request?: string;
-            solution?: { gRecaptchaResponse?: string; token?: string };
-          };
-          if (pollBody.status === 1) {
-            const token = pollBody.solution?.gRecaptchaResponse ?? pollBody.solution?.token;
-            if (!token) return { ok: false, reason: "no_token", message: "the solver reported success without a token" };
+          await sleep(Math.min(POLL_INTERVAL_MS, remaining), options.signal);
+
+          const polled = (await post("/getTaskResult", {
+            clientKey: config.apiKey,
+            taskId,
+          })) as GetTaskResultReply | null;
+          if (!polled) {
+            return {
+              ok: false,
+              reason: "timeout",
+              message: `the solver did not answer a poll within ${timeoutSeconds}s`,
+            };
+          }
+          if (polled.errorId !== 0 && polled.errorId !== undefined) {
+            return {
+              ok: false,
+              reason: "solver_error",
+              message: `the solver failed: ${polled.errorCode ?? polled.errorDescription ?? "unknown"}`,
+            };
+          }
+          if (polled.status === "ready") {
+            const token = tokenFromSolution(polled.solution);
+            if (!token) {
+              return { ok: false, reason: "no_token", message: "the solver reported ready without a token" };
+            }
             return {
               ok: true,
               token,
@@ -190,8 +286,14 @@ export function createSolver(config: SolverConfig | null, fetchImpl: typeof fetc
               waitedSeconds: Math.round((Date.now() - started) / 1000),
             };
           }
-          if (pollBody.request && pollBody.request !== "CAPCHA_NOT_READY") {
-            return { ok: false, reason: "solver_error", message: `the solver failed: ${pollBody.request}` };
+          // `processing` is the only other documented status; anything else is a
+          // vendor change this build should report rather than spin on.
+          if (polled.status !== "processing") {
+            return {
+              ok: false,
+              reason: "solver_error",
+              message: `the solver returned an unexpected status: ${String(polled.status ?? "none")}`,
+            };
           }
         }
       } catch (error) {
@@ -224,8 +326,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * The injection script for a solved token.
  *
  * A solver returns a token; the page's own widget is what is still unsolved.
- * Writing the token into the textarea the widget reads, and firing the callback
- * the page registered, is the documented bridge — and it is done **inside the
+ * Writing the token into the field the widget reads, and firing the callback the
+ * page registered, is the documented bridge — and it is done **inside the
  * page** through the driver's browser context, never by a second browser.
  *
  * It returns a script, not a side effect, because the caller already owns the
@@ -240,7 +342,6 @@ export function tokenInjectionScript(signal: CaptchaSignal, token: string): stri
       return `(() => {
   const h = document.querySelector('textarea[name="h-captcha-response"], textarea#h-captcha-response');
   if (h) h.value = ${value};
-  const frame = document.querySelector('iframe[src*="hcaptcha"]');
   const id = ${key} || (document.querySelector('[data-sitekey]') || {}).dataset?.sitekey;
   if (window.hcaptcha && id) {
     try { window.hcaptcha.getResponse = () => ${value}; } catch {}
@@ -283,7 +384,7 @@ export function tokenInjectionScript(signal: CaptchaSignal, token: string): stri
 /** The page URL to report to a solver: whatever the bound tab is on. */
 export function solverRequestFor(detection: CaptchaDetection, pageUrl: string): SolverRequest | null {
   const signal = detection.primary;
-  if (!signal || !signal.siteKey) return null;
+  if (!signal || !signal.siteKey || !detection.solvable) return null;
   return {
     kind: signal.kind,
     siteKey: signal.siteKey,

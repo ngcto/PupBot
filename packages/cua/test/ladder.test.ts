@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boxEnvironment,
   CuaDriver,
   readActionResult,
   readObservation,
@@ -156,6 +157,37 @@ describe("observation", () => {
 });
 
 describe("the driver transport", () => {
+  it("does not forward the host's session paths to the box", async () => {
+    // The host and the box are different machines with different UIDs: sending
+    // the host's /run/user/1001 to a box whose desktop runs as 1000 points the
+    // driver at a bus that does not exist, and every element call silently
+    // degrades to pixels. The box's own session already exports the right values.
+    const seen: Record<string, string>[] = [];
+    const target: CuaExecTarget = {
+      async exec(_command, options) {
+        seen.push(options?.env ?? {});
+        return { stdout: '{"ok":true}', stderr: "", exitCode: 0, timedOut: false };
+      },
+    };
+    const driver = new CuaDriver(target, { socket: "/tmp/x.sock" });
+    await driver.call("list_windows");
+
+    const env = seen[0] ?? {};
+    expect(env.DBUS_SESSION_BUS_ADDRESS).toBeUndefined();
+    expect(env.XDG_RUNTIME_DIR).toBeUndefined();
+    // The bridge opt-ins must still be set: without them no tree exists.
+    expect(env.GTK_MODULES).toBe("gail:atk-bridge");
+    expect(env.GNOME_ACCESSIBILITY).toBe("1");
+  });
+
+  it("derives session paths only when told to, for a call inside the target", () => {
+    const env = boxEnvironment({ XDG_RUNTIME_DIR: "/run/user/1000" }, { derive: true });
+    expect(env.XDG_RUNTIME_DIR).toBe("/run/user/1000");
+    expect(env.DBUS_SESSION_BUS_ADDRESS).toBe("unix:path=/run/user/1000/bus");
+    // And by default it asserts nothing about paths it cannot see.
+    expect(boxEnvironment({ XDG_RUNTIME_DIR: "/run/user/1001" }).XDG_RUNTIME_DIR).toBeUndefined();
+  });
+
   it("sends JSON over stdin rather than as a quoted shell argument", async () => {
     const seen: string[] = [];
     const target: CuaExecTarget = {
@@ -267,5 +299,37 @@ describe("ensureReady", () => {
     expect(readiness.installed).toBe(false);
     expect(readiness.reason).toContain("not installed");
     expect(readiness.reason).toContain("cua.ai/driver/install.sh");
+  });
+});
+
+describe("observation opt-outs", () => {
+  it("keeps the desktop image out of the result when the caller opted out", async () => {
+    // get_desktop_state always captures, so the opt-out is enforced on the
+    // typed result rather than pretended at the driver.
+    const target: CuaExecTarget = {
+      async exec() {
+        return {
+          stdout: JSON.stringify({
+            screenshot_png_b64: "iVBORw0",
+            screenshot_mime_type: "image/png",
+            screenshot_width: 1280,
+            screenshot_height: 800,
+            windows: [],
+          }),
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+        };
+      },
+    };
+    const driver = new CuaDriver(target);
+    const { observeDesktop } = await import("../src/tools/desktop.ts");
+
+    const withoutImage = await observeDesktop(driver, { screenshot: false });
+    expect(withoutImage.screenshot).toBeUndefined();
+    expect(withoutImage.kind).toBe("desktop");
+
+    const withImage = await observeDesktop(driver, {});
+    expect(withImage.screenshot?.width).toBe(1280);
   });
 });

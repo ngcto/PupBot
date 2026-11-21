@@ -186,7 +186,14 @@ export async function observeWindow(
   return { ...observation, elements: rankElements(observation.elements) };
 }
 
-/** Observe the whole primary display. Desktop-scope pixels come from here. */
+/**
+ * Observe the whole primary display. Desktop-scope pixel coordinates come from
+ * the image, so this is the one read that is image-first.
+ *
+ * The driver has no way to skip the capture (`get_desktop_state` always returns
+ * the PNG), so `screenshot: false` keeps the payload out of the typed result and
+ * out of the model's context rather than pretending the capture did not happen.
+ */
 export async function observeDesktop(
   driver: CuaDriver,
   options: { screenshot?: boolean; signal?: AbortSignal } = {},
@@ -194,10 +201,14 @@ export async function observeDesktop(
   const started = Date.now();
   const value = await driver.require(
     "get_desktop_state",
-    { ...(options.screenshot === false ? {} : {}) },
+    {},
     options.signal ? { signal: options.signal } : {},
   );
-  return readObservation(value, { kind: "desktop", durationMs: Date.now() - started, screenshot: true });
+  return readObservation(value, {
+    kind: "desktop",
+    durationMs: Date.now() - started,
+    screenshot: options.screenshot !== false,
+  });
 }
 
 /** How to name the thing an action applies to. */

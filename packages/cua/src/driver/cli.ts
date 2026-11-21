@@ -66,17 +66,28 @@ const DEFAULT_BINARY = "cua-driver";
 export const DEFAULT_SOCKET = "/tmp/terabot-cua.sock";
 
 /**
- * The environment the driver needs inside a Linux box.
+ * The environment the driver needs **inside the target box**.
  *
  * AT-SPI is what makes an accessibility tree exist at all, and it is reached
  * through the *session* bus, not the system bus. Without `DBUS_SESSION_BUS_ADDRESS`
  * the driver still connects to X11 and still takes screenshots, but
  * `get_window_state` returns an empty tree — the `degraded` state the docs warn
- * about — so every element call would fall back to pixels.
+ * about — so every element call falls back to pixels.
+ *
+ * It is deliberately **not** derived from this process's environment by default.
+ * This process usually runs on a different machine from the box, so forwarding
+ * its `XDG_RUNTIME_DIR` (say `/run/user/1001`) would point the driver at a bus
+ * that does not exist on the box (whose desktop runs as UID 1000) and silently
+ * reinstate the pixel-only failure. The box's own login session already exports
+ * both values, so the correct default is to assert nothing and let them through.
+ *
+ * Pass `derive: true` only when the caller *is* the box — a call running inside
+ * the target's own session — for the case where a value is genuinely missing.
  */
-export function boxEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const uid = env.UID ?? "";
-  const runtimeDir = env.XDG_RUNTIME_DIR ?? (uid ? `/run/user/${uid}` : "");
+export function boxEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { derive?: boolean } = {},
+): Record<string, string> {
   const result: Record<string, string> = {
     // GTK's AT-SPI bridge is opt-in per process; apps started without it expose
     // no tree no matter what the driver does.
@@ -84,6 +95,9 @@ export function boxEnvironment(env: NodeJS.ProcessEnv = process.env): Record<str
     GNOME_ACCESSIBILITY: "1",
     NO_AT_BRIDGE: "0",
   };
+  if (!options.derive) return result;
+
+  const runtimeDir = env.XDG_RUNTIME_DIR ?? (env.UID ? `/run/user/${env.UID}` : "");
   if (runtimeDir) result.XDG_RUNTIME_DIR = runtimeDir;
   if (!env.DBUS_SESSION_BUS_ADDRESS && runtimeDir) {
     result.DBUS_SESSION_BUS_ADDRESS = `unix:path=${runtimeDir}/bus`;
