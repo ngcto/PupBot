@@ -46,10 +46,22 @@ same API — no webview. The HTTP client, the SSE reader and the chat reducer it
 `apps/mobile/README.md` for the LAN address a device needs and what v1 deliberately leaves to the
 web app.
 
+## Marketing site
+
+`apps/marketing` is the public site: the landing page, pricing, the download page, a short docs page
+and the links across to sign-in. It is not the product. It runs on :3001 in development
+(`pnpm --filter @pupbot/marketing dev`) and is included in `pnpm dev`, `pnpm build`, `pnpm typecheck`
+and `pnpm test` from the root.
+
+Download buttons are driven by `apps/marketing/releases.ts`: a `null` URL renders "Coming soon"
+instead of a dead link. Deploy root, environment variables and the release config are documented in
+[`apps/marketing/README.md`](apps/marketing/README.md).
+
 ## Shape
 
 ```
 apps/web        Next.js App Router — the shell, bots, chat, settings; server actions for mutations
+apps/marketing  Next.js — the public site: landing, pricing, download, docs (:3001 in dev)
 apps/api        Hono — conversations, runs, SSE replay, the dev stub endpoint, better-auth
 apps/worker     pg-boss consumers — the run loop, models.dev sync
 packages/db     Drizzle schema, migrations, auth, crypto, the Postgres queue
