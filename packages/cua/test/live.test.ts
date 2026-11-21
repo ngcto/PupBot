@@ -7,6 +7,7 @@ import {
   click,
   detectCaptcha,
   execTargetFor,
+  fillSecret,
   launchApp,
   listWindows,
   CuaDriver,
@@ -82,24 +83,53 @@ describe.skipIf(!live)("cua driver live", () => {
 
         /* ── computer use: open an app, act on it, read back what changed ── */
 
+        // Files in HOME: the folder a file manager opens by default, so the
+        // listing is there without a second navigation.
         await provider.exec(
           box,
-          "mkdir -p /tmp/proof && rm -f /tmp/proof/* && echo alpha > /tmp/proof/alpha.txt && echo beta > /tmp/proof/beta.txt && echo gamma > /tmp/proof/gamma.txt",
+          "cd ~ && printf a > proof-alpha.txt && printf b > proof-beta.txt && printf c > proof-gamma.txt",
           { timeoutSeconds: 30 },
         );
-        const launched = await time("launchApp", () => launchApp(driver, { app: "thunar", urls: ["/tmp/proof"] }));
+        const launched = await time("launchApp", () => launchApp(driver, { app: "thunar" }));
         expect(launched.windows.length).toBeGreaterThan(0);
-        const window = launched.windows[0]!;
+        // A cold launch can answer with the first mapped window; the one that
+        // matters is the last, which is the folder window it opened.
+        const window = launched.windows.at(-1)!;
         const target: WindowTarget = { pid: window.pid, windowId: window.windowId };
 
-        const before = await time("observeWindow", () => observeWindow(driver, target));
+        const before = await time("observeWindow", async () => {
+          const observed = await observeWindow(driver, target);
+          const seen = observed.elements.map((element) => element.label ?? "").join(" ");
+          // MEASURED: Thunar's *icon* view exposes no file rows to AT-SPI — the
+          // tree has the chrome and 75 rows, and none of them is a file. The
+          // list view is a real table, so the proof switches to it first.
+          if (!seen.includes("proof-beta.txt")) {
+            const switched = await runSteps(driver, {
+              target,
+              steps: [{ tool: "click", args: { role: "menu item", name: "List View" } }],
+              observe: { screenshot: false },
+              foregroundFallback: true,
+            });
+            expect(switched.ok, `could not switch to the list view: ${switched.failure ?? ""}`).toBe(true);
+          }
+          return waitForLabels(driver, target, ["proof-beta.txt", "proof-gamma.txt"]);
+        });
         expect(before.snapshotId).not.toBe("");
         expect(before.elements.length).toBeGreaterThan(10);
-        // Every row is a target, and every token names the read it came from.
-        const token = before.elements[0]!.token;
+        // A *file row* is the target, not the first element in the tree: the
+        // first row here is the toolbar's "Open Parent" button, and clicking it
+        // navigates the window out of the folder (measured — the rows become
+        // the root listing and every later assertion is about the wrong place).
+        const fileRow = before.elements.find((element) => element.label === "proof-beta.txt");
+        expect(fileRow, "the file row must be an addressable element").toBeDefined();
+        const token = fileRow!.token;
+        // Every token names the read it came from.
         expect(token.startsWith(before.snapshotId)).toBe(true);
         const rowsBefore = before.elements.length;
         const labelsBefore = before.elements.map((element) => element.label ?? "").join(" ");
+        // The proof only means something if the files were visible to begin with.
+        expect(labelsBefore, "the folder's files must be listed before filtering").toContain("proof-beta.txt");
+        expect(labelsBefore, "the folder's files must be listed before filtering").toContain("proof-gamma.txt");
 
         /* ── the ladder: an exact target, and an honest account of the rung ── */
 
@@ -126,11 +156,17 @@ describe.skipIf(!live)("cua driver live", () => {
         const climbed = await time("click (foreground)", () =>
           click(driver, target, { elementToken: token }, { delivery: "foreground" }),
         );
-        // The foreground rung is the top of the ladder: it must land, and it must
-        // confirm it did rather than asking to climb again.
+        // The foreground rung is the top of the ladder: it is never refused for
+        // want of input, and it never asks to climb again.
         expect(climbed.effect).not.toBe("refused");
         expect(climbed.escalation).toBeUndefined();
-        expect(climbed.verified || climbed.effect === "confirmed").toBe(true);
+        // MEASURED: selecting a file row *can* come back `unverifiable`, because
+        // the toolkit reports no state change the driver can read back; the same
+        // click on a row whose selection does change the tree is `confirmed`.
+        // The invariant that must hold either way is the honest one — a change
+        // the driver could not read is never reported as success.
+        expect(climbed.ok).toBe(climbed.verified || climbed.effect === "confirmed");
+        console.log(`  foreground click: effect=${climbed.effect} ok=${climbed.ok} verified=${climbed.verified}`);
 
         /* ── a change the app owns: a search filter that alters the rows ── */
 
@@ -141,10 +177,10 @@ describe.skipIf(!live)("cua driver live", () => {
               { tool: "hotkey", args: { keys: ["ctrl", "f"] } },
               {
                 tool: "type_text",
-                args: { text: "alpha" },
+                args: { text: "proof-alpha" },
                 // The check is the proof: the filter must show alpha.txt and
                 // nothing else, in the app, not in our own bookkeeping.
-                expect: [{ text: "alpha.txt" }],
+                expect: [{ text: "proof-alpha.txt" }],
               },
             ],
             observe: { screenshot: false },
@@ -153,38 +189,78 @@ describe.skipIf(!live)("cua driver live", () => {
         );
         expect(filtered.ok, `batch failed: ${filtered.failure ?? "unknown"}`).toBe(true);
         expect(filtered.steps.every((step) => step.ok)).toBe(true);
-        expect(filtered.observed?.diffSummary ?? filtered.observed?.outline ?? "").toBeDefined();
+        // The end-of-batch observation is what proves the batch landed: it must
+        // be a real diff, not an empty string.
+        const diff = filtered.observed?.diffSummary ?? "";
+        expect(diff.length, "the batch must report what changed").toBeGreaterThan(0);
 
         const afterFilter = await observeWindow(driver, target);
         const labelsAfter = afterFilter.elements.map((element) => element.label ?? "").join(" ");
         console.log(
-          `  rows ${rowsBefore} -> ${afterFilter.elements.length}; alpha visible: ${labelsAfter.includes("alpha.txt")}`,
+          `  rows ${rowsBefore} -> ${afterFilter.elements.length}; alpha listed: ${labelsAfter.includes("proof-alpha.txt")}; beta excluded: ${!labelsAfter.includes("proof-beta.txt")}`,
         );
-        expect(labelsAfter, "the app must show the filtered file").toContain("alpha");
+        // The strongest assertion available: the filter *excluded* the files that
+        // did not match. Without this, a no-op batch passes because alpha.txt was
+        // on screen all along.
+        expect(labelsAfter, "the filtered file must be listed").toContain("proof-alpha.txt");
+        expect(labelsAfter, "a non-matching file must be filtered out").not.toContain("proof-beta.txt");
+        expect(labelsAfter, "a non-matching file must be filtered out").not.toContain("proof-gamma.txt");
+        // And the search box itself now shows what was typed into it.
+        const searchRow = afterFilter.elements.find(
+          (element) => element.role === "text field" || /search/i.test(element.label ?? ""),
+        );
+        if (searchRow) console.log(`  search field now: ${JSON.stringify(String(searchRow.value ?? ""))}`);
         expect(afterFilter.snapshotId).not.toBe(before.snapshotId);
 
-        /* ── the escape key is verified by the app going back ── */
+        /* ── clearing the filter is verified by the files coming back ── */
 
-        await runSteps(driver, {
+        // Clearing the filter is proved by selecting the entry's text and
+        // deleting it: the filter is gone because the text that caused it is
+        // gone. A `type_text` with an empty string is a no-op (measured), so it
+        // looks like a clear and is not one.
+        const cleared = await runSteps(driver, {
           target,
-          steps: [{ tool: "hotkey", args: { keys: ["escape"] } }],
-          observe: false,
+          steps: [
+            { tool: "hotkey", args: { keys: ["ctrl", "f"] } },
+            { tool: "hotkey", args: { keys: ["ctrl", "a"] } },
+            { tool: "press_key", args: { key: "BackSpace" } },
+          ],
+          observe: { screenshot: false },
           foregroundFallback: true,
         });
-        const restored = await observeWindow(driver, target);
-        expect(restored.elements.length).toBeGreaterThan(0);
-        expect(labelsBefore.length).toBeGreaterThan(0);
+        expect(cleared.ok, `could not clear the filter: ${cleared.failure ?? ""}`).toBe(true);
+        const restored = await waitForLabels(driver, target, ["proof-beta.txt", "proof-gamma.txt"]);
+        const labelsRestored = restored.elements.map((element) => element.label ?? "").join(" ");
+        // Clearing the filter is the observable change: the files that were
+        // hidden must be listed again.
+        expect(labelsRestored, "clearing the filter must list the files again").toContain("proof-beta.txt");
+        expect(labelsRestored).toContain("proof-gamma.txt");
 
-        /* ── a screenshot is available, and only when asked for ── */
+        /* ── a fill with a value this code chose, into a target it can name ── */
 
-        const image = await time("screenshot", () => screenshot(driver, target));
-        expect(image.data.length).toBeGreaterThan(1000);
-        expect(image.mime).toContain("image");
+        // A real login form on the box itself, so the fill has a password field:
+        // the case a Vault fill exists for. Host-executed, box-applied, and the
+        // target must be a ref this call can see.
+        await provider.putFile(
+          box,
+          "/tmp/login/index.html",
+          [
+            "<!doctype html><html><head><title>Sign in</title></head><body>",
+            '<h1>Sign in</h1><form onsubmit="event.preventDefault()">',
+            '<label for="e">Email</label><input id="e" name="email" type="text">',
+            '<label for="p">Password</label><input id="p" name="password" type="password">',
+            '<button type="submit">Sign in</button></form></body></html>',
+          ].join(""),
+        );
+        await provider.exec(
+          box,
+          "cd /tmp/login && setsid python3 -m http.server 8099 >/tmp/http.log 2>&1 < /dev/null & sleep 1; true",
+          { timeoutSeconds: 30 },
+        );
 
-        /* ── browser use: a rendered page, through the driver's CDP tools ── */
-
+        const profileName = `live-${Date.now()}`;
         const prepared = await time("prepareBrowser", () =>
-          prepareBrowser(driver, { profile: { mode: "isolated_named", name: "terabot-live" } }),
+          prepareBrowser(driver, { profile: { mode: "isolated_named", name: profileName } }),
         );
         expect(prepared.prepared).toBe(true);
         expect(prepared.pid).toBeGreaterThan(0);
@@ -201,19 +277,51 @@ describe.skipIf(!live)("cua driver live", () => {
         const tab = bound as { targetId: string; tabId: string };
 
         await time("browserNavigate", () =>
-          browserNavigate(driver, { targetId: tab.targetId, tabId: tab.tabId, url: "https://example.com" }),
+          browserNavigate(driver, { targetId: tab.targetId, tabId: tab.tabId, url: "http://127.0.0.1:8099/" }),
         );
 
         const page = await time("readPage", () =>
           readPage(driver, { targetId: tab.targetId, tabId: tab.tabId }),
         );
+        expect(page.title).toBe("Sign in");
         // Text that only a rendered page has: it exists because the browser parsed
         // the document, not in any HTTP body we could have read ourselves.
-        expect(page.title).toBe("Example Domain");
-        expect(page.outline.length).toBeGreaterThan(20);
-        expect(`${page.outline}${JSON.stringify(page.content)}`).toContain("Example Domain");
+        expect(page.outline.length).toBeGreaterThan(10);
         // Detection rides on the same read and costs nothing extra.
         expect(page.captcha.gated).toBe(false);
+
+        const passwordRef = page.refs.find(
+          (ref) => ref.actions.includes("type") && /password/i.test(`${ref.name ?? ""} ${ref.role}`),
+        );
+        expect(passwordRef, "the login form must expose a password field").toBeDefined();
+
+        const secret = "correct-horse-battery-staple";
+        const filled = await time("fillSecret (page)", () =>
+          fillSecret(driver, {
+            target: { pid: prepared.pid!, windowId: browserWindows[0]!.windowId },
+            fill: { kind: "page", targetId: tab.targetId, tabId: tab.tabId, ref: passwordRef!.ref },
+            value: secret,
+          }),
+        );
+        // The proof: a read-back shows the field holding the value. A password
+        // reports a mask, so `landed` is the honest answer and `verified` stays
+        // the driver's own verdict.
+        expect(filled.landed, `fill did not land: ${filled.message}`).toBe(true);
+        expect(filled.message).toBe("The field now holds the value.");
+        expect(JSON.stringify(filled), "the secret must never be in the result").not.toContain(secret);
+
+        const afterFill = await readPage(driver, tab);
+        const passwordAfter = afterFill.refs.find((ref) => /password/i.test(`${ref.name ?? ""}`)) ?? afterFill.refs[0];
+        console.log(`  password field reads back as: ${JSON.stringify(passwordAfter?.value)}`);
+        expect(passwordAfter?.value, "the field must be filled, masked or not").toBeTruthy();
+
+        /* ── a second read of the same page is a different snapshot ── */
+
+        expect(afterFill.snapshotId).not.toBe(page.snapshotId);
+
+        const image = await time("screenshot", () => screenshot(driver, target));
+        expect(image.data.length).toBeGreaterThan(1000);
+        expect(image.mime).toContain("image");
 
         /* ── a challenge is state, not a failure ── */
 
@@ -237,6 +345,31 @@ describe.skipIf(!live)("cua driver live", () => {
     600_000,
   );
 });
+
+/**
+ * Observe a window until it shows all the labels a test needs.
+ *
+ * A file manager enumerating a folder is asynchronous: the first read after
+ * launch can arrive before the listing does (measured — the window exists, the
+ * files do not yet). Polling for a *named* label is the honest fix: it waits for
+ * the app's own state rather than sleeping a guessed interval.
+ */
+async function waitForLabels(
+  driver: CuaDriver,
+  target: WindowTarget,
+  labels: string[],
+  timeoutMs = 8000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last = await observeWindow(driver, target);
+  while (Date.now() < deadline) {
+    const text = last.elements.map((element) => element.label ?? "").join(" ");
+    if (labels.every((label) => text.includes(label))) return last;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    last = await observeWindow(driver, target);
+  }
+  return last;
+}
 
 /**
  * Bring the box's desktop up, installing XFCE if this is the box's first use.

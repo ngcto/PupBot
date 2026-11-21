@@ -78,6 +78,9 @@ export type {
   WindowTarget,
 } from "./tools/desktop.ts";
 
+export { fillSecret, isStaleTarget } from "./tools/fill.ts";
+export type { FillRequest, FillResult, FillTarget } from "./tools/fill.ts";
+
 export {
   browserClick,
   browserDialog,

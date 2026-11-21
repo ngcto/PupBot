@@ -195,6 +195,11 @@ export function createSolver(config: SolverConfig | null, fetchImpl: typeof fetc
         return { ok: false, reason: "solver_error", message: "this challenge exposes no site key to solve" };
       }
 
+      // An abort that already happened never replays as an event, and the
+      // request controller below starts un-aborted — so check it explicitly, or
+      // a cancelled run would still create a paid task and keep polling.
+      if (options.signal?.aborted) throw new Error("aborted");
+
       const started = Date.now();
       const deadline = started + timeoutSeconds * 1000;
 
@@ -339,15 +344,22 @@ export function tokenInjectionScript(signal: CaptchaSignal, token: string): stri
   const value = JSON.stringify(token);
   switch (signal.kind) {
     case "hcaptcha":
+      // The response field alone is not enough: a form that enables its submit
+      // from `data-callback` only reacts when the page's own callback receives
+      // the token, and `hcaptcha.execute` does not deliver one.
       return `(() => {
   const h = document.querySelector('textarea[name="h-captcha-response"], textarea#h-captcha-response');
   if (h) h.value = ${value};
-  const id = ${key} || (document.querySelector('[data-sitekey]') || {}).dataset?.sitekey;
+  const widget = document.querySelector('[data-callback], .h-captcha');
+  const name = widget && widget.getAttribute('data-callback');
+  let fired = false;
+  if (name && typeof window[name] === 'function') { try { window[name](${value}); fired = true; } catch {} }
+  const id = ${key} || (widget && widget.getAttribute('data-sitekey'));
   if (window.hcaptcha && id) {
     try { window.hcaptcha.getResponse = () => ${value}; } catch {}
     try { window.hcaptcha.execute(id, { async: false }); } catch {}
   }
-  return !!h;
+  return !!h || fired;
 })()`;
     case "turnstile":
       return `(() => {
@@ -384,7 +396,11 @@ export function tokenInjectionScript(signal: CaptchaSignal, token: string): stri
 /** The page URL to report to a solver: whatever the bound tab is on. */
 export function solverRequestFor(detection: CaptchaDetection, pageUrl: string): SolverRequest | null {
   const signal = detection.primary;
+  // A task with an empty `websiteURL` is invalid, and the vendor would take the
+  // money before saying so. Refusing here keeps the caller on its local
+  // explanation instead of spending a task on a guess.
   if (!signal || !signal.siteKey || !detection.solvable) return null;
+  if (!/^https?:\/\//i.test(pageUrl)) return null;
   return {
     kind: signal.kind,
     siteKey: signal.siteKey,

@@ -48,11 +48,33 @@ describe("detection", () => {
     expect(detection.primary?.siteKey).toBe("6Lc_theAttribute0000000000");
   });
 
-  it("recognises Turnstile and hCaptcha", () => {
-    expect(detectCaptcha({ frameUrls: ["https://challenges.cloudflare.com/turnstile/v0/api.js"] }).primary?.kind).toBe(
-      "turnstile",
-    );
-    expect(detectCaptcha({ frameUrls: ["https://hcaptcha.com/1/api.js"] }).primary?.kind).toBe("hcaptcha");
+  it("recognises Turnstile and hCaptcha when the widget is rendered", () => {
+    const turnstile = detectCaptcha({
+      frameUrls: ["https://challenges.cloudflare.com/turnstile/v0/bframe?sitekey=0x4AAAA"],
+    });
+    expect(turnstile.primary?.kind).toBe("turnstile");
+    expect(turnstile.gated).toBe(true);
+
+    const hcaptcha = detectCaptcha({
+      frameUrls: ["https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html"],
+      html: '<textarea id="h-captcha-response"></textarea>',
+    });
+    expect(hcaptcha.primary?.kind).toBe("hcaptcha");
+    expect(hcaptcha.gated).toBe(true);
+  });
+
+  it("names a loaded widget library without calling the page gated", () => {
+    // Same hosts, no rendered challenge: advisory, never `primary`.
+    const turnstile = detectCaptcha({ frameUrls: ["https://challenges.cloudflare.com/turnstile/v0/api.js"] });
+    expect(turnstile.signals[0]?.kind).toBe("turnstile");
+    expect(turnstile.signals[0]?.advisory).toBe(true);
+    expect(turnstile.primary).toBeUndefined();
+    expect(turnstile.gated).toBe(false);
+
+    const hcaptcha = detectCaptcha({ frameUrls: ["https://hcaptcha.com/1/api.js"] });
+    expect(hcaptcha.signals[0]?.kind).toBe("hcaptcha");
+    expect(hcaptcha.primary).toBeUndefined();
+    expect(hcaptcha.gated).toBe(false);
   });
 
   it("recognises a Cloudflare interstitial as a soft gate that a human cadence may clear", () => {
@@ -91,9 +113,10 @@ describe("detection", () => {
 
   it("describes the gate in one sentence a model can act on", () => {
     const detection = detectCaptcha({
-      frameUrls: ["https://hcaptcha.com/1/api.js"],
-      html: '<div data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div>',
+      frameUrls: ["https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html"],
+      html: '<div data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div><textarea id="h-captcha-response"></textarea>',
     });
+    expect(detection.gated).toBe(true);
     const text = describeDetection(detection);
     expect(text).toContain("hcaptcha");
     expect(text).toContain("token");
@@ -169,17 +192,15 @@ describe("the challenge ladder", () => {
           name: "Verification",
           value: null,
           actions: [],
-          frame: "https://challenges.cloudflare.com/turnstile/v0/api.js?k=0x4AAAAAAA_siteKey",
+          frame: "https://challenges.cloudflare.com/turnstile/v0/bframe?k=0x4AAAAAAA_siteKey",
         },
       ],
     });
     const assessment = await assessChallenge(softKeyed, { solver: configuredSolver });
     // The interstitial marker is present, but the Turnstile widget is the real
     // gate and it has a site key, so the solver rung is the precise answer.
-    expect(assessment.detection.signals.map((signal) => signal.kind)).toEqual([
-      "turnstile",
-      "cloudflare_interstitial",
-    ]);
+    expect(assessment.detection.signals[0]?.kind).toBe("turnstile");
+    expect(assessment.detection.primary?.kind).toBe("turnstile");
     expect(assessment.paths).toEqual(["solver"]);
     expect(assessment.detection.solvable).toBe(true);
   });
@@ -443,10 +464,12 @@ describe("solver requests", () => {
     const detection = detectCaptcha({ title: "Just a moment..." });
     expect(solverRequestFor(detection, "https://x")).toBeNull();
     const keyed = detectCaptcha({
-      frameUrls: ["https://hcaptcha.com/1/api.js"],
+      frameUrls: ["https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html"],
       html: '<div data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div>',
     });
-    expect(solverRequestFor(keyed, "https://x")?.siteKey).toBe("10000000-ffff-ffff-ffff-000000000001");
+    expect(solverRequestFor(keyed, "https://x.example")?.siteKey).toBe("10000000-ffff-ffff-ffff-000000000001");
+    // An unknown page URL is refused rather than sent as an invalid task.
+    expect(solverRequestFor(keyed, "")).toBeNull();
   });
 });
 

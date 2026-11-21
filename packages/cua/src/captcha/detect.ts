@@ -21,75 +21,81 @@ import type { CaptchaDetection, CaptchaKind, CaptchaSignal } from "../types.ts";
 /** A challenge host, and what its presence implies. */
 interface Signature {
   kind: CaptchaKind;
-  pattern: RegExp;
-  confidence: CaptchaSignal["confidence"];
-  /** The key this kind of widget publishes in its URL or a data attribute. */
-  siteKeyFrom?: "url" | "attribute" | "callback";
-  soft?: boolean;
   /**
-   * True for a signature that only proves the *library* is loaded, not that a
-   * challenge is in the way. A page can carry reCAPTCHA's `api.js` purely to
-   * call `grecaptcha.execute` on a login button that is not currently showing a
-   * gate, and telling a model "this page is gated" then is worse than saying
-   * nothing: it stops a working page from being used.
+   * A URL that proves a challenge is **rendered and in the way**: an iframe the
+   * widget opened, or the page's own response field.
    */
-  loaderOnly?: boolean;
+  gate: RegExp;
+  /**
+   * A URL that only proves the widget **library** is loaded. A page can carry
+   * `hcaptcha.com/1/api.js`, `turnstile/v0/api.js` or `recaptcha/api.js` purely
+   * to call the widget from a button, and telling a model "this page is gated"
+   * then stops a working page from being used.
+   */
+  loader: RegExp;
+  confidence: CaptchaSignal["confidence"];
+  soft?: boolean;
 }
 
 /**
- * Hosts and paths, matched against iframe sources and script URLs. Ordered
- * most-specific first: reCAPTCHA Enterprise serves from the same host as v3, so
- * the enterprise markers are tested before the plain v3 one.
+ * Hosts and paths, matched against iframe sources and script URLs. A signature
+ * first looks for its gate, and falls back to its loader pattern marked
+ * advisory — so the *presence of a library* can never by itself become a gate.
+ *
+ * Ordered most-specific first: reCAPTCHA Enterprise serves from the same host as
+ * v3, so the enterprise markers are tested before the plain v3 one.
  */
 const SIGNATURES: Signature[] = [
   {
     kind: "recaptcha_enterprise",
-    pattern: /recaptcha\/(?:enterprise|api2\/enterprise)\.js/i,
+    gate: /recaptcha\/(?:enterprise|api2\/enterprise)\/(?:anchor|bframe)/i,
+    loader: /recaptcha\/(?:enterprise|api2\/enterprise)\.js/i,
     confidence: "high",
-    siteKeyFrom: "url",
   },
   {
     kind: "recaptcha_v2_checkbox",
-    pattern: /google\.com\/recaptcha\/(?:api2\/)?anchor|recaptcha\/api2\/anchor/i,
+    gate: /google\.com\/recaptcha\/(?:api2\/)?anchor/i,
+    // The v2 widget's own loader is the anchor/b-frame pair; a bare `api.js` is
+    // the generic or v3 loader and must not be read as a checkbox.
+    loader: /recaptcha\/(?:api2\/)?anchor/i,
     confidence: "high",
-    siteKeyFrom: "url",
   },
   {
     kind: "recaptcha_v2_invisible",
-    pattern: /google\.com\/recaptcha\/api2\/bframe|size=invisible/i,
+    gate: /size=invisible.*bframe|bframe.*size=invisible/i,
+    loader: /size=invisible/i,
     confidence: "medium",
-    siteKeyFrom: "url",
   },
   {
     kind: "recaptcha_v3",
-    pattern: /google\.com\/recaptcha\/api\.js|recaptcha\/api\.js|grecaptcha\.execute/i,
+    // v3 renders no widget: it is a score returned by `execute`. The only
+    // honest signal is the call together with the page's response field.
+    gate: /grecaptcha\.(?:execute|ready)\(/i,
+    loader: /google\.com\/recaptcha\/api\.js|recaptcha\/api\.js/i,
     confidence: "medium",
-    siteKeyFrom: "url",
-    // A loaded script is the whole of this signature. It becomes a gate only
-    // when the page also shows challenge furniture — see `blockingEvidence`.
-    loaderOnly: true,
   },
   {
     kind: "hcaptcha",
-    pattern: /hcaptcha\.com\/(?:1\/api\.js|checksiteconfig)|newassets\.hcaptcha\.com/i,
+    gate: /hcaptcha\.com\/captcha|newassets\.hcaptcha\.com\/captcha/i,
+    loader: /hcaptcha\.com\/(?:1\/api\.js|checksiteconfig)/i,
     confidence: "high",
-    siteKeyFrom: "attribute",
   },
   {
     kind: "turnstile",
-    pattern: /challenges\.cloudflare\.com\/turnstile\/v0\/api\.js|cf-turnstile/i,
+    gate: /challenges\.cloudflare\.com\/turnstile\/v\d+\/(?:bframe|a\/)|class=["'][^"']*cf-turnstile/i,
+    loader: /challenges\.cloudflare\.com\/turnstile\/v\d+\/api\.js|cf-turnstile/i,
     confidence: "high",
-    siteKeyFrom: "attribute",
   },
   {
     kind: "arkose",
-    pattern: /arkoselabs\.com|funcaptcha/i,
+    gate: /arkoselabs\.com\/fc\/(?:api|gc)\/|funcaptcha\.(?:com|net)/i,
+    loader: /arkoselabs\.com|funcaptcha/i,
     confidence: "high",
-    siteKeyFrom: "attribute",
   },
   {
     kind: "aws_waf",
-    pattern: /captcha\.awswaf\.com|awswaf/i,
+    gate: /captcha\.awswaf\.com\/captcha/i,
+    loader: /awswaf/i,
     confidence: "high",
   },
 ];
@@ -101,14 +107,23 @@ const SIGNATURES: Signature[] = [
  */
 const BLOCKING_MARKERS = [
   /\/recaptcha\/api2\/(?:anchor|bframe)/i,
-  /\/recaptcha\/enterprise/i,
-  /challenges\.cloudflare\.com\/turnstile\/v\d+\/bframe/i,
-  /newassets\.hcaptcha\.com\/c\/enterprise|hcaptcha\.com\/captcha/i,
+  /\/recaptcha\/(?:enterprise|api2\/enterprise)\/(?:anchor|bframe)/i,
+  /challenges\.cloudflare\.com\/turnstile\/v\d+\/(?:bframe|a\/)/i,
+  /newassets\.hcaptcha\.com\/captcha|hcaptcha\.com\/captcha/i,
   /id=["']g-recaptcha-response["']/i,
   /class=["'][^"']*g-recaptcha/i,
   /id=["']h-captcha-response["']/i,
   /name=["']cf-turnstile-response["']/i,
 ];
+
+/** The whole URL a regex matched inside, so a query string is not lost. */
+function enclosingUrl(haystack: string, index: number): string | undefined {
+  const start = haystack.lastIndexOf("http", index);
+  if (start < 0) return undefined;
+  const rest = haystack.slice(start);
+  const end = rest.search(/[\s"'<>]/);
+  return end < 0 ? rest : rest.slice(0, end);
+}
 
 /**
  * Markers of a Cloudflare interstitial specifically: the JS challenge and the
@@ -167,23 +182,31 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
   const haystack = [urls.join(" "), page.html ?? "", page.text ?? "", page.title ?? ""].join("\n");
   const signals: CaptchaSignal[] = [];
   /** Something on this page proves a challenge is rendered, not just loaded. */
-  const blocking = urls.some((url) => BLOCKING_MARKERS.some((marker) => marker.test(url)))
-    || BLOCKING_MARKERS.some((marker) => marker.test(haystack));
+  const blocking = BLOCKING_MARKERS.some((marker) => marker.test(haystack));
 
   for (const signature of SIGNATURES) {
-    const match = signature.pattern.exec(haystack);
-    if (!match) continue;
-    const source = urls.find((url) => signature.pattern.test(url)) ?? match[0];
-    // A loader-only signature is not a gate by itself: a page that merely calls
-    // `grecaptcha.execute` from a login button has a widget library loaded and
-    // nothing in the way.
-    const advisory = signature.loaderOnly === true && !blocking;
+    // A gate first: that is a rendered challenge or a response field.
+    const gateMatch = signature.gate.exec(haystack);
+    const loaderMatch = gateMatch ? null : signature.loader.exec(haystack);
+    if (!gateMatch && !loaderMatch) continue;
+
+    const match = gateMatch ?? loaderMatch!;
+    // Keep the *whole* URL the match sits in: a regex match can end before the
+    // query string, which is where the public site key lives.
+    const source = enclosingUrl(haystack, match.index) ?? match[0];
+    const loaderOnly = gateMatch === null;
+    // A loader with no challenge furniture anywhere on the page is advisory. A
+    // loader with furniture is a real gate (the widget is rendered, the loader
+    // just happened to be what matched first).
+    const advisory = loaderOnly && !blocking;
     signals.push({
       kind: signature.kind,
       confidence: advisory ? "low" : signature.confidence,
       ...(siteKeyFromUrl(source) ? { siteKey: siteKeyFromUrl(source) } : {}),
       source,
-      evidence: `matched ${signature.pattern.source} in a frame or script URL`,
+      evidence: advisory
+        ? `only the ${signature.kind} library is loaded; nothing on the page shows a challenge`
+        : `matched ${match[0]}`,
       ...(advisory ? { advisory: true } : {}),
     });
   }
@@ -234,8 +257,14 @@ export function detectCaptcha(page: PageSignals): CaptchaDetection {
     }
   }
 
+  // A rendered challenge outranks a loaded library, whatever their nominal
+  // confidence: an advisory hit must never become the primary when a real one
+  // is present.
   const order = { high: 0, medium: 1, low: 2 } as const;
-  signals.sort((a, b) => order[a.confidence] - order[b.confidence]);
+  signals.sort((a, b) => {
+    if (a.advisory !== b.advisory) return a.advisory ? 1 : -1;
+    return order[a.confidence] - order[b.confidence];
+  });
 
   // A page is gated only by a signal that is not merely advisory.
   const gating = signals.filter((signal) => signal.advisory !== true);
