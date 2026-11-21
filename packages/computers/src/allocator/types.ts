@@ -1,4 +1,5 @@
 import type { ComputerProvider, ComputerRef, ComputerState } from "../contract.ts";
+import type { ComputerFailure, PoolAvailability } from "./failures.ts";
 
 /** A bot's binding state: what the composer and the computer card read. */
 export type BindingState = "unbound" | "binding" | "ready" | "blocked";
@@ -8,21 +9,20 @@ export type ComputerRowStatus = "provisioning" | "awake" | "asleep" | "waking" |
 
 export interface AccountRecord {
   id: string;
+  /** The user who configured this account; null when the deployment provides it. */
+  ownerUserId: string | null;
+  /** True for a deployment-provided account: exempt from the one-per-provider rule. */
+  managed: boolean;
   provider: string;
   label: string;
   /** Encrypted credential; the allocator never decrypts it, the provider factory does. */
   encryptedCredential: string;
   status: "active" | "draining" | "error";
-  /** How many boxes this account's plan allows. */
-  capacity: number;
-  /** True when the deployment provides this account, false when a user connected it. */
-  managed: boolean;
   /**
-   * The user who connected an unmanaged account; null on a managed row. The
-   * allocator prefers this user's own account over a managed one for their own
-   * bots, and never hands one user's account to another user's bot.
+   * How many boxes this account's plan allows. `0` means unknown: the provider
+   * decides, and the allocator never refuses a create on its own count.
    */
-  ownerUserId: string | null;
+  capacity: number;
   /** Set when the provider rate-limits the account: do not start a box before then. */
   parkedUntil: string | null;
   lastError: string | null;
@@ -31,6 +31,8 @@ export interface AccountRecord {
 export interface ComputerRecord {
   id: string;
   accountId: string | null;
+  /** The workspace that owns the box; null once its workspace is deleted. */
+  workspaceId: string | null;
   provider: string;
   externalId: string;
   status: ComputerRowStatus;
@@ -38,6 +40,22 @@ export interface ComputerRecord {
   lastUsedAt: string | null;
   lastError: string | null;
   lastErrorCode: string | null;
+  createdAt: string;
+}
+
+/** Why a box ended up in the orphan ledger. */
+export type OrphanReason = "bot-delete" | "workspace-delete" | "account-delete";
+
+export interface OrphanRecord {
+  id: string;
+  accountId: string | null;
+  provider: string;
+  externalId: string;
+  reason: OrphanReason;
+  botId: string | null;
+  attempts: number;
+  lastError: string | null;
+  lastAttemptAt: string | null;
   createdAt: string;
 }
 
@@ -71,6 +89,8 @@ export interface ComputerPatch {
 
 export interface CreateComputerInput {
   accountId: string;
+  /** The bot's workspace, so a workspace delete can find the box. */
+  workspaceId?: string | null;
   provider: string;
   externalId: string;
   status: ComputerRowStatus;
@@ -84,6 +104,9 @@ export interface CreateComputerInput {
  */
 export interface ComputerStore {
   listAccounts(): Promise<AccountRecord[]>;
+  /** The accounts one bot may draw on: its workspace's own, plus deployment pools. */
+  /** What this bot's workspace can reach, for wording a block honestly. */
+  poolAvailabilityFor(botId: string): Promise<PoolAvailability>;
   updateAccount(id: string, patch: AccountPatch): Promise<void>;
 
   listComputers(): Promise<ComputerRecord[]>;
@@ -92,15 +115,18 @@ export interface ComputerStore {
   updateComputer(id: string, patch: ComputerPatch): Promise<void>;
 
   botExists(botId: string): Promise<boolean>;
-  /**
-   * The user who owns the bot's workspace, so the allocator can prefer that
-   * user's own connected account over a deployment-provided one. Null when the
-   * bot or its owner cannot be resolved.
-   */
-  botOwnerUserId(botId: string): Promise<string | null>;
+  /** The bot's workspace, recorded on every box it gets. */
+  botWorkspaceId(botId: string): Promise<string | null>;
   /** The bot's binding and the box currently linked to it, if any. */
   botBinding(botId: string): Promise<BindingRecord | null>;
+  /** The owner of the bot's workspace; null when the bot or its workspace is gone. */
+  botOwnerUserId(botId: string): Promise<string | null>;
   setBindingState(botId: string, state: BindingState, reason: string | null): Promise<void>;
+  /**
+   * Link a box to the bot only if it has no live box, atomically. False means
+   * another allocation won the race and the caller must destroy the box it made.
+   */
+  tryBindComputer(botId: string, computer: ComputerRecord): Promise<boolean>;
   /** Link a box to the bot, releasing the one it had. Also marks the binding ready. */
   bindComputer(botId: string, computer: ComputerRecord): Promise<void>;
   /** Drop the link and leave the bot unbound. */
@@ -109,6 +135,19 @@ export interface ComputerStore {
   botForComputer(computerId: string): Promise<string | null>;
   /** Bots still "binding" since before this instant: their provision request was lost. */
   staleBindingBotIds(before: string): Promise<string[]>;
+
+  listOrphans(): Promise<OrphanRecord[]>;
+  /** Record a box the provider would not delete, with what a later attempt needs. */
+  recordOrphan(input: {
+    accountId: string | null;
+    provider: string;
+    externalId: string;
+    reason: OrphanReason;
+    botId?: string | null;
+    lastError: string;
+  }): Promise<void>;
+  markOrphanAttempt(id: string, error: string | null): Promise<void>;
+  deleteOrphan(id: string): Promise<void>;
 
   listLeases(): Promise<LeaseRecord[]>;
   putLease(lease: LeaseRecord): Promise<void>;
@@ -121,7 +160,13 @@ export type ProviderFactory = (account: AccountRecord) => ComputerProvider;
 export interface AllocateResult {
   state: "ready" | "blocked";
   computerId?: string;
+  /**
+   * Why it is blocked. A string for the run record and the UI; `failure` is the
+   * structured form the model reads.
+   */
   reason?: string;
+  /** Present exactly when `state` is "blocked". */
+  failure?: ComputerFailure;
 }
 
 /**
@@ -191,6 +236,8 @@ export interface EnsureReadyResult {
    * for a transient failure the UI should retry on the next message.
    */
   blocked?: boolean;
+  /** The structured failure the model relays. Present when `ok` is false. */
+  failure?: ComputerFailure;
 }
 
 export interface ReconcileSummary {

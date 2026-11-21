@@ -10,7 +10,6 @@ export type {
   FileEntry,
   ProvisionOptions,
   ProviderErrorCode,
-  ProviderCapabilities,
   Screenshot,
 } from "./contract.ts";
 
@@ -46,6 +45,7 @@ export type { FakeFailure, FakeOperation, FakeProviderOptions } from "./fake.ts"
 export {
   ALLOCATOR_DEFAULTS,
   ComputerAllocator,
+  accountClass,
   describeFailures,
   describeMissingCapabilities,
   eligibleAccounts,
@@ -54,6 +54,8 @@ export type { AllocatorConfig, AllocatorOptions, ReconcileOptions } from "./allo
 export { DrizzleComputerStore } from "./allocator/drizzle-store.ts";
 export { MemoryComputerStore } from "./allocator/memory-store.ts";
 export { rowStatusFrom, toRef } from "./allocator/types.ts";
+export { NO_POOL, classifyFailure } from "./allocator/failures.ts";
+export type { ComputerFailure, ComputerFailureCode, PoolAvailability } from "./allocator/failures.ts";
 export type {
   AccountRecord,
   AllocateResult,
@@ -67,6 +69,8 @@ export type {
   EnsureReadyOptions,
   EnsureReadyResult,
   LeaseRecord,
+  OrphanReason,
+  OrphanRecord,
   ProviderFactory,
   ReconcileSummary,
   RequiredCapability,
@@ -74,7 +78,9 @@ export type {
 } from "./allocator/types.ts";
 
 export { DEFAULT_REQUIREMENTS } from "./allocator/types.ts";
-
+export { createComputerRuntime, createRunComputer, runComputerWithLease } from "./run-computer.ts";
+export type { RunComputerSignature } from "./run-computer.ts";
+export type { LeaseResult, MachineExecSummary, MachineHandle, RunObstacle } from "./run-computer.ts";
 export { createProviderFactory } from "./registry.ts";
 export type { ProviderRegistryOptions } from "./registry.ts";
 
