@@ -3,6 +3,7 @@ import { loadEnv } from "@terabot/config/load-env";
 import { RUN_QUEUE, closeDatabase, database, startBoss } from "@terabot/db";
 import type { RunJobData } from "@terabot/db";
 import { createGateway } from "@terabot/providers";
+import { SecretRequestService, VaultService, oneShotSecrets, vaultTools } from "@terabot/vault";
 import { createComputers } from "./computers.ts";
 import { registerCatalogJobs } from "./jobs/catalog.ts";
 import { registerComputerJobs } from "./jobs/computers.ts";
@@ -17,12 +18,16 @@ await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
   for (const job of jobs) {
     const { runId } = job.data;
     try {
+      // The same vault tools the inline path gets. The ask-the-user card cannot be
+      // answered across processes, so this run does not wait for one: the card
+      // renders and the answer arrives as the next message. See docs/deploy.md.
       const outcome = await executeRun({
         db: database(),
         gateway,
         runId,
         signal: job.signal,
         computer: runComputer,
+        tools: vaultTools({ db: database(), vault: new VaultService(database()), oneShot: oneShotSecrets() }),
       });
       console.log(`[run ${runId}] ${outcome.status} (${outcome.text.length} chars)`);
     } catch (error) {
@@ -31,6 +36,9 @@ await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
       // marked canceled, and a retry would only re-enter the same run.
       if (job.signal.aborted) return;
       throw error;
+    } finally {
+      // A one-shot value must not outlive the run it was typed for, however it ended.
+      await new SecretRequestService(database()).releaseRun({ runId }).catch(() => undefined);
     }
   }
 });

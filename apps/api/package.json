@@ -24,6 +24,7 @@
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",
     "@terabot/storage": "workspace:*",
+    "@terabot/vault": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.19",
     "pg-boss": "^12.38.2",

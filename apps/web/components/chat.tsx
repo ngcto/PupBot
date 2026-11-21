@@ -16,10 +16,11 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatTimestamp } from "../lib/format.ts";
-import type { BotView, MessageView } from "../lib/types.ts";
+import type { BotView, MessageView, PendingRequestView } from "../lib/types.ts";
 import { Composer } from "./composer.tsx";
 import { MessageBubble } from "./message-bubble.tsx";
 import { Markdown } from "./markdown.tsx";
+import { SecretRequestCard } from "./secret-request-card.tsx";
 import { useConversationStream } from "./use-run-stream.ts";
 
 const GROUP_GAP_MS = 10 * 60 * 1000;
@@ -29,6 +30,7 @@ export function Chat({
   apiUrl,
   initialMessages,
   activeRunId,
+  pendingRequest,
   onGiveComputer,
   onManageProviders,
 }: {
@@ -36,21 +38,41 @@ export function Chat({
   apiUrl: string;
   initialMessages: MessageView[];
   activeRunId: string | null;
+  /** A card the bot is still waiting on, read on load so a reload never loses it. */
+  pendingRequest: PendingRequestView | null;
   onGiveComputer: () => void;
   onManageProviders: () => void;
 }) {
   const router = useRouter();
-  const { messages, streaming, error, send, upload, sending, dismissError } = useConversationStream({
+  const { messages, streaming, error, send, upload, sending, clearRequest, dismissError } = useConversationStream({
     conversationId: bot.conversationId,
     apiUrl,
     initialMessages,
     initialActiveRunId: activeRunId,
   });
   const [reply, setReply] = useState<{ messageId: string; text: string } | null>(null);
+  // A card read from the database on load, cleared once it is answered.
+  const [restoredRequest, setRestoredRequest] = useState(pendingRequest);
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
 
   const rows = useMemo(() => buildRows(messages), [messages]);
+
+  // One card at a time: a live request from the event stream wins over one read from
+  // the database on load, because the live one is the newest.
+  const liveRequest = useMemo(
+    () =>
+      streaming?.request
+        ? {
+            requestId: streaming.request.requestId,
+            kind: streaming.request.kind,
+            reason: streaming.request.reason,
+            domain: streaming.request.domain,
+            expiresAt: streaming.request.expiresAt,
+          }
+        : restoredRequest,
+    [streaming?.request, restoredRequest],
+  );
 
   useEffect(() => {
     const node = scroller.current;
@@ -113,6 +135,20 @@ export function Chat({
                 </div>
               ),
             )}
+            {liveRequest ? (
+              <div className="mt-6 flex flex-col items-start" data-testid="secret-request-wrap">
+                <SecretRequestCard
+                  apiUrl={apiUrl}
+                  requestId={liveRequest.requestId}
+                  seed={liveRequest}
+                  onResolved={() => {
+                    clearRequest();
+                    setRestoredRequest(null);
+                    router.refresh();
+                  }}
+                />
+              </div>
+            ) : null}
             {streaming ? <StreamingTurn bot={bot} streaming={streaming} /> : null}
           </div>
         </div>

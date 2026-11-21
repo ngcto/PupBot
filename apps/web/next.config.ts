@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
     "@terabot/providers",
     "@terabot/storage",
     "@terabot/ui",
+    "@terabot/vault",
   ],
   experimental: { externalDir: true },
   serverExternalPackages: ["pg", "pg-boss"],

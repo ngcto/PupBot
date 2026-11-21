@@ -111,6 +111,7 @@ export function AppShell({ data }: { data: ShellData }) {
           apiUrl={data.apiUrl}
           initialMessages={data.messages}
           activeRunId={data.activeRunId}
+          pendingRequest={data.pendingRequest}
           onGiveComputer={onGiveComputer}
           onManageProviders={openProviders}
         />
@@ -157,6 +158,7 @@ export function AppShell({ data }: { data: ShellData }) {
         endpoints={data.endpoints}
         computerAccounts={data.computerAccounts}
         computerProviders={data.computerProviders}
+        apiUrl={data.apiUrl}
         initialSection={settingsSection}
       />
       <AppsDialog open={appsOpen} onOpenChange={setAppsOpen} initialConnections={data.connections} />
