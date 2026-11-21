@@ -5,28 +5,33 @@ Where the shipped build differs from `handoffs/spec/`, and why. The drive copy o
 
 ## Avatars
 
-Avatars are `open-bot-avatar`'s own starter set plus our palette. `packages/avatars` re-exports the
-package's seven definitions — `controller, barbell, mug, lightbulb, chat, sprout, watering-can` — and
-holds no silhouette path of its own, so a package upgrade brings the package's shapes with it. Any
-other id renders `controller`: the shipped families before it (`orb`, `squircle`, `crest`, `horn`,
-`scallop`, …) and the traced Grok Bot set (`circle`, `cloud`, `square`, …) alike.
+Avatars are `open-bot-avatar`'s own objects, nothing of ours. `packages/avatars` exposes 14 of them:
+five starter avatars taken from the package with `getExample` (`mug`, `lightbulb`, `chat`, `sprout`,
+`watering-can`) and nine gallery avatars vendored as data (`bull`, `bunny`, `camera`, `cat`, `cloud`,
+`ghost`, `rocket`, `star`, `witch-hat`). No silhouette is copied into our source and we author none.
 
-- **Eyes, depth and ink are the package's.** Each definition carries its own eye placement; we pass
-  only colour, size, `motion: "idle"`, `time: 0` and `reducedMotion: true`, so the server and the
-  browser draw the same frame and nothing of ours overrides the package's geometry, depth (its
-  default 6) or `#151515` ink.
-- **Colour is ours.** The eleven palette ids and `deriveAccent()` are unchanged. The default colour
-  is `ember` (`#f9670e`), the palette's nearest entry to the package's starter orange `#ff6a1a`; the
-  contact sheet shows all seven in both.
+- **Ids, in order, are API**: `mug, lightbulb, chat, sprout, watering-can, bull, bunny, camera, cat,
+  cloud, ghost, rocket, star, witch-hat`. Any other id — an old family (`orb`, `crest`, …), the
+  traced Grok Bot set (`circle`, `star4`, …), a starter or gallery object we do not ship
+  (`controller`, `barbell`, `book`, `egg`, …) — renders `mug`, the first id.
+- **The gallery nine are vendored, the rest imported.** The package ships only its 7 starter avatars;
+  the gallery files live in the upstream repository and are not on npm. They are copied in unchanged
+  (MIT, Copyright (c) 2026 Dominik Scholz) with `gallery/NOTICE.md` recording provenance and how to
+  re-vendor.
+- **Eyes, depth and ink are the definition's.** Each definition carries its own eye placement; we pass
+  only colour, size, `motion: "idle"`, `time: 0` and `reducedMotion: true`, so nothing of ours
+  overrides the package's geometry, depth (its default 6) or `#151515` ink.
+- **Colour is ours.** The eleven palette ids and `deriveAccent()` are unchanged; the default colour is
+  `ember` (`#f9670e`), the palette's nearest entry to the package's starter orange `#ff6a1a`, and the
+  contact sheet shows all 14 in both.
 - **`open-bot-avatar` 0.2.1 → 0.3.0** (`pnpm-workspace.yaml` gains the version in
   `minimumReleaseAgeExclude`, since it shipped the day before). Same exports and same definition
   contract; 0.3.0 adds `state`/`mood` (ribbons for `working`, marks for `thinking` and `blocked`, a
-  celebration for `done`), OKLCH helpers and its own starter set. Rendering all seven starter avatars
-  at 64px with our options produces byte-identical SVG before and after: no geometry, eye or ink
-  change for a resting avatar. Nothing in this app asks for a state yet.
-- **The traced silhouettes are gone.** The Grok Bot trace, its levelled revision, the crest/horns
-  family and the abandoned soft set were all replaced by the package's set; no path data from any of
-  them is left in the repository.
+  celebration for `done`), OKLCH helpers and its starter set. Rendering all 14 at 64px with our
+  options produces byte-identical SVG before and after: no geometry, eye or ink change for a resting
+  avatar. Nothing in this app asks for a state yet.
+- **The traced silhouettes are gone**, along with the crest/horns family, the abandoned soft set and
+  the four shapes we briefly authored: no path data from any of them is left in the repository.
 
 ## Colour
 

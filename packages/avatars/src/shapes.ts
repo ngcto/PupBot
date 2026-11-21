@@ -1,29 +1,27 @@
-import { examples } from "open-bot-avatar";
-import { CUSTOM } from "./custom.ts";
+import { getExample } from "open-bot-avatar";
 import { GALLERY } from "./gallery/index.ts";
 import type { AvatarDefinition, AvatarShape } from "./types.ts";
 
 /**
- * The registry is `open-bot-avatar`'s avatar set plus four we author ourselves:
- * its 7 starter avatars imported from the package (so a package upgrade brings
- * their shapes), 9 gallery avatars vendored as data (see `gallery/NOTICE.md`),
- * and our own `circle`, `square`, `water-drop` and `heart` (see `custom.ts`).
- * No vendored or package silhouette is copied into this file.
+ * The registry is `open-bot-avatar`'s avatars, nothing of ours: five of its starter
+ * avatars taken straight from the package with `getExample`, and nine of its
+ * gallery avatars vendored as data (see `gallery/NOTICE.md`). No silhouette is
+ * copied into this file and we author none.
  *
- * Ids, in this order, are API:
- * `controller`, `barbell`, `mug`, `lightbulb`, `chat`, `sprout`, `watering-can`,
- * `bull`, `bunny`, `camera`, `cat`, `cloud`, `ghost`, `rocket`, `star`,
- * `witch-hat`, `circle`, `square`, `water-drop`, `heart`.
+ * Ids, in this order, are API: `mug`, `lightbulb`, `chat`, `sprout`,
+ * `watering-can`, then `bull`, `bunny`, `camera`, `cat`, `cloud`, `ghost`,
+ * `rocket`, `star`, `witch-hat`.
  *
  * A stored avatar naming anything else — a retired id from our earlier families,
- * the traced Grok Bot set, or a gallery avatar we cut — renders the first entry.
+ * the traced Grok Bot set, or a starter or gallery avatar we do not ship —
+ * renders `mug`.
  *
  * Eyes come with each definition and we do not override the geometry, the depth
  * or the ink.
  */
+const STARTER_IDS = ["mug", "lightbulb", "chat", "sprout", "watering-can"] as const;
+
 const NOTES: Record<string, string> = {
-  controller: "Front view, face above the grips",
-  barbell: "Side view, a bar with round plates",
   mug: "Side view, a cup with a handle loop",
   lightbulb: "Front view, a globe on a stepped base",
   chat: "Speech bubble with a tail",
@@ -38,13 +36,16 @@ const NOTES: Record<string, string> = {
   rocket: "A rocket with fins",
   star: "A five-pointed star",
   "witch-hat": "A pointed witch hat",
-  circle: "A true circle",
-  square: "A square with rounded edges",
-  "water-drop": "A drop with the eyes in the bowl",
-  heart: "A heart with a cleft",
 };
 
-const DEFINITIONS: readonly AvatarDefinition[] = [...examples, ...GALLERY, ...CUSTOM];
+const DEFINITIONS: readonly AvatarDefinition[] = [
+  ...STARTER_IDS.map((id) => {
+    const definition = getExample(id);
+    if (!definition) throw new Error(`open-bot-avatar no longer ships the ${id} starter avatar`);
+    return definition;
+  }),
+  ...GALLERY,
+];
 
 export const SHAPES: readonly AvatarShape[] = DEFINITIONS.map((definition) => ({
   id: definition.id,

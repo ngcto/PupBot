@@ -3,7 +3,7 @@ import { DEFAULT_COLOR as PACKAGE_COLOR } from "open-bot-avatar";
 import { COLORS, DEFAULT_COLOR, SHAPES, renderAvatarSvg } from "../src/index.ts";
 
 /**
- * Regenerates `contact-sheet.html`: all 20 avatars at 96px, the size ladder this
+ * Regenerates `contact-sheet.html`: all 14 avatars at 96px, the size ladder this
  * set has to survive (16 / 32 / 64 / 96 / 128 / 256), the palette on three of
  * them, and the package's own orange on all of them.
  */

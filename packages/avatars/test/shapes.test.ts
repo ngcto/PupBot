@@ -3,8 +3,6 @@ import { validateAvatar } from "open-bot-avatar";
 import { SHAPES, DEFAULT_SHAPE, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
 
 const CONTRACT_ORDER = [
-  "controller",
-  "barbell",
   "mug",
   "lightbulb",
   "chat",
@@ -19,10 +17,6 @@ const CONTRACT_ORDER = [
   "rocket",
   "star",
   "witch-hat",
-  "circle",
-  "square",
-  "water-drop",
-  "heart",
 ] as const;
 
 /** Ids this registry retired or never shipped; none of them may still resolve. */
@@ -54,23 +48,29 @@ const RETIRED = [
   "paint-brush",
   "palette",
   "shield",
+  "controller",
+  "barbell",
+  "circle",
+  "square",
+  "water-drop",
+  "heart",
 ] as const;
 
 describe("avatar registry", () => {
-  it("lists all 20 ids exactly once, in contract order", () => {
+  it("lists all 14 ids exactly once, in contract order", () => {
     expect(SHAPES.map((shape) => shape.id)).toEqual([...CONTRACT_ORDER]);
     expect(new Set(SHAPES.map((shape) => shape.id)).size).toBe(CONTRACT_ORDER.length);
   });
 
   it("keeps the lookup helpers consistent with the list", () => {
-    expect(DEFAULT_SHAPE).toBe("controller");
+    expect(DEFAULT_SHAPE).toBe("mug");
     for (const id of CONTRACT_ORDER) {
       expect(isShapeId(id)).toBe(true);
       expect(shapeById(id).definition).toBe(shapeDefinition(id));
       expect(shapeDefinition(id).id).toBe(id);
     }
     expect(isShapeId("bean")).toBe(false);
-    expect(shapeById("bean").id).toBe("controller");
+    expect(shapeById("bean").id).toBe("mug");
   });
 
   it.each(RETIRED)("falls back to the first id for the retired id %s", (id) => {
@@ -107,7 +107,7 @@ describe("avatar registry", () => {
   });
 
   it("leaves eye colour and depth to the package", () => {
-    const svg = renderAvatarSvg({ shape: "controller", color: "ember", size: 96 });
+    const svg = renderAvatarSvg({ shape: "mug", color: "ember", size: 96 });
     expect(svg).toContain('fill="#151515"');
     expect(svg).not.toContain("fill-opacity");
   });

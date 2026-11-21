@@ -144,7 +144,7 @@ async function seed() {
   const seeds = [
     {
       name: "Pup",
-      shape: "controller",
+      shape: "mug",
       color: "amber",
       accent: "#f69412",
       primary: true,
