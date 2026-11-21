@@ -124,10 +124,39 @@ export interface AllocateResult {
   reason?: string;
 }
 
+/**
+ * A capability a caller needs from the box it gets. Placement reads
+ * `ComputerProvider.capabilities` and refuses an account whose provider cannot
+ * deliver it, instead of provisioning a box that will throw the moment the
+ * feature is used.
+ *
+ * `screenshot` is the one that matters today: a provider with no PNG of the
+ * screen is not the same product as one that has it, and a bot that needs to
+ * look at its screen must not be given a box that cannot show one.
+ */
+export type RequiredCapability = "exec" | "files" | "screenshot";
+
+export interface AllocateOptions {
+  /**
+   * Capabilities the box must have. Absent or empty means "any box", which is
+   * what every current caller wants: the harness has no screen tool yet, so
+   * nothing asks for `screenshot`. The requirement exists so that the day one
+   * is added, placement already knows how to honour it rather than silently
+   * handing out a box that cannot do the job.
+   */
+  requires?: readonly RequiredCapability[];
+}
+
 export interface EnsureReadyOptions {
   /** Reuse a lease id; absent, the allocator mints one per run. */
   leaseId?: string;
   timeoutMs?: number;
+  /**
+   * Capabilities this run needs. Checked against a box the bot already has, so
+   * a bot whose computer was connected before the requirement existed fails
+   * with a reason naming the gap rather than at the first screenshot call.
+   */
+  requires?: readonly RequiredCapability[];
 }
 
 export interface EnsureReadyResult {
