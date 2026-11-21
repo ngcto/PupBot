@@ -42,6 +42,10 @@ this machine on 2026-11-21, and the command or script is reproducible from the n
    permission checks (our `abort_requested` poll), and honest result reporting (our CUA
    `effect` field). §6 is about paying for those.
 5. Proposed architecture is in §7 and the interface TERA-74 needs to code against is in §7.4.
+6. **What it cannot do is a section, not a footnote.** §6.6 lists, checked against the code on this
+   branch, the capabilities the surface lacks today: no data tools at all, no `fetch`, no timers
+   (so no polling), no `console`, no images we can price, no `Intl`, no `structuredClone`. §6.6 is
+   the first thing to read before assuming a task is attemptable.
 
 ---
 
@@ -513,6 +517,56 @@ Code mode is not free. From Claude Code's own limitations list plus our shape:
    each is 10 s of turns in the old shape. But it means our code-mode path must be the supported
    path for computer tasks, not a variant.
 
+## 6.6 What the harness cannot do today
+
+A tool surface this small will hit a task that needs something we do not expose. This is the
+list, written before the benchmark so the first person to find a gap reads it here instead of
+discovering it in production. Every item below was checked against the code on this branch, not
+recalled.
+
+**No data tools at all.** There is no table, spreadsheet, database, file or search tool in the
+26-entry index. The surface is computer use and browsers only: 26 entries, of which 10 are
+`act`, 6 are `observe`, 8 are `browser`, and 2 are `challenge` (counted from `index.json`, not
+recalled — my first pass at this sentence had 11/7/6 and was wrong). So a task whose answer lives in a
+sheet or a database row is not attemptable in any arm — which is exactly why benchmark task 5 has
+to be replaced rather than substituted. The capability is not degraded; it is absent.
+
+**No network client.** `fetch` is `undefined` inside the program. An in-program call is the
+program's only route to the outside world, so a model cannot reach a URL the host has not wrapped
+as a tool. That is the sandbox working as designed, but it means "fetch this page and parse it" is
+two capabilities away, not one.
+
+**No timers, so no polling and no waiting.** `setTimeout` and `setInterval` are `undefined`;
+`queueMicrotask` exists. A program cannot sleep, retry on a delay, or wait for something to
+settle. It must act once and return, or call a tool the host already made wait internally
+(`runSteps` is the designed answer for that). A model will reach for `setTimeout` and get
+`undefined is not a function`; the failure message names it, but the shape of the tool is what has
+to teach it not to try.
+
+**No console, and the output channel is the only feedback.** `console` is `undefined`. `text()` is
+the only way to emit mid-program, and a program that prints nothing reports "printed nothing
+rather than failing silently" — which is honest but is not `console.log` as a model knows it.
+
+**No images.** `screenshot` returns an image, and the token-counting endpoint on this machine
+accepts image blocks without forwarding their pixels, so an image's cost cannot be priced here.
+Its own `resultNote` says an image is thousands of tokens and to read the tree first. So a program
+can *request* a screenshot but we cannot say what it costs until it is measured on a real
+endpoint. That limitation belongs to the measurement, not the harness, and it is the one row in
+the cost table that stays empty.
+
+**No `Intl`, no `structuredClone`.** `Intl` is `undefined`, so locale-aware date and number
+formatting has to happen in a tool or not at all. `structuredClone` is `undefined`, so deep-copying
+a result in-program needs `JSON.parse(JSON.stringify(x))` — present, stable, and slower.
+
+**What does work, verified:** `Date` and `Date.now`, `JSON`, `RegExp`, `BigInt`, floating-point
+in doubles (`0.1 + 0.2` is `0.30000000000000004`, same as Node), a stable `Array.prototype.sort`,
+and `Promise.all` over concurrent tool calls — two parallel calls returned in 8 ms of sandbox time
+where two sequential ones would have paid each tool's latency twice.
+
+**Not a gap, and worth saying plainly:** a failed program still reports what its calls did, so a
+stall after three successful clicks tells the model those three landed. And an unoffered tool is
+refused at the dispatcher with the reason, rather than arriving as `undefined is not a function`.
+
 ---
 
 ## 7. Proposed architecture
@@ -894,24 +948,28 @@ with the implementation, not before it.
 
 ---
 
-## 8. Questions for the Captain (1–2 decided 2026-11-21; 3 open)
+## 8. Questions for the Captain (1–2 decided 2026-11-21; 3 open; 2 delegated to measurement)
 
 1. **Two placements or one? — DECIDED: two, box second, not built until in-process is measured.** I propose the VM in our process by default and on the box for
    computer-heavy runs (§Q2). One placement is simpler; two is ~50× faster on tool latency for
    the case that matters most and safer on escape. The cost is a runner on the box and a
    transport abstraction. **I recommend two, with the box placement built second** so we can
    ship the loop with one placement and measure the difference.
-2. **The index inline or fetched? — REOPENED by measurement.** Inline as shipped is **1,877**;
-   instructions-only, with the index fetched by `searchTools` inside the program, is **146**. That
-   is a 1,731-token saving for one in-program call, which is nearly free because it runs in the
-   sandbox rather than as a model turn. The earlier "inline" call was made against 1,232, where
-   the trade was clear. At 1,877 against 146 it is a different trade and I am not re-deciding it
-   on the Captain's behalf. Cloudflare's codemode passes the whole API as TypeScript in the tool
-   description, which is the same bet at a larger size.
+2. **The index inline or fetched? — DELEGATED to arm C, inline until it reports.** The Captain's
+   call: keep 1,877 until the benchmark says a model can phrase a useful query for a tool it was
+   never told exists. The reasoning is recorded so the result is judged against it — if arm C
+   queries badly, 146 is a fake saving and inline stays with a number proving it.
 
-   What decides it is whether a model can phrase a useful `searchTools` query for a tool it has
-   not been told exists. That is a behavioural question the three-arm benchmark can answer and
-   arithmetic cannot, so it should not be settled before arm C runs.
+   The arithmetic behind it: inline as shipped is **1,877**; instructions-only, with the index
+   fetched by `searchTools` inside the program, is **146** — a 1,731-token saving for one
+   in-program call, which is nearly free because it runs in the sandbox rather than as a model
+   turn. The earlier "inline" call was made against 1,232, where the trade was clear. The reason
+   given for it then — a discovery round trip replays the prefix and costs a turn — does not apply
+   to an in-program call, which has neither cost. Cloudflare's codemode passes the whole API as
+   TypeScript in the tool description, which is the same bet at a larger size.
+
+   What settles it is behavioural, which is why it moved from arithmetic to arm C: can a model
+   phrase a useful query for a capability it was never told exists?
 3. **Native tool calling for simple tools, alongside code mode?** Anthropic and pi both keep
    the plain tool path usable. I propose **code mode only** for the model-facing surface and
    native calling only as a fallback for endpoints whose function-calling is unreliable, since
