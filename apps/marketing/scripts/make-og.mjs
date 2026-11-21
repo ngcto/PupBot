@@ -2,7 +2,7 @@
  * Renders the 1200x630 share cards into public/og.
  *
  * Run after a build so the Inter subset next/font fetched is on disk:
- *   pnpm --filter @pupbot/marketing build
+ *   pnpm --filter @terabot/marketing build
  *   node apps/marketing/scripts/make-og.mjs
  * The cards are checked in, so this only runs when the copy or the brand moves.
  */

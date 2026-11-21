@@ -7,7 +7,7 @@ import {
   PlayIcon,
   VoiceIcon,
 } from "@hugeicons/core-free-icons";
-import { Avatar } from "@pupbot/avatars/react";
+import { Avatar } from "@terabot/avatars/react";
 import {
   CollapsiblePanel,
   CollapsibleRoot,
@@ -17,7 +17,7 @@ import {
   TabsRoot,
   TabsTab,
   toast,
-} from "@pupbot/ui";
+} from "@terabot/ui";
 import { useState } from "react";
 import type { BotView } from "../lib/types.ts";
 

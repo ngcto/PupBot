@@ -1,4 +1,4 @@
-import { serverEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { schema } from "./schema.ts";

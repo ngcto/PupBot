@@ -1,5 +1,5 @@
-import { isStubProviderEnabled, serverEnv } from "@pupbot/config";
-import { computerAccount, database, encryptSecret, newId } from "@pupbot/db";
+import { isStubProviderEnabled, serverEnv } from "@terabot/config";
+import { computerAccount, database, encryptSecret, newId } from "@terabot/db";
 import { and, eq } from "drizzle-orm";
 
 /**

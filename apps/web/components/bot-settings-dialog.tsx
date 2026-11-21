@@ -1,7 +1,7 @@
 "use client";
 
-import { COLORS, type AvatarColorId, type AvatarShapeId } from "@pupbot/avatars";
-import { Avatar } from "@pupbot/avatars/react";
+import { COLORS, type AvatarColorId, type AvatarShapeId } from "@terabot/avatars";
+import { Avatar } from "@terabot/avatars/react";
 import {
   Button,
   DialogClose,
@@ -13,7 +13,7 @@ import {
   Textarea,
   cn,
   toast,
-} from "@pupbot/ui";
+} from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { addModelEndpoint, deleteBot, giveComputer, setBotFlags, updateBotSettings } from "../app/actions.ts";

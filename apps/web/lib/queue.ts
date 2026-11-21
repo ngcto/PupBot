@@ -1,4 +1,4 @@
-import { COMPUTER_PROVISION_QUEUE, createBoss } from "@pupbot/db";
+import { COMPUTER_PROVISION_QUEUE, createBoss } from "@terabot/db";
 import type { PgBoss } from "pg-boss";
 
 let bossPromise: Promise<PgBoss> | undefined;

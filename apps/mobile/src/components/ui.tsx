@@ -1,4 +1,4 @@
-import type { StatusTone } from "@pupbot/api-client";
+import type { StatusTone } from "@terabot/api-client";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import {

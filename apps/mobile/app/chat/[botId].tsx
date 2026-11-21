@@ -1,5 +1,5 @@
-import { blockReason, botStatusLine } from "@pupbot/api-client";
-import type { ChatMessage } from "@pupbot/api-client";
+import { blockReason, botStatusLine } from "@terabot/api-client";
+import type { ChatMessage } from "@terabot/api-client";
 import { ArrowLeft01Icon, ArrowUp02Icon, ChevronRightIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";

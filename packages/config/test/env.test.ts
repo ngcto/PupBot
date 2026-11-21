@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resetEnvCache, serverEnv } from "../src/env.ts";
 
 const base = {
-  DATABASE_URL: "postgres://pupbot:pupbot@localhost:5432/pupbot",
+  DATABASE_URL: "postgres://terabot:terabot@localhost:5432/terabot",
   BETTER_AUTH_SECRET: "x".repeat(40),
 };
 

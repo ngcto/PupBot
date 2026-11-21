@@ -8,8 +8,8 @@ import {
   run,
   RUN_QUEUE,
   startBoss,
-} from "@pupbot/db";
-import type { MessagePart } from "@pupbot/db";
+} from "@terabot/db";
+import type { MessagePart } from "@terabot/db";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";

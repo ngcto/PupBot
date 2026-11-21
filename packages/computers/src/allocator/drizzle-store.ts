@@ -6,8 +6,8 @@ import {
   computerLease,
   database,
   newId,
-} from "@pupbot/db";
-import type { Database } from "@pupbot/db";
+} from "@terabot/db";
+import type { Database } from "@terabot/db";
 import { and, eq, isNull, lt } from "drizzle-orm";
 import type {
   AccountPatch,

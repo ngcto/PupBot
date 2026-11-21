@@ -13,7 +13,7 @@
  *
  * On a headless Linux box run it under a virtual display:
  *   xvfb-run -a node scripts/smoke.mjs --url http://localhost:3000 \
- *     --sign-in demo@pupbot.dev:pupbot-demo --out .smoke/shell.png
+ *     --sign-in demo@terabot.dev:terabot-demo --out .smoke/shell.png
  */
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, stat } from "node:fs/promises";

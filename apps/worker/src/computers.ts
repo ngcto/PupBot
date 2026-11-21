@@ -1,5 +1,5 @@
-import type { RunComputer } from "@pupbot/agent";
-import { ComputerAllocator, DrizzleComputerStore, createProviderFactory } from "@pupbot/computers";
+import type { RunComputer } from "@terabot/agent";
+import { ComputerAllocator, DrizzleComputerStore, createProviderFactory } from "@terabot/computers";
 
 /**
  * The worker owns the allocator: the run path wakes a bot's computer here, and

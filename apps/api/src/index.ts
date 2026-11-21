@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
-import { serverEnv } from "@pupbot/config";
-import { loadEnv } from "@pupbot/config/load-env";
-import { closeDatabase } from "@pupbot/db";
+import { serverEnv } from "@terabot/config";
+import { loadEnv } from "@terabot/config/load-env";
+import { closeDatabase } from "@terabot/db";
 import { createApp } from "./app.ts";
 
 loadEnv();
@@ -10,7 +10,7 @@ const app = createApp();
 const port = serverEnv().API_PORT;
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`pupbot api listening on http://localhost:${info.port}`);
+  console.log(`terabot api listening on http://localhost:${info.port}`);
 });
 
 const shutdown = async () => {

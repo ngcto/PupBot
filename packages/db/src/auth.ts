@@ -1,4 +1,4 @@
-import { serverEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { database } from "./client.ts";
@@ -10,7 +10,7 @@ export type Auth = ReturnType<typeof createAuth>;
 export function createAuth() {
   const env = serverEnv();
   return betterAuth({
-    appName: "PupBot",
+    appName: "Terabot",
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     trustedOrigins: [env.BETTER_AUTH_URL, env.API_URL],
@@ -30,7 +30,7 @@ export function createAuth() {
     },
     advanced: {
       database: { generateId: () => newId() },
-      cookiePrefix: "pupbot",
+      cookiePrefix: "terabot",
     },
   });
 }

@@ -1,8 +1,8 @@
-import { executeRun } from "@pupbot/agent";
-import { loadEnv } from "@pupbot/config/load-env";
-import { RUN_QUEUE, closeDatabase, database, startBoss } from "@pupbot/db";
-import type { RunJobData } from "@pupbot/db";
-import { createGateway } from "@pupbot/providers";
+import { executeRun } from "@terabot/agent";
+import { loadEnv } from "@terabot/config/load-env";
+import { RUN_QUEUE, closeDatabase, database, startBoss } from "@terabot/db";
+import type { RunJobData } from "@terabot/db";
+import { createGateway } from "@terabot/providers";
 import { createComputers } from "./computers.ts";
 import { registerCatalogJobs } from "./jobs/catalog.ts";
 import { registerComputerJobs } from "./jobs/computers.ts";
@@ -37,7 +37,7 @@ await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
 
 await registerCatalogJobs(boss);
 await registerComputerJobs(boss, allocator);
-console.log("pupbot worker listening for runs");
+console.log("terabot worker listening for runs");
 
 // Adopt what the last process left behind, without holding up the queue.
 void allocator

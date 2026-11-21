@@ -1,4 +1,4 @@
-import { database, syncModelCatalog } from "@pupbot/db";
+import { database, syncModelCatalog } from "@terabot/db";
 import type { PgBoss } from "pg-boss";
 
 export const CATALOG_SYNC_QUEUE = "models-dev-sync";

@@ -1,8 +1,8 @@
 "use client";
 
-import { COLORS, type AvatarColorId, type AvatarShapeId, SHAPES } from "@pupbot/avatars";
-import { Avatar } from "@pupbot/avatars/react";
-import { Button, DialogClose, DialogContent, DialogRoot, DialogTitle, Input, cn } from "@pupbot/ui";
+import { COLORS, type AvatarColorId, type AvatarShapeId, SHAPES } from "@terabot/avatars";
+import { Avatar } from "@terabot/avatars/react";
+import { Button, DialogClose, DialogContent, DialogRoot, DialogTitle, Input, cn } from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createBot } from "../app/actions.ts";

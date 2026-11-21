@@ -1,4 +1,4 @@
-import { loadEnv } from "@pupbot/config/load-env";
+import { loadEnv } from "@terabot/config/load-env";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";

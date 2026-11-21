@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { loadEnv } from "@pupbot/config/load-env";
+import { loadEnv } from "@terabot/config/load-env";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDatabase } from "./client.ts";
 

@@ -7,8 +7,8 @@ import {
   setError,
   startRun,
   withHistory,
-} from "@pupbot/api-client";
-import type { BotDetail, ChatMessage, ChatState } from "@pupbot/api-client";
+} from "@terabot/api-client";
+import type { BotDetail, ChatMessage, ChatState } from "@terabot/api-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api.ts";
 
@@ -18,7 +18,7 @@ function isAbort(error: unknown): boolean {
 
 /**
  * One bot's conversation: history, a streamed reply, and an interrupt when a new
- * message is sent mid-answer. The state machine is `@pupbot/api-client`'s reducer;
+ * message is sent mid-answer. The state machine is `@terabot/api-client`'s reducer;
  * this hook only owns side effects (fetch, abort, refetch).
  */
 export function useChat(botId: string) {

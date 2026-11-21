@@ -9,7 +9,7 @@ allowBuilds:
   electron-winstaller: false
 
 overrides:
-  '@pupbot/avatars>react': 19.3.0
+  '@terabot/avatars>react': 19.3.0
 
 minimumReleaseAgeExclude:
   - "@better-auth/core@1.7.27"

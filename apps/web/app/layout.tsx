@@ -1,4 +1,4 @@
-import { Toaster } from "@pupbot/ui";
+import { Toaster } from "@terabot/ui";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "PupBot",
+  title: "Terabot",
   description: "Bots with cloud computers, in a chat window.",
 };
 

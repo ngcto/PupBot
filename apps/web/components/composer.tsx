@@ -8,8 +8,8 @@ import {
   ArrowUp02Icon,
   VoiceIcon,
 } from "@hugeicons/core-free-icons";
-import { Avatar } from "@pupbot/avatars/react";
-import { Button, MenuItem, MenuPopup, MenuRoot, MenuTrigger, Tooltip, cn, toast } from "@pupbot/ui";
+import { Avatar } from "@terabot/avatars/react";
+import { Button, MenuItem, MenuPopup, MenuRoot, MenuTrigger, Tooltip, cn, toast } from "@terabot/ui";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import type { BotView } from "../lib/types.ts";
@@ -23,7 +23,7 @@ interface ComposerProps {
   pending?: boolean;
 }
 
-const DRAFT_PREFIX = "pupbot:draft:";
+const DRAFT_PREFIX = "terabot:draft:";
 
 export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pending }: ComposerProps) {
   const [value, setValue] = useState("");

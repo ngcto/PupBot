@@ -2,7 +2,7 @@
 
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Settings01Icon, UserAdd01Icon, Logout01Icon } from "@hugeicons/core-free-icons";
-import { MenuItem, MenuPopup, MenuRoot, MenuSeparator, MenuTrigger } from "@pupbot/ui";
+import { MenuItem, MenuPopup, MenuRoot, MenuSeparator, MenuTrigger } from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import type { ReactElement } from "react";
 import { authClient } from "../lib/auth-client.ts";

@@ -1,5 +1,5 @@
 {
-  "name": "@pupbot/db",
+  "name": "@terabot/db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
-    "@pupbot/config": "workspace:*",
+    "@terabot/config": "workspace:*",
     "better-auth": "^1.7.27",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.16.3",

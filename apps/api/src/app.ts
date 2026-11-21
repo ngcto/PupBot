@@ -1,5 +1,5 @@
-import { serverEnv } from "@pupbot/config";
-import { auth as betterAuth } from "@pupbot/db";
+import { serverEnv } from "@terabot/config";
+import { auth as betterAuth } from "@terabot/db";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -29,7 +29,7 @@ export function createApp(options: AppOptions = {}) {
     }),
   );
 
-  app.get("/health", (c) => c.json({ ok: true, service: "pupbot-api" }));
+  app.get("/health", (c) => c.json({ ok: true, service: "terabot-api" }));
 
   // The same better-auth handler the web app mounts, so the API is a complete
   // surface for non-browser clients (and for tests) on one cookie.
