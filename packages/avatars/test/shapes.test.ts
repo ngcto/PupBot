@@ -106,14 +106,14 @@ describe("avatar registry", () => {
     }
   });
 
-  it("tilts every glyph once, about the middle of the frame", () => {
+  it("leans every glyph once, counter-clockwise, about the middle of the frame", () => {
     for (const id of CONTRACT_ORDER) {
       const svg = renderAvatarSvg({ shape: id, color: "sky", size: 64 });
       const tilts = svg.match(/rotate\(/g) ?? [];
       expect(tilts, id).toHaveLength(1);
       expect(svg).toContain(`<g transform="rotate(${GLYPH_TILT_DEG} 50 50)">`);
     }
-    expect(GLYPH_TILT_DEG).toBe(12);
+    expect(GLYPH_TILT_DEG).toBe(-12);
   });
 
   it("leaves eye colour and depth to the package", () => {
