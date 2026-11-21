@@ -74,19 +74,26 @@ const assetNames = {
  */
 export const assetNamesForTest = assetNames;
 
-/** A platform is only a link when its file was really uploaded for this version. */
-function published(
+/**
+ * Derive the button for one platform from a version and the assets a release
+ * really carries. Pure so the tests can feed it a full release, a partial one,
+ * and the empty state instead of only ever seeing whatever is checked in — a
+ * suite that only runs against `version: null` passes no matter what this does.
+ */
+function entryFor(
+  version: string | null,
+  assets: readonly string[],
   platform: keyof typeof assetNames,
   note: (version: string) => string,
 ): { url: string | null; note: string | null } {
-  if (publishedVersion === null) return { url: null, note: null };
-  const asset = assetNames[platform](publishedVersion);
-  if (!publishedAssets.includes(asset)) return { url: null, note: null };
-  return { url: releaseAssetUrl(publishedVersion, asset), note: note(publishedVersion) };
+  if (version === null) return { url: null, note: null };
+  const asset = assetNames[platform](version);
+  if (!assets.includes(asset)) return { url: null, note: null };
+  return { url: releaseAssetUrl(version, asset), note: note(version) };
 }
 
 /**
- * The builds that exist right now.
+ * The builds that exist for a given release.
  *
  * `macos` and `ios` are always `null` because producing them needs a paid
  * service: a macOS runner plus an Apple Developer certificate to sign and
@@ -97,28 +104,33 @@ function published(
  * debug-signed. Both notes say so, because a download that surprises someone is
  * worse than one that explains itself.
  */
-export const releases: readonly Release[] = [
-  { id: "macos", kind: "desktop", name: "macOS", url: null, note: null },
-  {
-    id: "windows",
-    kind: "desktop",
-    name: "Windows",
-    ...published("windows", (version) => `${version} · 64-bit installer · unsigned`),
-  },
-  {
-    id: "linux",
-    kind: "desktop",
-    name: "Linux",
-    ...published("linux", (version) => `${version} · portable AppImage · x64`),
-  },
-  { id: "ios", kind: "mobile", name: "iPhone and iPad", url: null, note: null },
-  {
-    id: "android",
-    kind: "mobile",
-    name: "Android",
-    ...published("android", (version) => `${version} · APK · test build, debug-signed`),
-  },
-];
+export function releasesFor(version: string | null, assets: readonly string[]): readonly Release[] {
+  return [
+    { id: "macos", kind: "desktop", name: "macOS", url: null, note: null },
+    {
+      id: "windows",
+      kind: "desktop",
+      name: "Windows",
+      ...entryFor(version, assets, "windows", (v) => `${v} · 64-bit installer · unsigned`),
+    },
+    {
+      id: "linux",
+      kind: "desktop",
+      name: "Linux",
+      ...entryFor(version, assets, "linux", (v) => `${v} · portable AppImage · x64`),
+    },
+    { id: "ios", kind: "mobile", name: "iPhone and iPad", url: null, note: null },
+    {
+      id: "android",
+      kind: "mobile",
+      name: "Android",
+      ...entryFor(version, assets, "android", (v) => `${v} · APK · test build, debug-signed`),
+    },
+  ];
+}
+
+/** The builds that exist right now, from the committed released.version.json. */
+export const releases: readonly Release[] = releasesFor(publishedVersion, publishedAssets);
 
 export type ReleaseAction = { readonly state: "available"; readonly href: string } | { readonly state: "coming-soon" };
 

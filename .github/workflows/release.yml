@@ -57,8 +57,13 @@ jobs:
       app-configured: ${{ steps.targets.outputs.app-configured }}
       api-configured: ${{ steps.targets.outputs.api-configured }}
       api-url: ${{ steps.targets.outputs.api-url }}
+      sha: ${{ steps.v.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Resolving `v1.2.3^{commit}` needs the tag ref, which the default
+          # depth-1 fetch of a branch does not include.
+          fetch-depth: 0
 
       - id: v
         name: Resolve the version
@@ -78,14 +83,31 @@ jobs:
             || { echo "::error::'$version' is not a semver 2.0 version"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          # A version with a suffix (0.2.0-rc.1) is a prerelease.
-          if printf '%s' "$version" | grep -q -- '-'; then
+          # Only a hyphen BEFORE any +build metadata marks a prerelease.
+          # `1.2.3+build-5` is a stable release whose metadata happens to contain
+          # a hyphen; matching on the whole string marked it prerelease.
+          core="${version%%+*}"
+          if printf '%s' "$core" | grep -q -- '-'; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "::notice::'$version' is a prerelease; every artifact name carries that suffix."
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "Releasing $tag" | tee -a "$GITHUB_STEP_SUMMARY"
+          # A manual run builds whatever ref it was dispatched on, which for an
+          # existing version would replace that release's installers with binaries
+          # from a different commit while the tag still points at the old one.
+          # Resolve the tag once and build that commit everywhere.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            sha="${{ github.sha }}"
+          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            sha="$(git rev-parse "$tag^{commit}")"
+            echo "::notice::$tag already exists; building its commit $sha, not the dispatched branch."
+          else
+            sha="${{ github.sha }}"
+            echo "::notice::$tag does not exist yet; building the dispatched commit $sha."
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag from \`${sha:0:7}\`" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Same rule as CI: the repo declares its Node major, this file never does.
       # The two shipped clients need a reachable origin to be more than a preview.
@@ -142,6 +164,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -191,6 +216,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -250,6 +278,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -291,6 +322,31 @@ jobs:
             echo "No API origin configured; the APK keeps its localhost default." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
+      # `app.json` ships 1.0.0 with no versionCode, so every tagged APK would
+      # install as the same app version and the same build number. Derive both
+      # from the tag before prebuild reads them.
+      - name: Align the mobile version with the tag
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # versionCode is a positive 32-bit integer that must increase as the
+          # version rises. Packing the semver core does that and fits in 32 bits:
+          # 0.1.0 -> 1000, 1.2.3 -> 1002003. A prerelease shares the code of the
+          # stable it is a candidate for (0.1.0-rc.1 and 0.1.0 are both 1000), so
+          # installing one replaces the other instead of stacking two builds of
+          # the same version on the device.
+          code="$(printf '%s' "$VERSION" | awk -F'[.+-]' '{printf "%d", $1*1000000 + $2*1000 + $3}')"
+          CODE="$code" node -e '
+            const fs = require("node:fs");
+            const path = "apps/mobile/app.json";
+            const config = JSON.parse(fs.readFileSync(path, "utf8"));
+            config.expo.version = process.env.VERSION;
+            config.expo.android = { ...config.expo.android, versionCode: Number(process.env.CODE) };
+            fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+          '
+          echo "Mobile version $VERSION, versionCode $code" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Generate the native project
         working-directory: apps/mobile
         run: pnpm exec expo prebuild --platform android --no-install
@@ -331,6 +387,11 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   publish:
     name: publish
+    # `!cancelled()` rather than the default: one failed platform must not throw
+    # away the installers the other two built. The Collect step then requires at
+    # least one asset, and the stamped asset list names only what actually
+    # uploaded, so a platform that failed keeps its "Coming soon" button.
+    if: ${{ !cancelled() && needs.meta.result == 'success' }}
     needs: [meta, linux, win, android]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -342,14 +403,22 @@ jobs:
       # The stamp step below runs a repo script, so this job needs the tree, not
       # only the downloaded artifacts.
       - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ needs.meta.outputs.node-version }}
 
+      # A failed platform's artifact is simply absent; `download-artifact` fails
+      # on that by default, which would undo the point of tolerating the failure.
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: "*"
+          merge-multiple: true
+        continue-on-error: true
 
       - name: Collect the assets
         run: |
@@ -357,8 +426,9 @@ jobs:
           mkdir -p assets
           find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.apk' -o -name 'latest*.yml' \) -exec cp {} assets/ \;
           ls -lh assets/ | tee -a "$GITHUB_STEP_SUMMARY"
-          count="$(find assets -type f | wc -l)"
-          [ "$count" -ge 3 ] || { echo "::error::expected at least three assets, found $count"; exit 1; }
+          count="$(find assets -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.apk' \) | wc -l)"
+          [ "$count" -ge 1 ] || { echo "::error::no installers came through; every platform failed"; exit 1; }
+          echo "**$count installer(s) from this run**" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Write the release notes
         env:
@@ -440,12 +510,13 @@ jobs:
           TAG: ${{ needs.meta.outputs.tag }}
           VERSION: ${{ needs.meta.outputs.version }}
           PRERELEASE: ${{ needs.meta.outputs.is-prerelease }}
+          SHA: ${{ needs.meta.outputs.sha }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Terabot $VERSION" --notes-file notes.md
           else
-            args=(--title "Terabot $VERSION" --notes-file notes.md --target "$GITHUB_SHA")
+            args=(--title "Terabot $VERSION" --notes-file notes.md --target "$SHA")
             [ "$PRERELEASE" = "true" ] && args+=(--prerelease)
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${args[@]}"
           fi
@@ -465,20 +536,38 @@ jobs:
           node scripts/stamp-release-version.mjs "$VERSION" "$names"
 
       # Committing is a human's job — a release must not push to a protected
-      # branch — so the diff and the exact command are printed instead.
-      - name: Show the file to commit
+      # branch — so a patch that reproduces these edits is published, not just a
+      # `git add`. The stamped files exist only on this runner; telling someone to
+      # add files they do not have would leave the site unchanged.
+      - name: Publish the patch that updates the site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          git --no-pager diff -- apps/marketing/released.version.json apps/desktop/package.json || true
+          set -euo pipefail
+          git --no-pager diff -- apps/marketing/released.version.json apps/desktop/package.json > release-site.patch || true
           {
             echo "### Next step"
             echo ""
-            echo "Commit the stamped file to publish these links on the site:"
+            echo "The stamped files live only on this runner. Apply the change in your checkout:"
             echo ""
             echo '```'
+            echo "gh run download ${{ github.run_id }} --repo $GITHUB_REPOSITORY -n release-site-patch"
+            echo "git apply release-site.patch"
             echo "git add apps/marketing/released.version.json apps/desktop/package.json"
-            echo "git commit -m \"chore(release): publish ${{ needs.meta.outputs.version }} download links\""
+            echo "git commit -m \"chore(release): publish $VERSION download links\""
             echo '```'
+            echo ""
+            echo "The patch is attached to this run as \`release-site-patch\`."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-site-patch
+          path: release-site.patch
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Print the download URLs
         env:
