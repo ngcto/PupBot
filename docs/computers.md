@@ -152,3 +152,27 @@ Deterministic, lowest rank first:
 
 Random ordering would make "the second provider was used" untestable and make two
 identical accounts behave differently between runs.
+
+## Running the live proofs
+
+The tests that spend a real box are gated behind `INSTABOX_LIVE=1` and never run in the
+default suite:
+
+```
+INSTABOX_LIVE=1 npx vitest run --root packages/computers test/live-lifecycle.test.ts
+INSTABOX_LIVE=1 npx vitest run --root packages/computers test/live-destroy.test.ts
+INSTABOX_LIVE=1 npx vitest run --root apps/api test/computer-db.test.ts
+```
+
+**Instabox's free plan allows three box starts per minute.** Run two live proofs back to back
+and the second can be rate-limited, which makes `provision` fail with `code=rate_limited` —
+and then the allocator does the correct thing and falls through to the next eligible provider.
+That fall-through is a feature, and it makes a live test that asserts on the account it named
+look broken: the box it finds is on some other account, and the assertion fails with a count
+rather than a cause. So a live test asserts **the row's account first, then the box count**, and
+a re-run a minute later is clean.
+
+The same distinction matters when reading a failure by hand: `rate_limited` on a live run is the
+plan's limit, not the allocator refusing the work. Every live test destroys what it made in its
+own `finally`, whatever the assertions did, and diffs the provider's inventory against what was
+there before the run rather than assuming the account was empty.

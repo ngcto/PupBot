@@ -38,6 +38,40 @@ packages that declare a `lint` script, so `scripts/check-lint-coverage.mjs` fail
 ships source without one — and also when it cannot read a package at all. A coverage gate that
 quietly covers nothing is the hole it exists to close.
 
+## A stacked PR shows `CONFLICTING` and runs no CI, and it is usually neither
+
+`pull_request` workflows only start once GitHub can build a merge ref. A PR it considers
+unmergeable has no merge ref, so **no workflow runs at all** — the board is empty rather than red,
+which reads as "nobody has looked yet" when the truth is "GitHub never tried".
+
+Two things conspire, and both are artefacts of the stack rather than the code:
+
+- **A squash-merge breaks the stack's ability to find the next base.** After the bottom layer
+  lands as a squash, `gh stack sync` says `could not determine the previous base of <branch> after
+  main changed; rebase this branch manually` and stops. The stack metadata keeps pointing at the
+  pre-squash tree.
+- **A PR based on a non-default branch** only ever gets `pull_request` runs. A dirty PR based on
+  another PR therefore has no other trigger to fall back on.
+
+What to check, in this order, before believing the conflict:
+
+```
+git merge-tree $(git merge-base origin/<base> origin/<head>) origin/<base> origin/<head> | grep -c '<<<<<<<'
+gh run list --commit <head-sha> --limit 5
+```
+
+Zero conflict markers and zero runs means the code is fine and only the stack is stale. Replay it
+by hand onto what actually landed, rather than waiting for the stack to catch up:
+
+```
+git rebase --onto origin/main <old-base-head>          # for the layer above a squash
+git push --force-with-lease=<branch>:<old-remote-sha> origin <branch>
+```
+
+Then confirm the PR's diff against its base is only its own layer's files. When the layer above
+merges, its own PR retargets to `main` on its own and lands as a correct replay — but only if the
+stack metadata was refreshed by that push first.
+
 ## The release pipeline
 
 `release.yml` is a different workflow with different rules. It runs on a `v*` tag, or by hand
