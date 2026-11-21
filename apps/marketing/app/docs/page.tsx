@@ -94,12 +94,13 @@ export default function DocsPage() {
             <p>
               Provisioning goes through an allocator over a provider interface, with Instabox as the provider. It
               creates a machine on request, sleeps it when it goes idle, renews its lease and starts it again when work
-              needs it; a failed wake replaces the box rather than leaving a dead one bound to the bot.
+              needs it. A wake that times out, or one that finds the box gone, replaces it; a credential or quota
+              failure keeps the box bound and blocks the bot with the reason.
             </p>
             <p>
               Running commands on that machine from a chat is not wired yet: the harness in this build sends your
               message to the model and streams the reply, and tool calling is what comes next. The computer is real and
-              awake; it is not yet taking orders.
+              the rail shows whether it is awake or asleep; it is not yet taking orders.
             </p>
           </div>
         </section>
