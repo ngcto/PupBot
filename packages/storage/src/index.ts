@@ -5,6 +5,9 @@ import { createS3Store } from "./s3.ts";
 
 export type AttachmentDriver = "s3" | "postgres";
 
+/** The key names a backend this deployment no longer has credentials for. */
+export class StorageBackendUnavailable extends Error {}
+
 /** Attachments are opaque bytes at a key; the row keeps name, size and mime. */
 export interface AttachmentStore {
   readonly driver: AttachmentDriver;
@@ -53,7 +56,8 @@ function s3Settings(env: ServerEnv): S3Settings | null {
 /**
  * S3 is the writer when the whole contract is set (Supabase Storage, MinIO,
  * AWS), so a deployment moves to it by adding environment variables. Reads
- * follow the key, so both backends keep answering while old files exist.
+ * follow the key, so both backends keep answering while the backend each row
+ * was written to is still configured.
  * Without S3 configured everything lives in Postgres, which needs no second
  * credential.
  */
@@ -73,11 +77,15 @@ export function createAttachmentStore(env: ServerEnv = serverEnv()): AttachmentS
     },
     async read(storageKey) {
       const store = storeFor(driverForKey(storageKey));
-      return store ? store.read(bareKey(storageKey)) : null;
+      // A missing backend is a configuration fault, not a missing file: the
+      // bytes still exist, so say so instead of answering not_found.
+      if (!store) throw new StorageBackendUnavailable(driverForKey(storageKey));
+      return store.read(bareKey(storageKey));
     },
     async remove(storageKey) {
       const store = storeFor(driverForKey(storageKey));
-      await store?.remove(bareKey(storageKey));
+      if (!store) throw new StorageBackendUnavailable(driverForKey(storageKey));
+      await store.remove(bareKey(storageKey));
     },
   };
 }

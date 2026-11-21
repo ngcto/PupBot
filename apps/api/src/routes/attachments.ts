@@ -1,5 +1,5 @@
 import { attachment, bot, conversation, database, findWorkspace, message, newId } from "@pupbot/db";
-import { attachmentStore, storageKeyFor } from "@pupbot/storage";
+import { StorageBackendUnavailable, attachmentStore, storageKeyFor } from "@pupbot/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv } from "../types.ts";
@@ -98,7 +98,18 @@ export const attachmentRoutes = new Hono<AppEnv>()
     const row = rows[0];
     if (!row) return c.json({ error: "not_found" }, 404);
 
-    const bytes = await attachmentStore().read(row.storageKey);
+    let bytes: Buffer | null;
+    try {
+      bytes = await attachmentStore().read(row.storageKey);
+    } catch (error) {
+      if (error instanceof StorageBackendUnavailable) {
+        // The row is real and the bytes exist: the deployment lost the
+        // credentials for the backend they were written to.
+        console.error("[attachments] backend unavailable", error.message);
+        return c.json({ error: "storage_unavailable" }, 503);
+      }
+      throw error;
+    }
     if (!bytes) return c.json({ error: "not_found" }, 404);
 
     return new Response(new Uint8Array(bytes), {

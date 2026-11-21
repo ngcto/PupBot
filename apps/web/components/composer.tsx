@@ -124,10 +124,14 @@ export function Composer({
 
   const submit = async () => {
     if (!canSend || uploading) return;
-    const accepted = await onSend(value, reply ?? undefined, files);
+    const sent = value;
+    const sentFiles = files;
+    const accepted = await onSend(sent, reply ?? undefined, sentFiles);
     if (!accepted) return;
-    setValue("");
-    setFiles([]);
+    // The textarea stays editable while the POST is in flight, so a draft typed
+    // during it is the next message, not the one that just went out.
+    setValue((current) => (current === sent ? "" : current));
+    setFiles((current) => (current === sentFiles ? [] : current));
     onCancelReply();
     area.current?.focus();
   };
