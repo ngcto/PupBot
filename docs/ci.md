@@ -95,3 +95,13 @@ attempt.
 one `grep` of the job log for the line above the error, not a theory about token grants. Four
 plausible permission theories were built on that status and all four were wrong, because none of
 them could have been true of a call that did not happen.
+
+### A filter that returns nothing is not evidence of nothing
+
+The same day, closing two issues nearly went wrong the same way: `tools.issue.read` came back with
+no assignee and no linked pull requests for both, which reads as "not mine, do not touch". Re-reading
+returned both, assigned and in review.
+
+**A filter or read that returns nothing for something you know exists is a degraded read, not an
+absence.** Re-read it before acting on it — the cost of a second call is nothing next to acting on an
+empty result that was never empty.
