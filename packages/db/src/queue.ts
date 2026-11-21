@@ -1,5 +1,5 @@
 import { PgBoss } from "pg-boss";
-import { serverEnv } from "@pupbot/config";
+import { serverEnv } from "@terabot/config";
 
 export const RUN_QUEUE = "run";
 

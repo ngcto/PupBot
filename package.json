@@ -1,5 +1,5 @@
 {
-  "name": "pupbot",
+  "name": "terabot",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.11.2",
@@ -14,10 +14,10 @@
     "lint": "turbo run lint",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "db:generate": "pnpm --filter @pupbot/db generate",
-    "db:migrate": "pnpm --filter @pupbot/db migrate",
-    "db:seed": "pnpm --filter @pupbot/db seed",
-    "catalog:sync": "pnpm --filter @pupbot/worker catalog:sync",
+    "db:generate": "pnpm --filter @terabot/db generate",
+    "db:migrate": "pnpm --filter @terabot/db migrate",
+    "db:seed": "pnpm --filter @terabot/db seed",
+    "catalog:sync": "pnpm --filter @terabot/worker catalog:sync",
     "e2e": "playwright test"
   },
   "devDependencies": {

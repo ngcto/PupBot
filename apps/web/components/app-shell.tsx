@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, toast } from "@pupbot/ui";
+import { Button, toast } from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { giveComputer } from "../app/actions.ts";

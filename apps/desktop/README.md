@@ -182,7 +182,7 @@ End-to-end, against a running product, on a headless Linux machine:
 pnpm --filter @terabot/desktop build
 xvfb-run -a pnpm --filter @terabot/desktop smoke -- \
   --url http://localhost:3000 \
-  --sign-in demo@pupbot.dev:pupbot-demo \
+  --sign-in demo@terabot.dev:terabot-demo \
   --deep-link 'terabot://sign-in?from=smoke' \
   --second-instance 'terabot://sign-in?from=second' \
   --restart \

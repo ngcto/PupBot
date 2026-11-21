@@ -10,7 +10,7 @@ import {
   database,
   modelEndpoint,
   user as userTable,
-} from "@pupbot/db";
+} from "@terabot/db";
 import { and, asc, eq, count, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { ensureComputerPool } from "../lib/computers.ts";
@@ -69,7 +69,7 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
     await tx.insert(botTable).values({
       id: botId,
       workspaceId: workspace.id,
-      name: clean(input.name, MAX_NAME) || "PupBot",
+      name: clean(input.name, MAX_NAME) || "Terabot",
       avatar: { shape: input.shape, color: input.color },
       accentColor: input.accentColor,
       instructions: "",
@@ -80,7 +80,7 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
     await tx.insert(conversation).values({
       id: conversationId,
       botId,
-      title: clean(input.name, MAX_NAME) || "PupBot",
+      title: clean(input.name, MAX_NAME) || "Terabot",
       isPrimary: Number(existing) === 0,
     });
   });

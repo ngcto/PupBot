@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Input } from "@pupbot/ui";
+import { Button, Input } from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "../lib/auth-client.ts";

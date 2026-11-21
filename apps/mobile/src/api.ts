@@ -1,5 +1,5 @@
-import { createApiClient } from "@pupbot/api-client";
-import type { FetchLike, SessionStore } from "@pupbot/api-client";
+import { createApiClient } from "@terabot/api-client";
+import type { FetchLike, SessionStore } from "@terabot/api-client";
 import { fetch as expoFetch } from "expo/fetch";
 import * as SecureStore from "expo-secure-store";
 

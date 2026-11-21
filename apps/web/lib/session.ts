@@ -1,4 +1,4 @@
-import { auth, ensureWorkspace, findWorkspace } from "@pupbot/db";
+import { auth, ensureWorkspace, findWorkspace } from "@terabot/db";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 

@@ -1,4 +1,4 @@
-import type { MessagePart } from "@pupbot/db";
+import type { MessagePart } from "@terabot/db";
 
 export type ComputerBinding = "unbound" | "binding" | "ready" | "blocked";
 

@@ -38,7 +38,7 @@ const DEFAULT_START_TIMEOUT_MS = 90_000;
 const DEFAULT_SCREENSHOT_TIMEOUT_MS = 90_000;
 /** A uniform 1280x800 frame compresses to ~3 KB; a painted desktop is ~100 KB. */
 const PAINTED_PNG_BYTES = 8 * 1024;
-const SHOT_PATH = "/tmp/pupbot-shot.png";
+const SHOT_PATH = "/tmp/terabot-shot.png";
 
 const TRANSITIONAL = new Set(["creating", "starting", "resuming", "stopping", "suspending"]);
 

@@ -1,5 +1,5 @@
-import { botStatusLine } from "@pupbot/api-client";
-import type { BotSummary } from "@pupbot/api-client";
+import { botStatusLine } from "@terabot/api-client";
+import type { BotSummary } from "@terabot/api-client";
 import { ChevronRightIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";

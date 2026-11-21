@@ -37,7 +37,7 @@ const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>PupBot avatars</title>
+<title>Terabot avatars</title>
 <style>
   body { margin: 0; background: #0e0e0e; color: #f5f5f5; font: 14px/22px Inter, system-ui, sans-serif; }
   main { max-width: 1040px; margin: 0 auto; padding: 40px 32px 64px; }
@@ -55,7 +55,7 @@ const html = `<!doctype html>
 </head>
 <body>
 <main>
-  <h1>PupBot avatars</h1>
+  <h1>Terabot avatars</h1>
   <p class="lead">${SHAPES.length} starter avatars from <code>open-bot-avatar</code> 0.3.0, in our
   palette. The bodies and their depth are the package's; the eye pair and the colours are ours.</p>
   <h2>Shapes at 96px</h2>

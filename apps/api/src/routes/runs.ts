@@ -1,5 +1,5 @@
-import { isTerminal } from "@pupbot/agent";
-import { bot, conversation, database, findWorkspace, run, runEvent } from "@pupbot/db";
+import { isTerminal } from "@terabot/agent";
+import { bot, conversation, database, findWorkspace, run, runEvent } from "@terabot/db";
 import { and, asc, eq, gt } from "drizzle-orm";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";

@@ -1,8 +1,8 @@
 "use client";
 
-import { COLORS, SHAPES, type AvatarColorId, type AvatarShapeId } from "@pupbot/avatars";
-import { Avatar } from "@pupbot/avatars/react";
-import { cn } from "@pupbot/ui";
+import { COLORS, SHAPES, type AvatarColorId, type AvatarShapeId } from "@terabot/avatars";
+import { Avatar } from "@terabot/avatars/react";
+import { cn } from "@terabot/ui";
 
 /** Six 30px avatars and their 22px gaps fit the 438px dialog on one line. */
 const PER_ROW = 6;

@@ -25,7 +25,7 @@ import {
   TabsTab,
   cn,
   toast,
-} from "@pupbot/ui";
+} from "@terabot/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "../lib/auth-client.ts";
@@ -225,7 +225,7 @@ export function SettingsDialog({
               <DialogTitle className="text-xl font-semibold">Updates</DialogTitle>
               <GroupLabel>Version</GroupLabel>
               <Card>
-                <Row label="PupBot 0.1.0" helper="Development build.">
+                <Row label="Terabot 0.1.0" helper="Development build.">
                   <Button size="sm" variant="secondary" onClick={() => toast("You are on the latest build.")}>
                     Check now
                   </Button>

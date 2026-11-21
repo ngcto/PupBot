@@ -1,11 +1,11 @@
-import { renderAvatarSvg, shapeById } from "@pupbot/avatars";
+import { renderAvatarSvg, shapeById } from "@terabot/avatars";
 import { useMemo } from "react";
 import { View } from "react-native";
 import { SvgXml } from "react-native-svg";
 
 /**
  * The same SVG the web renders, drawn with `react-native-svg`. One renderer for
- * every surface: the avatar registry is `@pupbot/avatars`, not a copy of it.
+ * every surface: the avatar registry is `@terabot/avatars`, not a copy of it.
  */
 export function Avatar({
   shape,

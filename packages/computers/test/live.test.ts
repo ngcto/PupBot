@@ -27,7 +27,7 @@ describe.skipIf(!live)("instabox live", () => {
     let ref: Awaited<ReturnType<typeof provider.provision>> | undefined;
     try {
       ref = await time("provision (create, operation, ready)", () =>
-        provider.provision({ metadata: { "pupbot-test": "live" }, ttlSeconds: 3600 }),
+        provider.provision({ metadata: { "terabot-test": "live" }, ttlSeconds: 3600 }),
       );
       console.log(`  box: ${ref.id} on ${ref.account}`);
 
@@ -36,16 +36,16 @@ describe.skipIf(!live)("instabox live", () => {
       expect(status.ready).toBe(true);
       expect(status.raw).toBe("running");
 
-      const echo = await time("exec echo", () => provider.exec(ref!, "echo pupbot-live"));
+      const echo = await time("exec echo", () => provider.exec(ref!, "echo terabot-live"));
       expect(echo.exitCode).toBe(0);
-      expect(echo.stdout).toContain("pupbot-live");
+      expect(echo.stdout).toContain("terabot-live");
 
-      await time("putFile", () => provider.putFile(ref!, "/data/home/pupbot-live.txt", "hello live"));
-      const back = await time("getFile", () => provider.getFile(ref!, "/data/home/pupbot-live.txt"));
+      await time("putFile", () => provider.putFile(ref!, "/data/home/terabot-live.txt", "hello live"));
+      const back = await time("getFile", () => provider.getFile(ref!, "/data/home/terabot-live.txt"));
       expect(new TextDecoder().decode(back)).toBe("hello live");
 
       const entries = await time("list", () => provider.list(ref!, "/data/home"));
-      expect(entries.some((entry) => entry.name === "pupbot-live.txt")).toBe(true);
+      expect(entries.some((entry) => entry.name === "terabot-live.txt")).toBe(true);
 
       const slept = await time("sleep (suspend)", () => provider.sleep(ref!));
       expect(slept.state).toBe("sleeping");

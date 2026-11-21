@@ -1,5 +1,5 @@
 {
-  "name": "@pupbot/worker",
+  "name": "@terabot/worker",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,11 +12,11 @@
     "catalog:sync": "tsx src/scripts/sync-catalog.ts"
   },
   "dependencies": {
-    "@pupbot/agent": "workspace:*",
-    "@pupbot/computers": "workspace:*",
-    "@pupbot/config": "workspace:*",
-    "@pupbot/db": "workspace:*",
-    "@pupbot/providers": "workspace:*",
+    "@terabot/agent": "workspace:*",
+    "@terabot/computers": "workspace:*",
+    "@terabot/config": "workspace:*",
+    "@terabot/db": "workspace:*",
+    "@terabot/providers": "workspace:*",
     "pg-boss": "^12.38.2"
   },
   "devDependencies": {

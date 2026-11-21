@@ -1,9 +1,9 @@
-@import "@pupbot/ui/styles.css";
+@import "@terabot/ui/styles.css";
 
 /*
  * The marketing site is a second surface of the same product: the palette,
  * hairlines, radii, easings and the Inter stack all come from
- * `@pupbot/ui/styles.css`, the measured token file the app uses. What is added
+ * `@terabot/ui/styles.css`, the measured token file the app uses. What is added
  * here is only what a shop window needs and a chat window does not — a display
  * type scale, a page container, and buttons big enough to click on a phone.
  */
