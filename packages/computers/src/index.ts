@@ -43,7 +43,13 @@ export type { Agent37ProviderOptions, Agent37Unsupported } from "./agent37/provi
 export { FakeComputerProvider } from "./fake.ts";
 export type { FakeFailure, FakeOperation, FakeProviderOptions } from "./fake.ts";
 
-export { ALLOCATOR_DEFAULTS, ComputerAllocator, describeFailures, eligibleAccounts } from "./allocator/allocator.ts";
+export {
+  ALLOCATOR_DEFAULTS,
+  ComputerAllocator,
+  describeFailures,
+  describeMissingCapabilities,
+  eligibleAccounts,
+} from "./allocator/allocator.ts";
 export type { AllocatorConfig, AllocatorOptions, ReconcileOptions } from "./allocator/allocator.ts";
 export { DrizzleComputerStore } from "./allocator/drizzle-store.ts";
 export { MemoryComputerStore } from "./allocator/memory-store.ts";
@@ -51,6 +57,7 @@ export { rowStatusFrom, toRef } from "./allocator/types.ts";
 export type {
   AccountRecord,
   AllocateResult,
+  AllocateOptions,
   BindingRecord,
   BindingState,
   ComputerRecord,
@@ -62,8 +69,11 @@ export type {
   LeaseRecord,
   ProviderFactory,
   ReconcileSummary,
+  RequiredCapability,
   SweepSummary,
 } from "./allocator/types.ts";
+
+export { DEFAULT_REQUIREMENTS } from "./allocator/types.ts";
 
 export { createProviderFactory } from "./registry.ts";
 export type { ProviderRegistryOptions } from "./registry.ts";

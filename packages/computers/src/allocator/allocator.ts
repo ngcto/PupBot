@@ -8,11 +8,13 @@ import type {
   EnsureReadyOptions,
   EnsureReadyResult,
   LeaseRecord,
+  AllocateOptions,
   ProviderFactory,
   ReconcileSummary,
+  RequiredCapability,
   SweepSummary,
 } from "./types.ts";
-import { rowStatusFrom, toRef } from "./types.ts";
+import { DEFAULT_REQUIREMENTS, rowStatusFrom, toRef } from "./types.ts";
 
 const LEASE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -100,11 +102,21 @@ export class ComputerAllocator {
    * Give a bot a computer: pick an account, provision, bind. Idempotent per bot
    * under a lock, so two messages arriving together create one box.
    */
-  async allocateForBot(botId: string): Promise<AllocateResult> {
+  async allocateForBot(botId: string, options: AllocateOptions = {}): Promise<AllocateResult> {
     return this.#withBotLock(botId, async () => {
+      const requires = options.requires ?? DEFAULT_REQUIREMENTS;
       const current = await this.store.botBinding(botId);
       if (current?.state === "ready" && current.computer && current.computer.status !== "deleted") {
-        return { state: "ready", computerId: current.computer.id };
+        // A box the bot already has is only reused when it can do the job: moving
+        // a running bot is worse than failing, but handing it a box that cannot
+        // screenshot and letting the feature throw later is worse still. The old
+        // box is destroyed, not just unbound — an unbound box with its bot gone
+        // is a bill nobody is looking at.
+        const gap = await this.#capabilityGap(current.computer, requires);
+        if (!gap) return { state: "ready", computerId: current.computer.id };
+        this.#log(`bot ${botId} needs ${gap.capability}; its current box cannot, moving it`);
+        await this.#destroyComputer(current.computer);
+        await this.store.releaseComputer(botId);
       }
 
       const ownerUserId = await this.store.botOwnerUserId(botId);
@@ -116,6 +128,20 @@ export class ComputerAllocator {
             ? "No computer is connected for this bot, and this deployment has no managed capacity."
             : "No computer account is connected.",
         );
+      }
+
+      // An account whose provider cannot deliver a required capability is left
+      // out entirely, so the allocator tries every remaining provider rather
+      // than stopping at the first one that would have failed.
+      const usable: AccountRecord[] = [];
+      const incapable: Array<{ account: AccountRecord; reason: string }> = [];
+      for (const account of accounts) {
+        const gap = this.#accountCapabilityGap(account, requires);
+        if (gap) incapable.push({ account, reason: gap });
+        else usable.push(account);
+      }
+      if (usable.length === 0) {
+        return this.#block(botId, describeMissingCapabilities(incapable.map((entry) => entry.reason)));
       }
 
       const computers = await this.store.listComputers();
@@ -133,7 +159,7 @@ export class ComputerAllocator {
       // with no recorded owner, then least-full. A managed account is never
       // special-cased ahead of a user's own, and a stub or leftover row never
       // outranks a real deployment computer.
-      const ordered = [...accounts].sort((a, b) => {
+      const ordered = [...usable].sort((a, b) => {
         const rank = (account: AccountRecord) => [
           hosted.has(account.id) ? 0 : 1,
           accountClass(account, ownerUserId),
@@ -156,6 +182,46 @@ export class ComputerAllocator {
 
       return this.#block(botId, describeFailures(failures));
     });
+  }
+
+  /**
+   * The first required capability this account's provider cannot deliver, or
+   * null. A provider that cannot be built at all is not reported here: that is
+   * a broken credential, which `#reserveAndProvision` already handles by naming
+   * the account and leaving the rest of the pool usable.
+   */
+  #accountCapabilityGap(account: AccountRecord, requires: readonly RequiredCapability[]): string | null {
+    if (requires.length === 0) return null;
+    let provider: ComputerProvider;
+    try {
+      provider = this.#provider(account);
+    } catch {
+      return null;
+    }
+    const missing = requires.find((capability) => !provider.capabilities[capability]);
+    if (!missing) return null;
+    // The account's own label, not the provider implementation's name: that is
+    // the string Settings shows, so the sentence matches what a person can act on.
+    const why = provider.capabilities.unsupported[missing];
+    return `${account.label} cannot ${missing}${why ? ` (${why})` : ""}`;
+  }
+
+  /** The same check for a box the bot already has, so a move is justified. */
+  async #capabilityGap(
+    computer: ComputerRecord,
+    requires: readonly RequiredCapability[],
+  ): Promise<{ capability: RequiredCapability } | null> {
+    if (requires.length === 0) return null;
+    const account = (await this.store.listAccounts()).find((entry) => entry.id === computer.accountId);
+    if (!account) return { capability: requires[0]! };
+    let provider: ComputerProvider;
+    try {
+      provider = this.#provider(account);
+    } catch {
+      return null;
+    }
+    const missing = requires.find((capability) => !provider.capabilities[capability]);
+    return missing ? { capability: missing } : null;
   }
 
   /**
@@ -224,9 +290,10 @@ export class ComputerAllocator {
   }
 
   async #ensureReady(botId: string, options: EnsureReadyOptions, depth: number): Promise<EnsureReadyResult> {
+    const requires = options.requires ?? DEFAULT_REQUIREMENTS;
     const binding = await this.store.botBinding(botId);
     if (!binding || binding.state !== "ready" || !binding.computer || binding.computer.status === "deleted") {
-      const allocation = await this.allocateForBot(botId);
+      const allocation = await this.allocateForBot(botId, { requires });
       if (allocation.state !== "ready") {
         return { ok: false, reason: allocation.reason ?? "No computer is available.", blocked: true };
       }
@@ -239,6 +306,18 @@ export class ComputerAllocator {
     if (!account) {
       await this.store.releaseComputer(botId);
       return { ok: false, reason: "This bot's computer account was removed.", blocked: true };
+    }
+
+    // A requirement added after this box was bound must fail loudly here rather
+    // than at the first call that needs the capability. `allocateForBot` moves
+    // the bot when it can; this is the path where it could not.
+    const gap = await this.#capabilityGap(computer, requires);
+    if (gap) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: describeMissingCapabilities([`${account.label} cannot ${gap.capability}`]),
+      };
     }
 
     let provider: ComputerProvider;
@@ -974,6 +1053,22 @@ function accountClass(account: AccountRecord, ownerUserId: string | null): numbe
   if (!account.managed && ownerUserId !== null && account.ownerUserId === ownerUserId) return 0;
   if (account.managed) return 1;
   return 2;
+}
+
+/**
+ * What a person is told when every eligible account's provider lacks something
+ * the run needs.
+ *
+ * This sentence is the whole user-visible value of the capability check: it has
+ * to say what is missing and which account, because "no computer is available"
+ * sends someone to look at capacity, which is not the problem. It is written in
+ * the second person and names the thing they can do about it.
+ */
+export function describeMissingCapabilities(reasons: string[]): string {
+  const detail = reasons.join("; ");
+  return reasons.length === 1
+    ? `No connected computer can do what this bot needs. ${detail}. Connect one that can, or ask for a task that does not need it.`
+    : `None of your connected computers can do what this bot needs. ${detail}. Connect one that can, or ask for a task that does not need it.`;
 }
 
 export function describeFailures(failures: Array<{ code: ProviderErrorCode; message: string }>): string {
