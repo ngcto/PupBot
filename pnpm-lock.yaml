@@ -577,6 +577,9 @@ importers:
       '@terabot/providers':
         specifier: workspace:*
         version: link:../providers
+      '@terabot/tools':
+        specifier: workspace:*
+        version: link:../tools
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)

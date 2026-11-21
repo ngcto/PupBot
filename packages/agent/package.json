@@ -16,6 +16,7 @@
     "@terabot/config": "workspace:*",
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",
+    "@terabot/tools": "workspace:*",
     "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
