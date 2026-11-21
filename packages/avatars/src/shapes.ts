@@ -1,40 +1,27 @@
 import { examples } from "open-bot-avatar";
+import { CUSTOM } from "./custom.ts";
 import { GALLERY } from "./gallery/index.ts";
 import type { AvatarDefinition, AvatarShape } from "./types.ts";
 
 /**
- * The registry is `open-bot-avatar`'s own avatar set: the 16 gallery definitions
- * vendored as data (see `gallery/NOTICE.md`) followed by the 7 starter avatars
- * imported from the package, so a package upgrade brings their shapes as it does
- * its renderer. No silhouette path lives in this file.
+ * The registry is `open-bot-avatar`'s avatar set plus four we author ourselves:
+ * its 7 starter avatars imported from the package (so a package upgrade brings
+ * their shapes), 9 gallery avatars vendored as data (see `gallery/NOTICE.md`),
+ * and our own `circle`, `square`, `water-drop` and `heart` (see `custom.ts`).
+ * No vendored or package silhouette is copied into this file.
  *
- * Ids, in this order, are API: `book`, `brain`, `bull`, `bunny`, `camera`, `cat`,
- * `cloud`, `egg`, `ghost`, `magnifier`, `paint-brush`, `palette`, `rocket`,
- * `shield`, `star`, `witch-hat`, then `controller`, `barbell`, `mug`, `lightbulb`,
- * `chat`, `sprout`, `watering-can`. A stored avatar naming anything else — a
- * retired id from our earlier families, or anything we never shipped — renders
- * the first entry.
+ * Ids, in this order, are API:
+ * `controller`, `barbell`, `mug`, `lightbulb`, `chat`, `sprout`, `watering-can`,
+ * `bull`, `bunny`, `camera`, `cat`, `cloud`, `ghost`, `rocket`, `star`,
+ * `witch-hat`, `circle`, `square`, `water-drop`, `heart`.
  *
- * Eyes come with each definition: `open-bot-avatar` places the pair per object,
- * and we do not override the geometry, the depth or the ink.
+ * A stored avatar naming anything else — a retired id from our earlier families,
+ * the traced Grok Bot set, or a gallery avatar we cut — renders the first entry.
+ *
+ * Eyes come with each definition and we do not override the geometry, the depth
+ * or the ink.
  */
 const NOTES: Record<string, string> = {
-  book: "An open book",
-  brain: "Side view, a folded brain",
-  bull: "Front view with horns",
-  bunny: "Long ears and a round face",
-  camera: "A camera with a lens",
-  cat: "Pointed ears and whiskers",
-  cloud: "A soft cloud",
-  egg: "A standing egg",
-  ghost: "A ghost with a wavy hem",
-  magnifier: "A magnifying glass",
-  "paint-brush": "A loaded paint brush",
-  palette: "A painter's palette",
-  rocket: "A rocket with fins",
-  shield: "A shield",
-  star: "A five-pointed star",
-  "witch-hat": "A pointed witch hat",
   controller: "Front view, face above the grips",
   barbell: "Side view, a bar with round plates",
   mug: "Side view, a cup with a handle loop",
@@ -42,9 +29,22 @@ const NOTES: Record<string, string> = {
   chat: "Speech bubble with a tail",
   sprout: "A pot with a stem and two leaves",
   "watering-can": "Side view, a can with a handle and spout",
+  bull: "Front view with horns",
+  bunny: "Long ears and a round face",
+  camera: "A camera with a lens",
+  cat: "Pointed ears and whiskers",
+  cloud: "A soft cloud",
+  ghost: "A ghost with a wavy hem",
+  rocket: "A rocket with fins",
+  star: "A five-pointed star",
+  "witch-hat": "A pointed witch hat",
+  circle: "A true circle",
+  square: "A square with rounded edges",
+  "water-drop": "A drop with the eyes in the bowl",
+  heart: "A heart with a cleft",
 };
 
-const DEFINITIONS: readonly AvatarDefinition[] = [...GALLERY, ...examples];
+const DEFINITIONS: readonly AvatarDefinition[] = [...examples, ...GALLERY, ...CUSTOM];
 
 export const SHAPES: readonly AvatarShape[] = DEFINITIONS.map((definition) => ({
   id: definition.id,

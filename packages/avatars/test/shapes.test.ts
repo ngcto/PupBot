@@ -2,24 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateAvatar } from "open-bot-avatar";
 import { SHAPES, DEFAULT_SHAPE, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
 
-/** Gallery ids alphabetical, then the package's own examples in package order. */
 const CONTRACT_ORDER = [
-  "book",
-  "brain",
-  "bull",
-  "bunny",
-  "camera",
-  "cat",
-  "cloud",
-  "egg",
-  "ghost",
-  "magnifier",
-  "paint-brush",
-  "palette",
-  "rocket",
-  "shield",
-  "star",
-  "witch-hat",
   "controller",
   "barbell",
   "mug",
@@ -27,9 +10,22 @@ const CONTRACT_ORDER = [
   "chat",
   "sprout",
   "watering-can",
+  "bull",
+  "bunny",
+  "camera",
+  "cat",
+  "cloud",
+  "ghost",
+  "rocket",
+  "star",
+  "witch-hat",
+  "circle",
+  "square",
+  "water-drop",
+  "heart",
 ] as const;
 
-/** Ids from the families this registry replaced; none of them may still resolve. */
+/** Ids this registry retired or never shipped; none of them may still resolve. */
 const RETIRED = [
   "orb",
   "squircle",
@@ -42,11 +38,8 @@ const RETIRED = [
   "antennae",
   "scallop",
   "shoulder",
-  "circle",
-  "square",
   "star4",
   "quatrefoil",
-  "heart",
   "flower",
   "drop",
   "pill",
@@ -54,23 +47,30 @@ const RETIRED = [
   "house",
   "splat",
   "hexagon",
+  "book",
+  "brain",
+  "egg",
+  "magnifier",
+  "paint-brush",
+  "palette",
+  "shield",
 ] as const;
 
-describe("open-bot-avatar's avatar set", () => {
-  it("lists all 23 ids exactly once, gallery then examples", () => {
+describe("avatar registry", () => {
+  it("lists all 20 ids exactly once, in contract order", () => {
     expect(SHAPES.map((shape) => shape.id)).toEqual([...CONTRACT_ORDER]);
     expect(new Set(SHAPES.map((shape) => shape.id)).size).toBe(CONTRACT_ORDER.length);
   });
 
   it("keeps the lookup helpers consistent with the list", () => {
-    expect(DEFAULT_SHAPE).toBe("book");
+    expect(DEFAULT_SHAPE).toBe("controller");
     for (const id of CONTRACT_ORDER) {
       expect(isShapeId(id)).toBe(true);
       expect(shapeById(id).definition).toBe(shapeDefinition(id));
       expect(shapeDefinition(id).id).toBe(id);
     }
     expect(isShapeId("bean")).toBe(false);
-    expect(shapeById("bean").id).toBe("book");
+    expect(shapeById("bean").id).toBe("controller");
   });
 
   it.each(RETIRED)("falls back to the first id for the retired id %s", (id) => {
