@@ -5,20 +5,57 @@ Where the shipped build differs from `handoffs/spec/`, and why. The drive copy o
 
 ## Avatars
 
-Symmetric silhouettes only (`avatars.json`, home-44): no dog heads, no lopsided detail. The ids are
-`orb, squircle, drop, bell, arch, hexa, pill, gem, crest, horns, antennae, scallop, shoulder`.
+Avatars are `open-bot-avatar`'s own objects, nothing of ours. `packages/avatars` exposes 14 of them:
+five starter avatars taken from the package with `getExample` (`mug`, `lightbulb`, `chat`, `sprout`,
+`watering-can`) and nine gallery avatars vendored as data (`bull`, `bunny`, `camera`, `cat`, `cloud`,
+`ghost`, `rocket`, `star`, `witch-hat`). No silhouette is copied into our source and we author none.
 
-- **Silhouettes fill 0.88 of the box; features cannot reach 0.96.** `open-bot-avatar` rejects
-  geometry outside 6..94 (its error message says 8..92, but 6..94 validates), so the widest a
-  silhouette *or* a horn can be is 0.88. Everything is fitted to that box.
-- **Eye proportions are the library's.** Its eye is a fixed 4:11 pill at `scale` ≤ 1.8, so the
-  contract's 0.22 × 0.34 slots with a 0.18 gap cannot be matched literally. We keep the reference's
-  visual weight (`scale` ≈ 1.36, spacing ≈ 20) and the 90% `#121212` ink.
-- **`arch` and `gem` are polyline approximations.** The renderer's path parser accepts `M/L/C/Q/Z`
-  only — no elliptical arcs — so the arch's semicircular top is 48 straight segments.
-- **Symmetry is enforced by a test, not by construction.** `shapes.test.ts` samples every path point
-  and asserts a mirrored partner exists within 0.35 units, plus a bounding-box check that the shape
-  is centred on x = 50. That is the thing that drifts when someone tweaks a control point.
+- **Ids, in order, are API**: `mug, lightbulb, chat, sprout, watering-can, bull, bunny, camera, cat,
+  cloud, ghost, rocket, star, witch-hat`. Any other id — an old family (`orb`, `crest`, …), the
+  traced Grok Bot set (`circle`, `star4`, …), a starter or gallery object we do not ship
+  (`controller`, `barbell`, `book`, `egg`, …) — renders `mug`, the first id.
+- **The gallery nine are vendored, the rest imported.** The package ships only its 7 starter avatars;
+  the gallery files live in the upstream repository and are not on npm. They are copied in unchanged
+  (MIT, Copyright (c) 2026 Dominik Scholz) with `gallery/NOTICE.md` recording provenance and how to
+  re-vendor.
+- **Depth, body and ink are the definition's; the eye pair is ours.** We pass colour, size,
+  `motion: "idle"`, `time: 0` and `reducedMotion: true`, so the body and its depth (the package's
+  default 6) are untouched, and the ink stays `#151515`. The package draws two level vertical ovals;
+  Ng's reference draws a different pair, so `render.ts` takes those two groups out and draws the pair
+  itself in the same place, under the same matrix, in `eyes.ts`. **The definitions are still exactly
+  the package's**, which is what matters for a re-vendor.
+- **The eye pair carries the gaze.** The body lean is half of the reference's look; the other half is
+  the pair: a fat, low near capsule and a thin, high far one, both slanted from upper-left to
+  lower-right, receding up and right. Measured off the Grok picker cells and the chat
+  mascot: capsules 0.52R and 0.50R long (R = the glyph's inscribed radius), 0.27R and 0.21R thick,
+  60° below horizontal, near eye's centre 0.21R left and 0.05R below the pair's midpoint, far eye
+  mirrored. Placed with the pair's midpoint 0.52R right of the definition's own eye anchor and 0.06R
+  below it, which reproduces the reference's proportions across our 14: pair box 0.344 of the body's
+  width by 0.255 of its height against the reference's 0.350 by 0.252, at 0.337 from the body's top
+  against 0.339, 6.4% of body area against 6.6%. With the body leaning, `rocket` (0.18R), `star` (0.06R)
+  and `witch-hat` (0.12R) carry the pair left to stay inside their own outline; no glyph needed a
+  smaller pair.
+- **The body leans 12°, the pair does not.** `render.ts` turns the drawn body counter-clockwise about
+  the middle of the 0..100 box — the definitions stay as written, so a re-vendor is mechanical — and
+  adds the eye layer *after* that transform, so the pair keeps the screen angle it was fitted with and
+  the body leans under it. The angle is measured two ways that agree: the screenshot's trace
+  rotation-matched against its levelled revision gives 12° (median of the clean-edged shapes, 11.6°),
+  and silhouette IoU against the reference cells at matched size gives a plateau from −12° to −16°
+  (0.7101 at −12, 0.7106 at −14, 0.7100 at −16) against 0.6856 level and 0.6733 for the old clockwise
+  turn. The peak is inside that plateau's noise, so 12° stands. Bounds re-checked at 16–256 px with the
+  lean: the widest drawn extent is `witch-hat` at 48.44 units of the 50-unit half box, then `bull`
+  47.5, `sprout` 46.9, `camera` 45; nothing clips and no glyph needed shrinking.
+- **Colour is ours.** The eleven palette ids and `deriveAccent()` are unchanged; the default colour is
+  `ember` (`#f9670e`), the palette's nearest entry to the package's starter orange `#ff6a1a`, and the
+  contact sheet shows all 14 in both.
+- **`open-bot-avatar` 0.2.1 → 0.3.0** (`pnpm-workspace.yaml` gains the version in
+  `minimumReleaseAgeExclude`, since it shipped the day before). Same exports and same definition
+  contract; 0.3.0 adds `state`/`mood` (ribbons for `working`, marks for `thinking` and `blocked`, a
+  celebration for `done`), OKLCH helpers and its starter set. Rendering all 14 at 64px with our
+  options produces byte-identical SVG before and after: no geometry, eye or ink change for a resting
+  avatar. Nothing in this app asks for a state yet.
+- **The traced silhouettes are gone**, along with the crest/horns family, the abandoned soft set and
+  the four shapes we briefly authored: no path data from any of them is left in the repository.
 
 ## Colour
 
