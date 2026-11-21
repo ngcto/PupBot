@@ -38,6 +38,11 @@ export const computerStatus = pgEnum("computer_status", [
 ]);
 export const computerAccountStatus = pgEnum("computer_account_status", ["active", "draining", "error"]);
 export const catalogMatch = pgEnum("catalog_match", ["matched", "unmatched", "manual"]);
+/**
+ * Who may use the product without paying and configure it. `owner` is granted
+ * only by the server from `OWNER_EMAILS`, never by a request.
+ */
+export const userRole = pgEnum("user_role", ["owner", "member"]);
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
@@ -50,6 +55,11 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  /**
+   * Defaults to `member`, so a self-serve signup can never grant itself access.
+   * `syncOwnerRoles` is the only writer of `owner`, driven by `OWNER_EMAILS`.
+   */
+  role: userRole("role").notNull().default("member"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

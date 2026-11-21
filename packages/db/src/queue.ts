@@ -13,6 +13,12 @@ export interface ComputerProvisionJobData {
 
 export interface RunJobData {
   runId: string;
+  /**
+   * The account the run belongs to, so the worker can apply the billing gate
+   * without re-reading the workspace chain. Carried on the job because the
+   * worker has no request to scope from.
+   */
+  userId?: string;
 }
 
 export interface BossOptions {

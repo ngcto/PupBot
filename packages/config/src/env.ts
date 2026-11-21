@@ -74,6 +74,11 @@ const serverSchema = z.object({
   VERCEL_OIDC_TOKEN: optionalSecret,
   /** Marks a Vercel deployment, so OIDC is known to be available. */
   VERCEL: z.string().optional(),
+  /**
+   * Comma-separated emails that are the Owner: never gated, always able to
+   * configure the deployment. The only way `user.role` becomes `owner`.
+   */
+  OWNER_EMAILS: optionalSecret,
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;

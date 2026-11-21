@@ -92,6 +92,13 @@
       "when": 1795264347657,
       "tag": "0012_lifecycle_computers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795269144476,
+      "tag": "0013_user_role",
+      "breakpoints": true
     }
   ]
 }
