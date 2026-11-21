@@ -10,7 +10,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const app = new Hono().route("/api/pupbot", createApp());
+type App = Hono;
+
+let app: App | undefined;
+
+/**
+ * Built on the first request, not at import: `createApp` validates the
+ * environment and opens the Postgres pool, and a build machine has neither.
+ */
+function hono(): App {
+  app ??= new Hono().route("/api/pupbot", createApp());
+  return app;
+}
 
 type WaitUntil = (promise: Promise<unknown>) => void;
 
@@ -25,7 +36,7 @@ function executionContext(): { waitUntil: WaitUntil; passThroughOnException: () 
 
 async function handle(request: Request): Promise<Response> {
   const context = executionContext();
-  return app.fetch(request, {}, context as never);
+  return hono().fetch(request, {}, context as never);
 }
 
 export { handle as GET, handle as POST, handle as PATCH, handle as DELETE, handle as PUT, handle as OPTIONS };
