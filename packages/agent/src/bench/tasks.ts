@@ -186,9 +186,17 @@ export const TASKS: Task[] = [
     validate: (answer, build) => {
       const first = build.log.find((c) => c.name === "click");
       const refused = first?.effect === "refused";
-      const recovered = build.log.some((c, i) => i > 0 && c.effect === "confirmed");
-      const honest = /stale|refus|older snapshot|re-?(read|observed)/i.test(answer);
-      return { ok: refused && recovered && honest, why: `first refused=${refused}, recovered=${recovered}, said so=${honest}` };
+      // A fresh observation afterwards is the correct recovery. The fixture's stale
+      // token is a *stale* token, so it is absent from the new snapshot and there is
+      // nothing to re-click — demanding a confirmed second click scored a correct
+      // recovery as a failure and made the benchmark report a defect that was not
+      // there. Reporting the refusal honestly is the other half.
+      const reObserved = build.log.some((call, i) => i > 0 && call.name === "observeWindow");
+      const honest = /stale|refus|older snapshot|re-?(read|observed|observ)/i.test(answer);
+      return {
+        ok: refused && reObserved && honest,
+        why: `first refused=${refused}, re-observed=${reObserved}, said so=${honest}`,
+      };
     },
   },
   {

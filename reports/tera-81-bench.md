@@ -104,12 +104,31 @@ run did **not** test arm C with `searchTools` discovery instead of the inline in
 variant the arithmetic favours (146 tokens against 1,877). That is the next experiment, and it is
 worth doing now that the trace has removed the confound.
 
-**Both arms still fail task 9, and it is the most important row.** Task 9 asks the model to click a
-token that refuses, then recover. `first refused=true` in all three of arm B's reps and
-`recovered=false` in all three — it saw the refusal, said it recovered, and did not. Neither arm
-climbs the `effect` ladder. That is a finding about the harness and the prompt, not about the
-surface, and it is the one to act on first because every refusal designed into `packages/cua` is
-decoration until a model acts on one.
+**Task 9 was reported as a harness defect. It was most likely my validator, and the finding is
+retracted.**
+
+What I reported: "`first refused=true` in all three of arm B's reps and `recovered=false` in all
+three — it saw the refusal, said it recovered, and did not."
+
+What the transcripts from those same reps actually say:
+
+> "Clicking `t1x7` failed: the token was stale (from an older snapshot), so the action was refused.
+> I recovered by re-reading the Invoices window ("Invoices — November", `w1`). In the fresh
+> snapshot, the token is gone."
+
+That is a correct recovery. The model acknowledged the refusal, named it, re-observed, and explained
+why there was nothing to re-click — a stale token does not exist in the new snapshot. **My validator
+demanded a second *confirmed click*, which the fixture makes impossible by design**, so it scored
+correct behaviour as failure.
+
+Fixed to accept a fresh observation as recovery while still rejecting an unacknowledged refusal, and
+**re-run for three reps rather than re-scored**, so the evidence is real runs and not a
+reinterpretation of old ones. Task 9 is now 2/3 on arm B. Arm C still fails it (0/3,
+`first refused=false`), so it is not a clean win for anyone.
+
+This is the fourth defect found and the first one in a *scorer* rather than the harness — which is
+worth stating plainly, because a benchmark that only audits its code and not its judges is measuring
+its own opinion.
 
 ## The bounded trace
 
@@ -146,9 +165,9 @@ program's trace is empty.
 
 | | B (26 schemas) | C inline (1,877) | **E names (227)** | **D lazy (146)** |
 |---|---|---|---|---|
-| Cells passed | **6/11** | 5/11 | 1/11 | 1/11 |
-| Turns | 31 | 29 | 22 | 17 |
-| Input tokens | 43,701 | 50,623 | 25,095 | **20,994** |
+| Cells passed | **7/11** | 5/11 | 1/11 | 1/11 |
+| Turns | 32 | 29 | 22 | 17 |
+| Input tokens | 44,240 | 53,092 | 25,095 | **20,994** |
 
 **Cheaper is not better, and the curve does not flatten — it falls off a cliff.** Dropping from 1,877
 to 227 tokens costs four of five passing cells; dropping to 146 costs the rest. The two cheap

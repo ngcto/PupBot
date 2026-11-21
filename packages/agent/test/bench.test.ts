@@ -163,12 +163,19 @@ describe("the validators", () => {
     });
   });
 
-  it("rejects task 9 when the refusal was never acknowledged", () => {
+  it("accepts a fresh observation as recovery, and rejects an unacknowledged refusal", () => {
     const build = armB();
     build.log.push({ name: "click", input: { token: "t1x7" }, effect: "refused" });
-    build.log.push({ name: "click", input: { token: "t2ab" }, effect: "confirmed" });
+    build.log.push({ name: "observeWindow", input: { windowId: "w1" } });
+    // Re-observing is the correct recovery: the stale token is gone from the new
+    // snapshot, so there is nothing to re-click.
+    expect(task(9).validate("The token was stale, so I re-read the window.", build).ok).toBe(true);
+    // Claiming success without acknowledging the refusal is still a failure.
     expect(task(9).validate("Done, clicked it.", build).ok).toBe(false);
-    expect(task(9).validate("The token was stale, so I re-read the window and clicked t2ab.", build).ok).toBe(true);
+    // So is a refusal that was never surfaced.
+    const silent = armB();
+    silent.log.push({ name: "click", input: { token: "t1x7" }, effect: "confirmed" });
+    expect(task(9).validate("Re-read and clicked.", silent).ok).toBe(false);
   });
 
   it("rejects task 8 if a screenshot was taken", () => {
