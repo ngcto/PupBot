@@ -151,9 +151,9 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
   );
 
   const send = useCallback(
-    async (text: string, quote?: { messageId: string; text: string }, files: UploadedFile[] = []) => {
+    async (text: string, quote?: { messageId: string; text: string }, files: UploadedFile[] = []): Promise<boolean> => {
       const trimmed = text.trim();
-      if ((!trimmed && files.length === 0) || sending) return;
+      if ((!trimmed && files.length === 0) || sending) return false;
       setSending(true);
       setError(null);
 
@@ -171,8 +171,14 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
 
         if (!response.ok) {
           const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-          setError(detail?.error === "unauthorized" ? "Your session expired. Sign in again." : "That message did not send.");
-          return;
+          setError(
+            detail?.error === "unauthorized"
+              ? "Your session expired. Sign in again."
+              : detail?.error === "invalid_attachment"
+                ? "A file in this message is no longer available. Remove it and send again."
+                : "That message did not send.",
+          );
+          return false;
         }
 
         const data = (await response.json()) as { runId: string; messageId: string };
@@ -195,8 +201,10 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
           runId: null,
         });
         subscribe(data.runId);
+        return true;
       } catch {
         setError("You look offline. The message will send when you reconnect.");
+        return false;
       } finally {
         setSending(false);
       }

@@ -25,7 +25,8 @@ import type { BotView } from "../lib/types.ts";
 
 interface ComposerProps {
   bot: BotView;
-  onSend: (text: string, quote?: { messageId: string; text: string }, files?: UploadedFile[]) => void;
+  /** Resolves true once the message is accepted, so a failed send keeps the draft. */
+  onSend: (text: string, quote?: { messageId: string; text: string }, files?: UploadedFile[]) => Promise<boolean>;
   onAttach: (file: File) => Promise<UploadedFile>;
   reply: { messageId: string; text: string } | null;
   onCancelReply: () => void;
@@ -34,6 +35,9 @@ interface ComposerProps {
 }
 
 const DRAFT_PREFIX = "pupbot:draft:";
+
+/** The message API refuses more than this, so the picker stops here. */
+const MAX_ATTACHMENTS = 8;
 
 export function Composer({
   bot,
@@ -53,9 +57,16 @@ export function Composer({
   const attach = async (picked: FileList | null) => {
     const chosen = Array.from(picked ?? []);
     if (chosen.length === 0) return;
+    const room = MAX_ATTACHMENTS - files.length;
+    if (room <= 0) {
+      toast(`A message can carry ${MAX_ATTACHMENTS} files.`);
+      if (picker.current) picker.current.value = "";
+      return;
+    }
+    if (chosen.length > room) toast(`Only ${room} more file${room === 1 ? "" : "s"} fit in this message.`);
     setUploading(true);
     try {
-      for (const file of chosen) {
+      for (const file of chosen.slice(0, room)) {
         try {
           const uploaded = await onAttach(file);
           setFiles((existing) => [...existing, uploaded]);
@@ -111,9 +122,10 @@ export function Composer({
 
   const canSend = value.trim().length > 0 || files.length > 0;
 
-  const submit = () => {
+  const submit = async () => {
     if (!canSend || uploading) return;
-    onSend(value, reply ?? undefined, files);
+    const accepted = await onSend(value, reply ?? undefined, files);
+    if (!accepted) return;
     setValue("");
     setFiles([]);
     onCancelReply();

@@ -124,6 +124,22 @@ environment) already live on the project, so nothing else needs to be repeated.
 BASE_URL=https://terabot-six.vercel.app pnpm e2e
 ```
 
+## Testing without touching the hosted database
+
+`loadEnv()` reads the workspace `.env`, and the file kept for this deployment points
+`DATABASE_URL` at the hosted Supabase pooler. `pnpm test` therefore writes its fixtures —
+users, workspaces, attachments — into the hosted database unless you override it:
+
+```bash
+pnpm db:up                                     # Docker Postgres on 127.0.0.1:5432
+DATABASE_URL=postgres://pupbot:pupbot@127.0.0.1:5432/pupbot pnpm db:migrate
+DATABASE_URL=postgres://pupbot:pupbot@127.0.0.1:5432/pupbot pnpm test
+```
+
+The tests clean up after themselves, but they are several times slower through the pooler
+(a round trip is ~1 s from a build machine against ~1 ms locally), and the hosted row
+counts are what the product shows.
+
 ## Limits of this shape
 
 - A run is capped by the function's `maxDuration` (300s on Hobby). Longer work needs the queue

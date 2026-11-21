@@ -424,6 +424,11 @@ export const attachment = pgTable(
   "attachment",
   {
     id: uuid("id").primaryKey(),
+    /**
+     * Set on upload, before any message names the file: it is what makes an
+     * unclaimed upload claimable by its own workspace and by no other.
+     */
+    workspaceId: uuid("workspace_id").references(() => workspace.id, { onDelete: "cascade" }),
     messageId: uuid("message_id").references(() => message.id, { onDelete: "cascade" }),
     storageKey: text("storage_key").notNull(),
     name: text("name").notNull(),
@@ -431,7 +436,7 @@ export const attachment = pgTable(
     mime: text("mime").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("attachment_message_idx").on(t.messageId)],
+  (t) => [index("attachment_message_idx").on(t.messageId), index("attachment_workspace_idx").on(t.workspaceId)],
 );
 
 /**

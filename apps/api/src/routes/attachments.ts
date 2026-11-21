@@ -1,5 +1,5 @@
 import { attachment, bot, conversation, database, findWorkspace, message, newId } from "@pupbot/db";
-import { attachmentStore } from "@pupbot/storage";
+import { attachmentStore, storageKeyFor } from "@pupbot/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv } from "../types.ts";
@@ -9,6 +9,29 @@ const MAX_BYTES = 4 * 1024 * 1024;
 
 function safeName(raw: string): string {
   return raw.replace(/[\u0000-\u001f/\\]/g, "_").slice(0, 255) || "file";
+}
+
+/**
+ * Types a browser may open without executing anything. Markup and SVG are not
+ * on the list: the download is served from the app's own origin, so an inline
+ * document would run with the session's authority.
+ */
+const INLINE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "application/pdf",
+  "text/plain",
+]);
+
+/** RFC 6266: a plain name for old clients, `filename*` so any name survives. */
+function disposition(name: string, mime: string): string {
+  const fallback = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const encoded = encodeURIComponent(name);
+  const kind = INLINE_TYPES.has(mime.toLowerCase()) ? "inline" : "attachment";
+  return `${kind}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 export const attachmentRoutes = new Hono<AppEnv>()
@@ -35,7 +58,8 @@ export const attachmentRoutes = new Hono<AppEnv>()
 
     await database().insert(attachment).values({
       id,
-      storageKey: id,
+      workspaceId: workspace.id,
+      storageKey: storageKeyFor(attachmentStore().driver, id),
       name,
       size: bytes.byteLength,
       mime,
@@ -81,7 +105,9 @@ export const attachmentRoutes = new Hono<AppEnv>()
       headers: {
         "content-type": row.mime,
         "content-length": String(bytes.byteLength),
-        "content-disposition": `inline; filename="${row.name.replace(/"/g, "")}"`,
+        "content-disposition": disposition(row.name, row.mime),
+        "content-security-policy": "sandbox",
+        "x-content-type-options": "nosniff",
         "cache-control": "private, max-age=3600",
       },
     });
