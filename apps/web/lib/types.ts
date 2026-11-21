@@ -103,8 +103,22 @@ export interface EndpointView {
   id: string;
   label: string;
   kind: string;
-  /** Shown in Settings > Providers so a custom gateway is identifiable. */
-  baseUrl: string;
+  /**
+   * Shown in Settings > Providers so a custom gateway is identifiable. Null for
+   * a built-in: its URL is fixed and not the user's to see.
+   */
+  baseUrl: string | null;
+  /** The built-in this row is, or null for a custom endpoint. */
+  builtinId: string | null;
+  /** The built-in's own name, for the Settings row. */
+  builtinName: string | null;
+  /**
+   * Whether a bot can chat through this provider. A built-in without a key
+   * cannot, so bot creation must not offer it.
+   */
+  ready: boolean;
+  /** Detail fields the catalogue filled rather than the user typed. */
+  detailSources: string[];
   /** The provider's default model; a bot picks its own when it is created. */
   modelId: string;
   contextWindow: number | null;
