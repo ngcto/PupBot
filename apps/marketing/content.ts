@@ -33,6 +33,7 @@ export const tiers: readonly Tier[] = [
     notes: [
       "Model usage is billed by your provider, at its rates.",
       "Cloud computers come from the computer provider set up for your workspace.",
+      "Computers are provisioned through a provider interface; the current build uses a stub provider until a real one is connected.",
       "No usage limits are published or enforced while the product is in development.",
     ],
   },

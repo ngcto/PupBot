@@ -154,6 +154,10 @@
     margin-top: 8px;
   }
 
+  .prose ul + p {
+    margin-top: 16px;
+  }
+
   .prose a {
     color: var(--color-ink);
     text-decoration: underline;

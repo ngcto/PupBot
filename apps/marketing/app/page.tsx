@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 const endpointRows = [
   {
     term: "Endpoints",
-    value: "An OpenAI-compatible chat endpoint, or Anthropic, with the base URL and model id your provider gives you.",
+    value: "An OpenAI-compatible chat endpoint, with the base URL and model id your provider gives you.",
   },
   {
     term: "Your key",
@@ -150,7 +150,7 @@ export default function LandingPage() {
             <p className="copy" style={{ marginTop: 16, maxWidth: 560 }}>
               Terabot is a desktop app for macOS, Windows and Linux, and a mobile app for iOS and Android. Both are
               being built. No build is published yet, and the download page says so on every button instead of sending
-              you to a missing file.
+              you to a missing file. <Link href="/docs#status">The docs list what is wired today.</Link>
             </p>
           </div>
           <div className="stack-12" style={{ alignSelf: "end" }}>

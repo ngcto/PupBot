@@ -67,9 +67,9 @@ export default function DocsPage() {
             </p>
             <h3>What is supported</h3>
             <p>
-              An OpenAI-compatible chat completions endpoint, or Anthropic Messages. Model metadata — context window
-              and pricing — comes from models.dev and is stored with the endpoint, so the app knows what a model can
-              take before a run starts.
+              An OpenAI-compatible chat completions endpoint. Model metadata — context window and pricing — comes
+              from models.dev and is stored with the endpoint, so the app knows what a model can take before a run
+              starts.
             </p>
             <h3>What happens to the key</h3>
             <p>
@@ -91,6 +91,11 @@ export default function DocsPage() {
               The rail lists the bot&apos;s computer and whether it is awake. It is the bot&apos;s machine, not a pool
               shared with the rest of the workspace.
             </p>
+            <p>
+              Computers are provisioned through a provider interface, and the adapter that talks to a real provider is
+              not connected in this build: what you get today is a stub that holds files in memory and runs no
+              commands. The section above describes the shape the feature ships with, not a working machine yet.
+            </p>
           </div>
         </section>
 
@@ -111,11 +116,21 @@ export default function DocsPage() {
         <section id="status">
           <h2>Status</h2>
           <div className="prose">
-            <p>
-              There is no published build yet. The <Link href="/download">download page</Link> lists every platform and
-              says Coming soon where a build is missing. Pricing is{" "}
-              <Link href="/pricing">free while in development</Link>.
-            </p>
+            <p>What exists today, and what does not:</p>
+            <ul>
+              <li>
+                No build is published. The <Link href="/download">download page</Link> marks macOS, Windows, Linux, iOS
+                and Android as Coming soon.
+              </li>
+              <li>Model endpoints are OpenAI-compatible chat completions. Anthropic and Responses endpoints are not wired.</li>
+              <li>
+                Computers are provisioned through a provider interface, with a stub provider in the current build. A
+                real provider is connected before the first public build.
+              </li>
+              <li>
+                Pricing is <Link href="/pricing">free while in development</Link>, and there is no paid plan.
+              </li>
+            </ul>
             <p>If something here stops matching the app, the app is right and this page is wrong.</p>
           </div>
         </section>

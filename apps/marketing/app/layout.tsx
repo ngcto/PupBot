@@ -27,12 +27,9 @@ export const metadata: Metadata = {
     url: "/",
     images: [{ url: "/og/home.png", width: 1200, height: 630, alt: `${site.name}: a bot's conversation beside its own computer` }],
   },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description: site.description,
-    images: ["/og/home.png"],
-  },
+  // Only the card type lives here: a page that defines its own Open Graph tags
+  // would otherwise inherit this layout's Twitter title, description and image.
+  twitter: { card: "summary_large_image" },
   robots: { index: true, follow: true },
 };
 
