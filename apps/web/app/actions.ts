@@ -274,9 +274,10 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
     // flip to `binding`, so this both marks the bot and stops a second instance
     // from provisioning it; a bot already binding belongs to that other request.
     if (inlineComputers()) {
-      if (!(await claimComputerInline(botId))) {
-        return { state: "binding", reason: null };
-      }
+      const claim = await claimComputerInline(botId);
+      // Bound already: nothing to do, and re-provisioning would rebuild the box.
+      if (claim === "ready") return { state: "ready", reason: null };
+      if (claim === "busy") return { state: "binding", reason: null };
       const result = await allocateComputerInline(botId);
       revalidatePath("/", "layout");
       return { state: result.state, reason: result.reason ?? null };

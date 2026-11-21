@@ -42,20 +42,36 @@ export async function allocateComputerInline(botId: string): Promise<AllocateRes
 }
 
 /**
- * Take exclusive ownership of a bot's allocation before provisioning it. The
- * allocator's own lock is a per-instance Map and this runtime is several
- * instances, so two requests for one unbound bot could otherwise both create a
- * machine. The claim is an atomic flip to `binding` from any other state, so one
- * instance wins across processes; the loser leaves the work to the winner.
+ * Takes exclusive ownership of a bot's allocation before provisioning it, and
+ * reports the state that ownership was taken from. The allocator's own lock is a
+ * per-instance Map and this runtime is several instances, so two requests for
+ * one unbound bot could otherwise both create a machine.
+ *
+ * Only an unbound bot is claimable: claiming a bound one would move it off
+ * `ready`, and the allocator's reuse check keys on that state, so the allocation
+ * would build a second box and orphan the first.
  */
-export async function claimComputerInline(botId: string): Promise<boolean> {
-  return allocatorFor().store.claimBinding(botId);
+export async function claimComputerInline(botId: string): Promise<"claimed" | "ready" | "busy"> {
+  const allocator = allocatorFor();
+  const binding = await allocator.store.botBinding(botId);
+  if (binding?.state === "ready") return "ready";
+  if (binding && binding.state !== "unbound") return "busy";
+  return (await allocator.store.claimBinding(botId)) ? "claimed" : "busy";
 }
 
 export function inlineRunComputer(): RunComputer {
   const computers = allocatorFor();
   return {
-    ensureReady: (botId) => computers.ensureReady(botId),
+    // A bot still waiting on another instance's allocation is told to wait, not
+    // allocated again: `ensureReady` provisions whenever the binding is not
+    // `ready`, and this runtime is several instances with no shared lock.
+    ensureReady: async (botId) => {
+      const binding = await computers.store.botBinding(botId);
+      if (binding?.state === "binding") {
+        return { ok: false, reason: "Your computer is still starting up. Try again in a moment.", blocked: false };
+      }
+      return computers.ensureReady(botId);
+    },
     release: (botId, leaseId) => computers.releaseLease(botId, leaseId),
   };
 }
