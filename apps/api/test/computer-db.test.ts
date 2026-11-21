@@ -4,6 +4,7 @@ import {
   DrizzleComputerStore,
   FakeComputerProvider,
   createComputerRuntime,
+  createProviderFactory,
   eligibleAccounts,
 } from "@terabot/computers";
 import type { AccountRecord, ComputerProvider } from "@terabot/computers";
@@ -493,4 +494,65 @@ describe("a bot never gets a second box, even from two processes", () => {
     expect(all.length - deleted.length).toBe(1);
     expect(deleted).toHaveLength(1);
   });
+});
+
+/*
+ * The same atomicity, against the real provider rather than a fake.
+ *
+ * The Postgres test above proves the lock and the unique index; this proves the
+ * thing a person actually experiences: two first uses arriving together spend one
+ * real box, and the provider itself ends up holding exactly one machine. A fake
+ * that counts calls cannot show that — only Instabox's own list can.
+ *
+ * Opt in with INSTABOX_LIVE=1. It spends one real box, destroyed afterwards.
+ */
+describe.skipIf(process.env.INSTABOX_LIVE !== "1")("the real provider spends one box per bot", () => {
+  it("creates exactly one machine when two allocators race for the same bot", async () => {
+    const space = await workspaceFor("race-live");
+    const botId = await makeBot(space.id, "Live racy");
+    const accountId = await addAccount(space.ownerId, "instabox", false);
+
+    // The row holds the deployment key, encrypted, exactly as the app stores it.
+    await db
+      .update(computerAccount)
+      .set({ encryptedCredential: encryptSecret(process.env.INSTABOX_API_KEY ?? "") })
+      .where(eq(computerAccount.id, accountId));
+
+    const providers = createProviderFactory();
+    const a = new ComputerAllocator({ store: new DrizzleComputerStore(), providers });
+    const b = new ComputerAllocator({ store: new DrizzleComputerStore(), providers });
+
+    try {
+      const [first, second] = await Promise.all([a.allocateForBot(botId), b.allocateForBot(botId)]);
+
+      expect([first.state, second.state]).toEqual(["ready", "ready"]);
+      expect(first.computerId).toBe(second.computerId);
+
+      // One row, and one machine at the provider.
+      const live = await db
+        .select()
+        .from(computer)
+        .where(and(eq(computer.workspaceId, space.id), ne(computer.status, "deleted")));
+      expect(live).toHaveLength(1);
+
+      const listed = await providers(
+        (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!,
+      ).listComputers();
+      const ids = listed.map((entry) => entry.id);
+      console.log(`  boxes at the provider: ${ids.join(", ") || "(none)"}`);
+      expect(ids).toHaveLength(1);
+      expect(ids[0]).toBe(live[0]?.externalId);
+    } finally {
+      // Destroy whatever it made, whatever the assertions did.
+      await a.destroyForBot(botId).catch(() => undefined);
+      const remaining = await providers(
+        (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!,
+      ).listComputers().catch(() => []);
+      for (const box of remaining) {
+        await providers(
+          (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!,
+        ).destroy(box).catch(() => undefined);
+      }
+    }
+  }, 600_000);
 });
