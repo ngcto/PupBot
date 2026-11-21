@@ -332,6 +332,17 @@ export interface EndpointInput {
   /** Optional provider default; the first id the provider lists is used when omitted. */
   modelId?: string;
   apiKey?: string;
+  /** A context window the user typed; the catalogue then never replaces it. */
+  contextWindow?: number;
+}
+
+/**
+ * The context window a save should carry. A value the user typed wins over both
+ * a value an earlier fill supplied and an empty field, and the fill is run
+ * against that value so the provenance list records it as theirs.
+ */
+function userContextWindow(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 /** The catalogue provider a kind belongs to, for defaulting a model. */
@@ -605,7 +616,8 @@ export async function addModelEndpoint(input: EndpointInput): Promise<EndpointRe
     db,
     {
       baseUrl: target.baseUrl,
-      contextWindow: null,
+      // A window typed in the form is already set, so the fill leaves it alone.
+      contextWindow: userContextWindow(input.contextWindow),
       pricing: null,
       toolSupport: null,
       reasoningCapability: null,
@@ -625,7 +637,13 @@ export async function addModelEndpoint(input: EndpointInput): Promise<EndpointRe
     encryptedKey: apiKey ? encryptSecret(apiKey) : null,
     modelCatalogId: match.row?.id ?? null,
     catalogMatch: match.match,
-    contextWindow: filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
+    // A window typed in the form is the user's from the first save; a blank
+    // field takes what the catalogue supplied.
+    contextWindow:
+      userContextWindow(input.contextWindow) ??
+      filled?.details.contextWindow ??
+      match.row?.contextWindow ??
+      null,
     pricing: filled?.details.pricing ?? match.row?.pricing ?? null,
     toolSupport: filled?.details.toolSupport ?? null,
     reasoningCapability: filled?.details.reasoning ?? null,
@@ -657,6 +675,8 @@ export interface ProviderUpdate {
   apiKey?: string;
   /** Explicitly forget the stored key. */
   clearKey?: boolean;
+  /** A context window the user typed in this save; it stops being auto-filled. */
+  contextWindow?: number;
   /**
    * Details the user typed in this save. Those fields stop being badged as
    * catalogue-filled, because the number is now theirs.
@@ -698,16 +718,20 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
 
   // A retargeted row is a fresh endpoint: it keeps nothing it learned about the
   // old one, so every detail is refilled from the new model's catalogue entry.
-  const before: EndpointDetailSource = retargeted
-    ? {
-        baseUrl: target.baseUrl,
-        contextWindow: null,
-        pricing: null,
-        toolSupport: null,
-        reasoningCapability: null,
-        autoFilledFields: null,
-      }
-    : endpoint;
+  const typedContext = userContextWindow(input.contextWindow);
+  const before: EndpointDetailSource =
+    retargeted || typedContext !== null
+      ? {
+          baseUrl: target.baseUrl,
+          // A typed window is passed in as already set, so the gap-only fill
+          // leaves it alone and never badges it as catalogue-sourced.
+          contextWindow: typedContext,
+          pricing: retargeted ? null : endpoint.pricing,
+          toolSupport: retargeted ? null : endpoint.toolSupport,
+          reasoningCapability: retargeted ? null : endpoint.reasoningCapability,
+          autoFilledFields: retargeted ? null : (typedContext !== null ? ((endpoint.autoFilledFields ?? []).filter((field) => field !== "contextWindow") as typeof endpoint.autoFilledFields) : endpoint.autoFilledFields),
+        }
+      : endpoint;
   const filled = await fillEndpointDetails(db, before, modelId);
   const match = await findCatalogMatch(db, {
     modelId,

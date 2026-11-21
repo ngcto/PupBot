@@ -11,6 +11,7 @@ import type { Database } from "@terabot/db";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { detailsOf, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
+import { fillMissingDetails } from "@terabot/providers";
 
 /**
  * The gap-only rule, proved against a real database rather than against the pure
@@ -171,6 +172,25 @@ describe.skipIf(!databaseUrl)("gap-only auto-population in Postgres", () => {
         reasoning: true,
       });
       expect(storedSources(written!)).toEqual(["reasoning"]);
+    });
+  });
+
+  it("keeps a window typed on the form, which arrives before the fill rather than after it", async () => {
+    await inRolledBackTransaction(async (tx) => {
+      // The save path hands the typed value to the fill as already set, so the
+      // catalogue's 200k is never written and never badged.
+      const fill = fillMissingDetails({ contextWindow: 32_000 }, {
+        contextWindow: 200_000,
+        pricing: { input: 3, output: 15 },
+        toolSupport: true,
+        reasoning: true,
+      });
+      expect(fill.details.contextWindow).toBe(32_000);
+      expect(fill.sources).not.toContain("contextWindow");
+      // And it leaves a row in the database holding what was typed.
+      const row = await endpointRow(tx, { contextWindow: fill.details.contextWindow });
+      const [reread] = await tx.select().from(modelEndpoint).where(eq(modelEndpoint.id, row.id));
+      expect(detailsOf(reread!).contextWindow).toBe(32_000);
     });
   });
 
