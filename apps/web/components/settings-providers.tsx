@@ -99,8 +99,8 @@ export function ProvidersPanel({ endpoints }: { endpoints: EndpointView[] }) {
                           {kindLabel(endpoint.kind)}
                         </span>
                       </p>
-                      <p className="mt-0.5 truncate text-sm text-ink-muted" title={endpoint.baseUrl}>
-                        {endpoint.baseUrl}
+                      <p className="mt-0.5 truncate text-sm text-ink-muted">
+                        {endpoint.baseUrl ?? endpoint.builtinName ?? "Built-in provider"}
                       </p>
                       <p className="mt-0.5 text-sm text-ink-faint">
                         {endpoint.modelCount === null

@@ -3,29 +3,38 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert02Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { Button, CollapsiblePanel, CollapsibleRoot, CollapsibleTrigger, Input, Select, cn } from "@terabot/ui";
+import { BUILTIN_PROVIDERS } from "@terabot/providers";
 import { useEffect, useState } from "react";
 import { addModelEndpoint, probeProviderEndpoint, updateModelEndpointProvider } from "../app/actions.ts";
 import type { ProviderProbe, TestEndpointResult } from "../app/actions.ts";
 import type { EndpointKind } from "@terabot/providers";
 import type { EndpointView } from "../lib/types.ts";
 
-type Preset = "openai" | "anthropic" | "custom";
+/**
+ * A provider is either one of ours — a fixed base URL, a key, done — or a custom
+ * OpenAI-compatible endpoint the user points somewhere themselves. The built-in
+ * list comes from `BUILTIN_PROVIDERS`, so a URL added there appears here with
+ * nothing else to change.
+ */
+type Choice = string;
 
-const PRESETS: Array<{ value: Preset; label: string }> = [
-  { value: "openai", label: "OpenAI" },
-  { value: "anthropic", label: "Anthropic" },
-  { value: "custom", label: "Custom OpenAI-compatible" },
-];
+const CUSTOM = "custom";
+const ANTHROPIC = "anthropic";
 
-const PRESET_CONFIG: Record<Preset, { kind: EndpointKind; baseUrl: string; keyHint: string }> = {
-  openai: { kind: "openai-chat", baseUrl: "https://api.openai.com/v1", keyHint: "Paste your OpenAI key" },
-  anthropic: {
+const CUSTOM_CONFIG: Record<string, { kind: EndpointKind; baseUrl: string; keyHint: string }> = {
+  [ANTHROPIC]: {
     kind: "anthropic-messages",
     baseUrl: "https://api.anthropic.com/v1",
     keyHint: "Paste your Anthropic key",
   },
-  custom: { kind: "openai-chat", baseUrl: "", keyHint: "Paste the key this gateway expects" },
+  [CUSTOM]: { kind: "openai-chat", baseUrl: "", keyHint: "Paste the key this gateway expects" },
 };
+
+const CHOICES: Array<{ value: Choice; label: string }> = [
+  ...BUILTIN_PROVIDERS.map((provider) => ({ value: provider.id, label: provider.name })),
+  { value: ANTHROPIC, label: "Anthropic" },
+  { value: CUSTOM, label: "Custom OpenAI-compatible" },
+];
 
 const KIND_OPTIONS: Array<{ value: EndpointKind; label: string }> = [
   { value: "openai-chat", label: "OpenAI chat completions" },
@@ -34,6 +43,25 @@ const KIND_OPTIONS: Array<{ value: EndpointKind; label: string }> = [
 ];
 
 const ADVANCED_KEY = "terabot:provider-advanced";
+
+/** The built-in a saved row is, matched by id and then by its URL for an old row. */
+function builtinOf(endpoint: EndpointView | null) {
+  if (!endpoint) return undefined;
+  return (
+    BUILTIN_PROVIDERS.find((provider) => provider.id === endpoint.builtinId) ??
+    BUILTIN_PROVIDERS.find((provider) => provider.baseUrl === endpoint.baseUrl)
+  );
+}
+
+function choiceOf(endpoint: EndpointView | null): Choice {
+  if (!endpoint) return BUILTIN_PROVIDERS[0]?.id ?? CUSTOM;
+  const builtin = builtinOf(endpoint);
+  if (builtin) return builtin.id;
+  if (endpoint.kind === "anthropic-messages" && endpoint.baseUrl === CUSTOM_CONFIG[ANTHROPIC]!.baseUrl) {
+    return ANTHROPIC;
+  }
+  return CUSTOM;
+}
 
 export function TestResultLine({ result }: { result: TestEndpointResult }) {
   if (result.ok) {
@@ -61,18 +89,11 @@ export function TestResultLine({ result }: { result: TestEndpointResult }) {
   );
 }
 
-function presetOf(endpoint: EndpointView | null): Preset {
-  if (!endpoint) return "openai";
-  if (endpoint.kind === "anthropic-messages") return "anthropic";
-  const known = endpoint.baseUrl === PRESET_CONFIG.openai.baseUrl;
-  return known && endpoint.kind === "openai-chat" ? "openai" : "custom";
-}
-
 /**
- * A provider belongs to Settings, not to a bot: kind, key and base URL are set
- * once here, and every bot then picks this provider plus a model. The key is
- * posted to a server action and never read back — an edit leaves it untouched
- * unless a new one is typed.
+ * A provider belongs to Settings, not to a bot: the provider, its key and — for a
+ * custom endpoint only — its base URL are set once here, and every bot then picks
+ * this provider plus a model. The key is posted to a server action and never read
+ * back — an edit leaves it untouched unless a new one is typed.
  */
 export function ProviderForm({
   endpoint = null,
@@ -84,9 +105,9 @@ export function ProviderForm({
   onCancel: () => void;
 }) {
   const editing = Boolean(endpoint);
-  const [preset, setPreset] = useState<Preset>(() => presetOf(endpoint));
-  const [kind, setKind] = useState<EndpointKind>(endpoint?.kind as EndpointKind | undefined ?? "openai-chat");
-  const [baseUrl, setBaseUrl] = useState(endpoint?.baseUrl ?? PRESET_CONFIG.openai.baseUrl);
+  const [choice, setChoice] = useState<Choice>(() => choiceOf(endpoint));
+  const [kind, setKind] = useState<EndpointKind>((endpoint?.kind as EndpointKind | undefined) ?? "openai-chat");
+  const [baseUrl, setBaseUrl] = useState(endpoint?.baseUrl ?? "");
   const [label, setLabel] = useState(endpoint?.label ?? "");
   const [apiKey, setApiKey] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -94,6 +115,13 @@ export function ProviderForm({
   const [probe, setProbe] = useState<ProviderProbe | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const builtin = BUILTIN_PROVIDERS.find((provider) => provider.id === choice);
+  // A built-in's URL is fixed, so the form never shows it and never accepts one.
+  const custom = !builtin;
+  const config = custom ? CUSTOM_CONFIG[choice === ANTHROPIC ? ANTHROPIC : CUSTOM]! : null;
+  const targetUrl = builtin?.baseUrl ?? baseUrl;
+  const canSave = Boolean(targetUrl.trim());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -105,19 +133,21 @@ export function ProviderForm({
     window.localStorage.setItem(ADVANCED_KEY, advanced ? "1" : "0");
   }, [advanced]);
 
-  function changePreset(next: Preset) {
-    setPreset(next);
-    if (next === "custom") {
-      setKind("openai-chat");
-      if (preset !== "custom") setBaseUrl("");
+  function changeChoice(next: Choice) {
+    setChoice(next);
+    setProbe(null);
+    const provider = BUILTIN_PROVIDERS.find((entry) => entry.id === next);
+    if (provider) {
+      setKind(provider.kind);
+      setBaseUrl(provider.baseUrl);
       return;
     }
-    const config = PRESET_CONFIG[next];
-    setKind(config.kind);
-    setBaseUrl(config.baseUrl);
+    const preset = CUSTOM_CONFIG[next];
+    if (preset) {
+      setKind(preset.kind);
+      setBaseUrl(preset.baseUrl);
+    }
   }
-
-  const config = PRESET_CONFIG[preset];
 
   async function test() {
     setTesting(true);
@@ -126,8 +156,8 @@ export function ProviderForm({
     try {
       const result = await probeProviderEndpoint({
         ...(endpoint ? { endpointId: endpoint.id } : {}),
-        kind,
-        baseUrl,
+        kind: builtin?.kind ?? kind,
+        ...(builtin ? { builtinId: builtin.id } : { baseUrl }),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
       });
       setProbe(result);
@@ -147,15 +177,15 @@ export function ProviderForm({
         await updateModelEndpointProvider({
           endpointId: endpoint.id,
           label: label.trim() || endpoint.label,
-          kind,
-          baseUrl,
+          kind: builtin?.kind ?? kind,
+          ...(builtin ? { builtinId: builtin.id } : { baseUrl }),
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         });
       } else {
         await addModelEndpoint({
           label: label.trim(),
-          kind,
-          baseUrl,
+          kind: builtin?.kind ?? kind,
+          ...(builtin ? { builtinId: builtin.id } : { baseUrl }),
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         });
       }
@@ -171,11 +201,7 @@ export function ProviderForm({
     <div className="space-y-3" data-testid="provider-form">
       <div className="flex items-center justify-between gap-4">
         <span className="text-body">Provider</span>
-        <Select
-          value={preset}
-          onValueChange={(value) => changePreset(value as Preset)}
-          options={PRESETS}
-        />
+        <Select value={choice} onValueChange={(value) => changeChoice(value)} options={CHOICES} />
       </div>
 
       <div>
@@ -183,7 +209,7 @@ export function ProviderForm({
         <Input
           aria-label="Provider name"
           value={label}
-          placeholder="OpenAI"
+          placeholder={builtin?.name ?? "My gateway"}
           onChange={(event) => setLabel(event.target.value)}
         />
       </div>
@@ -193,7 +219,7 @@ export function ProviderForm({
         <Input
           aria-label="API key"
           type="password"
-          placeholder={editing ? "Leave blank to keep the stored key" : config.keyHint}
+          placeholder={editing ? "Leave blank to keep the stored key" : builtin?.keyHint ?? config!.keyHint}
           value={apiKey}
           onChange={(event) => {
             setApiKey(event.target.value);
@@ -203,7 +229,7 @@ export function ProviderForm({
         <p className="mt-1.5 text-sm text-ink-faint">Stored encrypted on the server. It is never shown again.</p>
       </div>
 
-      {preset === "custom" ? (
+      {custom ? (
         <div>
           <p className="mb-1.5 text-sm text-ink-muted">Base URL</p>
           <Input
@@ -224,26 +250,34 @@ export function ProviderForm({
         </CollapsibleTrigger>
         <CollapsiblePanel>
           <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-sm text-ink-muted">Wire format</span>
-              <Select
-                value={kind}
-                onValueChange={(value) => setKind(value as EndpointKind)}
-                options={KIND_OPTIONS}
-              />
-            </div>
-            <div>
-              <p className="mb-1.5 text-sm text-ink-muted">Base URL</p>
-              <Input
-                aria-label="Advanced base URL"
-                value={baseUrl}
-                placeholder="https://api.openai.com/v1"
-                onChange={(event) => {
-                  setBaseUrl(event.target.value);
-                  setProbe(null);
-                }}
-              />
-            </div>
+            {custom ? (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-ink-muted">Wire format</span>
+                <Select
+                  value={kind}
+                  onValueChange={(value) => setKind(value as EndpointKind)}
+                  options={KIND_OPTIONS}
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-ink-muted">
+                {builtin!.name} uses OpenAI chat completions at a fixed address. Nothing to set.
+              </p>
+            )}
+            {custom ? (
+              <div>
+                <p className="mb-1.5 text-sm text-ink-muted">Base URL</p>
+                <Input
+                  aria-label="Advanced base URL"
+                  value={baseUrl}
+                  placeholder="https://api.openai.com/v1"
+                  onChange={(event) => {
+                    setBaseUrl(event.target.value);
+                    setProbe(null);
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         </CollapsiblePanel>
       </CollapsibleRoot>
@@ -252,7 +286,7 @@ export function ProviderForm({
         <Button
           size="sm"
           variant="secondary"
-          disabled={testing || (!endpoint && !baseUrl.trim())}
+          disabled={testing || !canSave}
           onClick={() => void test()}
         >
           {testing ? "Testing…" : "Test connection"}
@@ -260,8 +294,8 @@ export function ProviderForm({
         <Button
           size="sm"
           variant="primary"
-          className={cn(!baseUrl.trim() && "opacity-40")}
-          disabled={saving || !baseUrl.trim()}
+          className={cn(!canSave && "opacity-40")}
+          disabled={saving || !canSave}
           onClick={() => void save()}
         >
           {saving ? "Saving…" : editing ? "Save provider" : "Add provider"}

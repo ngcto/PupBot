@@ -19,12 +19,7 @@ export interface ModelDetails {
   reasoning?: boolean | null;
 }
 
-export const DETAIL_FIELDS = [
-  "contextWindow",
-  "pricing",
-  "toolSupport",
-  "reasoning",
-] as const;
+export const DETAIL_FIELDS = ["contextWindow", "pricing", "toolSupport", "reasoning"] as const;
 
 export type DetailField = (typeof DETAIL_FIELDS)[number];
 
@@ -33,6 +28,12 @@ export interface DetailFill {
   details: ModelDetails;
   /** Fields this call took from the catalogue, so the UI can say where they came from. */
   autoFilled: DetailField[];
+  /**
+   * Every field in `details` that came from the catalogue, this call or an
+   * earlier one — what to store beside the details so a filled number stays
+   * badged after the fill, not only in the moment it happened.
+   */
+  sources: DetailField[];
 }
 
 function usableNumber(value: unknown): value is number {
@@ -41,10 +42,11 @@ function usableNumber(value: unknown): value is number {
 
 function usablePricing(value: unknown): value is NonNullable<ModelDetails["pricing"]> {
   if (!value || typeof value !== "object") return false;
-  const rates = Object.values(value as Record<string, unknown>);
   // A price of 0 is real (a free model); only an object with no numeric rate at
   // all is "not set".
-  return rates.some((rate) => typeof rate === "number" && Number.isFinite(rate));
+  return Object.values(value as Record<string, unknown>).some(
+    (rate) => typeof rate === "number" && Number.isFinite(rate),
+  );
 }
 
 /**
@@ -74,14 +76,21 @@ export function isSet(field: DetailField, value: unknown): boolean {
  *
  * A field is only filled when the catalogue actually has a usable value for it,
  * so an unmatched model leaves the endpoint exactly as it was.
+ *
+ * `previousSources` is what an earlier fill reported for this row, so a price
+ * that came from the catalogue stays badged on a later visit. This function
+ * cannot tell an untouched filled value from one the user later retyped — both
+ * are simply "set" — so a write path that accepts a user's own edit clears the
+ * mark for the fields they touched with `sourcesAfterUserEdit`.
  */
 export function fillMissingDetails(
   current: ModelDetails | null | undefined,
   catalogue: ModelDetails | null | undefined,
+  previousSources: readonly DetailField[] = [],
 ): DetailFill {
   const details: ModelDetails = { ...(current ?? {}) };
   const autoFilled: DetailField[] = [];
-  if (!catalogue) return { details, autoFilled };
+  if (!catalogue) return { details, autoFilled, sources: [] };
 
   for (const field of DETAIL_FIELDS) {
     if (isSet(field, details[field])) continue;
@@ -91,21 +100,23 @@ export function fillMissingDetails(
     (details as Record<DetailField, unknown>)[field] = candidate;
     autoFilled.push(field);
   }
-  return { details, autoFilled };
+
+  const sources = DETAIL_FIELDS.filter(
+    (field) =>
+      isSet(field, details[field]) && (autoFilled.includes(field) || previousSources.includes(field)),
+  );
+  return { details, autoFilled, sources };
 }
 
 /**
- * Which fields came from the catalogue rather than from the user. Stored beside
- * the details so the UI can badge a filled number after the fill, not only in
- * the moment it happens.
+ * The provenance list after the user edits some fields by hand: every field they
+ * touched stops being catalogue-sourced, because the number is now theirs.
  */
-export function detailSources(
-  details: ModelDetails | null | undefined,
-  autoFilled: readonly DetailField[] | null | undefined,
-): Partial<Record<DetailField, "catalogue">> {
-  const sources: Partial<Record<DetailField, "catalogue">> = {};
-  for (const field of autoFilled ?? []) {
-    if (isSet(field, details?.[field])) sources[field] = "catalogue";
-  }
-  return sources;
+export function sourcesAfterUserEdit(
+  sources: readonly DetailField[] | null | undefined,
+  edited: readonly DetailField[],
+): DetailField[] {
+  return (sources ?? []).filter(
+    (field) => !edited.includes(field) && (DETAIL_FIELDS as readonly string[]).includes(field),
+  );
 }

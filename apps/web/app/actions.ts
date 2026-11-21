@@ -13,13 +13,19 @@ import {
   user as userTable,
 } from "@terabot/db";
 import {
+  builtinForBaseUrl,
+  builtinNeedsKey,
+  builtinProvider,
   createGateway,
+  endpointConfigForRow,
   listEndpointModels,
   ModelListingError,
+  PROBE_SESSION,
   providerHintForBaseUrl,
+  sourcesAfterUserEdit,
 } from "@terabot/providers";
-import type { EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
-import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import type { DetailField, EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   connectComputerAccount as connectComputerAccountFor,
@@ -27,7 +33,8 @@ import {
 } from "../lib/computer-accounts.ts";
 import { allocateComputerInline, inlineComputers, sweepComputersInline } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
-import { endpointConfigFor } from "../lib/endpoint-config.ts";
+import { endpointConfigFor, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
+import type { EndpointDetailSource } from "../lib/endpoint-config.ts";
 import {
   assertPublicDestination,
   assertPublicEndpointUrl,
@@ -89,19 +96,34 @@ export async function createBot(input: BotInput): Promise<{ botId: string }> {
   let modelId: string | null = null;
   if (input.endpointId) {
     const [chosen] = await db
-      .select({ id: modelEndpoint.id, modelId: modelEndpoint.modelId })
+      .select({
+        id: modelEndpoint.id,
+        modelId: modelEndpoint.modelId,
+        builtinId: modelEndpoint.builtinId,
+        hasKey: sql<boolean>`${modelEndpoint.encryptedKey} is not null`,
+      })
       .from(modelEndpoint)
       .where(and(eq(modelEndpoint.id, input.endpointId), eq(modelEndpoint.workspaceId, workspace.id)))
       .limit(1);
     if (!chosen) throw new Error("that provider is not in this workspace");
+    // A built-in with no key cannot answer, so it must not be bound to a bot —
+    // the dialog already hides it, and a stale form must fail with the reason
+    // rather than create a bot whose first message errors.
+    if (builtinNeedsKey(chosen)) throw new Error("that provider has no key yet; add its key in Settings → Providers");
     endpointId = chosen.id;
     modelId = clean(input.modelId ?? "", 200) || chosen.modelId || null;
   } else {
-    const [fallback] = await db
-      .select({ id: modelEndpoint.id, modelId: modelEndpoint.modelId })
+    const candidates = await db
+      .select({
+        id: modelEndpoint.id,
+        modelId: modelEndpoint.modelId,
+        builtinId: modelEndpoint.builtinId,
+        hasKey: sql<boolean>`${modelEndpoint.encryptedKey} is not null`,
+      })
       .from(modelEndpoint)
       .where(eq(modelEndpoint.workspaceId, workspace.id))
-      .limit(1);
+      .orderBy(asc(modelEndpoint.createdAt));
+    const fallback = candidates.find((row) => !builtinNeedsKey(row));
     endpointId = fallback?.id ?? null;
     modelId = fallback?.modelId ?? null;
   }
@@ -314,7 +336,10 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
 export interface EndpointInput {
   label: string;
   kind: EndpointKind;
-  baseUrl: string;
+  /** A built-in's id; its base URL then comes from the shared table, not from `baseUrl`. */
+  builtinId?: string | null;
+  /** Required for a custom endpoint; ignored for a built-in. */
+  baseUrl?: string;
   /** Optional provider default; the first id the provider lists is used when omitted. */
   modelId?: string;
   apiKey?: string;
@@ -338,8 +363,32 @@ async function defaultModelFor(
     .then((listing) => listing.models[0]?.id ?? "")
     .catch(() => "");
   if (listed) return listed;
-  const suggested = await suggestCatalogModel(providerForKind(config.kind));
+  // A built-in is a known provider, so the catalogue is asked about the provider
+  // itself before falling back to "anything that speaks this wire format".
+  const hint = builtinForBaseUrl(config.baseUrl)?.id;
+  const suggested =
+    (hint ? await suggestCatalogModel(hint) : null) ?? (await suggestCatalogModel(providerForKind(config.kind)));
   return suggested?.modelId ?? "";
+}
+
+/**
+ * Resolves the target of a save: a built-in by its id, or a custom URL. The
+ * built-in's URL never comes from the browser, so a form cannot be tricked into
+ * pointing a known provider at another host, and the row's own `kind` follows
+ * the provider's wire format instead of whatever the form claimed.
+ */
+function resolveTarget(input: { builtinId?: string | null; baseUrl?: string; kind: EndpointKind }): {
+  builtinId: string | null;
+  baseUrl: string;
+  kind: EndpointKind;
+  label: string;
+} {
+  const builtin = builtinProvider(clean(input.builtinId ?? "", 60));
+  if (builtin) {
+    return { builtinId: builtin.id, baseUrl: builtin.baseUrl, kind: builtin.kind, label: builtin.name };
+  }
+  if (input.builtinId) throw new Error("that provider is not built in; pick one from the list or use a custom base URL");
+  return { builtinId: null, baseUrl: parseBaseUrl(clean(input.baseUrl ?? "", 300)), kind: input.kind, label: "" };
 }
 
 const providerHintFor = providerHintForBaseUrl;
@@ -458,8 +507,28 @@ export async function refreshEndpointModels(endpointId: string): Promise<Endpoin
   }
 
   try {
-    const config = await endpointConfigFor(db, endpoint);
-    const listing = await listEndpointModels(config, { fetch: publicOnlyFetch });
+    const config = await endpointConfigFor(db, endpoint, { session: PROBE_SESSION });
+    const listing = await listEndpointModels(config, {
+      fetch: publicOnlyFetch,
+      etag: endpoint.modelListEtag,
+    });
+
+    // A 304 means the cached list is still current: refresh the timestamp, keep
+    // the models, and write nothing else.
+    if (listing.notModified) {
+      await db
+        .update(modelEndpoint)
+        .set({ modelListFetchedAt: new Date(listing.fetchedAt) })
+        .where(eq(modelEndpoint.id, endpointId));
+      const cached = await mergeWithCatalogue(db, endpoint.modelList ?? [], providerHintFor(endpoint.baseUrl));
+      return {
+        source: "live",
+        fetchedAt: listing.fetchedAt,
+        models: cached,
+        note: modelListNote(cached.length),
+      };
+    }
+
     if (listing.models.length === 0) {
       return {
         source: "catalogue",
@@ -470,7 +539,11 @@ export async function refreshEndpointModels(endpointId: string): Promise<Endpoin
     }
     await db
       .update(modelEndpoint)
-      .set({ modelList: listing.models, modelListFetchedAt: new Date(listing.fetchedAt) })
+      .set({
+        modelList: listing.models,
+        modelListFetchedAt: new Date(listing.fetchedAt),
+        modelListEtag: listing.etag ?? null,
+      })
       .where(eq(modelEndpoint.id, endpointId));
     revalidatePath("/", "layout");
     const merged = await mergeWithCatalogue(db, listing.models, providerHintFor(endpoint.baseUrl));
@@ -521,26 +594,53 @@ export async function endpointModelChoices(endpointId: string): Promise<Endpoint
 
 export async function addModelEndpoint(input: EndpointInput): Promise<EndpointResult> {
   const { workspace, db } = await context();
-  const baseUrl = parseBaseUrl(clean(input.baseUrl, 300));
-  const kind = input.kind;
+  const target = resolveTarget(input);
   const apiKey = input.apiKey?.trim();
   const requested = clean(input.modelId ?? "", 200);
-  const modelId =
-    requested || (await defaultModelFor(db, { kind, baseUrl, model: "", ...(apiKey ? { apiKey } : {}) }));
+  const probeConfig = endpointConfigForRow({
+    kind: target.kind,
+    baseUrl: target.baseUrl,
+    builtinId: target.builtinId,
+    model: "",
+    ...(apiKey ? { apiKey } : {}),
+    session: PROBE_SESSION,
+  });
+  const modelId = requested || (await defaultModelFor(db, probeConfig));
 
-  const match = await findCatalogMatch(db, { modelId, providerHint: providerHintFor(baseUrl) });
+  const match = await findCatalogMatch(db, { modelId, providerHint: providerHintFor(target.baseUrl) });
   const endpointId = newId();
+  // A new row has nothing set by hand, so every catalogue field may be filled.
+  // `findCatalogMatch` picks the same row; going through the fill keeps the
+  // provenance list honest from the first save.
+  const filled = await fillEndpointDetails(
+    db,
+    {
+      baseUrl: target.baseUrl,
+      contextWindow: null,
+      pricing: null,
+      toolSupport: null,
+      reasoningCapability: null,
+      autoFilledFields: null,
+    },
+    modelId,
+  );
+
   await db.insert(modelEndpoint).values({
     id: endpointId,
     workspaceId: workspace.id,
-    kind,
-    label: clean(input.label, MAX_NAME) || providerLabel(kind),
-    baseUrl,
+    kind: target.kind,
+    label: clean(input.label, MAX_NAME) || target.label || providerLabel(target.kind),
+    baseUrl: target.baseUrl,
+    builtinId: target.builtinId,
     modelId,
     encryptedKey: apiKey ? encryptSecret(apiKey) : null,
     modelCatalogId: match.row?.id ?? null,
     catalogMatch: match.match,
-    contextWindow: match.row?.contextWindow ?? null,
+    contextWindow: filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
+    pricing: filled?.details.pricing ?? match.row?.pricing ?? null,
+    toolSupport: filled?.details.toolSupport ?? null,
+    reasoningCapability: filled?.details.reasoning ?? null,
+    autoFilledFields: filled?.sources ?? null,
   });
 
   revalidatePath("/", "layout");
@@ -550,7 +650,7 @@ export async function addModelEndpoint(input: EndpointInput): Promise<EndpointRe
   return {
     endpointId,
     match: match.match,
-    contextWindow: match.row?.contextWindow ?? null,
+    contextWindow: filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
     modelName: match.row?.name ?? null,
     modelId,
   };
@@ -560,11 +660,19 @@ export interface ProviderUpdate {
   endpointId: string;
   label: string;
   kind: EndpointKind;
-  baseUrl: string;
+  /** A built-in's id; its base URL then comes from the shared table. */
+  builtinId?: string | null;
+  /** Required for a custom endpoint; ignored for a built-in. */
+  baseUrl?: string;
   /** A new key; omitted or blank keeps the stored one. */
   apiKey?: string;
   /** Explicitly forget the stored key. */
   clearKey?: boolean;
+  /**
+   * Details the user typed in this save. Those fields stop being badged as
+   * catalogue-filled, because the number is now theirs.
+   */
+  userSetFields?: DetailField[];
 }
 
 export async function updateModelEndpointProvider(input: ProviderUpdate): Promise<void> {
@@ -576,38 +684,69 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
     .limit(1);
   if (!endpoint) throw new Error("that provider is not in this workspace");
 
-  const baseUrl = parseBaseUrl(clean(input.baseUrl, 300));
+  const target = resolveTarget(input);
   const apiKey = input.apiKey?.trim();
   // What the row will connect to afterwards. A different target has different
   // models, so neither its default model nor its cached listing can carry over:
   // a bot created without touching the picker would send an id the new provider
   // never had.
   const retargeted =
-    input.kind !== endpoint.kind || baseUrl !== endpoint.baseUrl || Boolean(apiKey) || Boolean(input.clearKey);
+    target.builtinId !== endpoint.builtinId ||
+    target.kind !== endpoint.kind ||
+    target.baseUrl !== endpoint.baseUrl ||
+    Boolean(apiKey) ||
+    Boolean(input.clearKey);
   const stored = await endpointConfigFor(db, endpoint);
-  const effective: ModelEndpointConfig = {
-    kind: input.kind,
-    baseUrl,
+  const effective = endpointConfigForRow({
+    kind: target.kind,
+    baseUrl: target.baseUrl,
+    builtinId: target.builtinId,
     model: "",
-    ...(apiKey ? { apiKey } : input.clearKey || !stored.apiKey ? {} : { apiKey: stored.apiKey }),
-  };
+    session: PROBE_SESSION,
+    ...(apiKey ? { apiKey } : stored.apiKey ? { apiKey: stored.apiKey } : {}),
+  });
   const modelId = retargeted ? await defaultModelFor(db, effective) : endpoint.modelId;
+
+  // A retargeted row is a fresh endpoint: it keeps nothing it learned about the
+  // old one, so every detail is refilled from the new model's catalogue entry.
+  const before: EndpointDetailSource = retargeted
+    ? {
+        baseUrl: target.baseUrl,
+        contextWindow: null,
+        pricing: null,
+        toolSupport: null,
+        reasoningCapability: null,
+        autoFilledFields: null,
+      }
+    : endpoint;
+  const filled = await fillEndpointDetails(db, before, modelId);
   const match = await findCatalogMatch(db, {
     modelId,
-    providerHint: providerHintFor(baseUrl),
+    providerHint: providerHintFor(target.baseUrl),
   });
+
+  // Fields the user typed now are theirs; anything else that is still
+  // catalogue-sourced keeps its badge.
+  const sources = retargeted
+    ? (filled?.sources ?? [])
+    : sourcesAfterUserEdit(storedSources(endpoint), input.userSetFields ?? []);
 
   await db
     .update(modelEndpoint)
     .set({
-      label: clean(input.label, MAX_NAME) || providerLabel(input.kind),
-      kind: input.kind,
-      baseUrl,
+      label: clean(input.label, MAX_NAME) || target.label || providerLabel(target.kind),
+      kind: target.kind,
+      baseUrl: target.baseUrl,
+      builtinId: target.builtinId,
       modelId,
       modelCatalogId: match.row?.id ?? null,
       catalogMatch: match.match,
-      contextWindow: match.row?.contextWindow ?? null,
-      ...(retargeted ? { modelList: null, modelListFetchedAt: null } : {}),
+      contextWindow: filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
+      pricing: filled?.details.pricing ?? match.row?.pricing ?? null,
+      toolSupport: filled?.details.toolSupport ?? null,
+      reasoningCapability: filled?.details.reasoning ?? null,
+      autoFilledFields: sources,
+      ...(retargeted ? { modelList: null, modelListFetchedAt: null, modelListEtag: null } : {}),
       ...(apiKey ? { encryptedKey: encryptSecret(apiKey) } : input.clearKey ? { encryptedKey: null } : {}),
     })
     .where(eq(modelEndpoint.id, endpoint.id));
@@ -654,6 +793,8 @@ export interface ProviderProbe {
 export async function probeProviderEndpoint(input: {
   endpointId?: string;
   kind: EndpointKind;
+  /** A built-in's id; its URL comes from the table, so the form need not send one. */
+  builtinId?: string | null;
   baseUrl?: string;
   apiKey?: string;
 }): Promise<ProviderProbe> {
@@ -661,6 +802,9 @@ export async function probeProviderEndpoint(input: {
   let config: ModelEndpointConfig;
   let savedModel = "";
   let unchanged = false;
+  // Which built-in this probe is for, so the test call is made with the same
+  // table-derived URL and headers the probe read the model list with.
+  let builtinId: string | null = builtinProvider(clean(input.builtinId ?? "", 60))?.id ?? null;
 
   if (input.endpointId) {
     const [endpoint] = await db
@@ -670,29 +814,56 @@ export async function probeProviderEndpoint(input: {
       .limit(1);
     if (!endpoint) return { models: [], note: "that provider is not in this workspace", test: null };
     const stored = await endpointConfigFor(db, endpoint);
-    const draftBaseUrl = clean(input.baseUrl ?? "", 300);
     const apiKey = input.apiKey?.trim() || stored.apiKey;
+    const draftBuiltin = builtinProvider(clean(input.builtinId ?? "", 60)) ?? builtinProvider(endpoint.builtinId);
+    builtinId = draftBuiltin?.id ?? null;
     let baseUrl: string;
     try {
-      baseUrl = assertPublicEndpointUrl(draftBaseUrl || stored.baseUrl);
+      const draftUrl = clean(input.baseUrl ?? "", 300) || stored.baseUrl;
+      baseUrl = assertPublicEndpointUrl(draftBuiltin?.baseUrl ?? draftUrl);
     } catch (error) {
       return { models: [], note: error instanceof Error ? error.message : "that base URL is not allowed", test: null };
     }
-    config = { kind: input.kind, baseUrl, model: "", ...(apiKey ? { apiKey } : {}) };
+    config = endpointConfigForRow({
+      kind: draftBuiltin?.kind ?? input.kind,
+      baseUrl,
+      builtinId: draftBuiltin?.id ?? null,
+      model: "",
+      session: PROBE_SESSION,
+      ...(apiKey ? { apiKey } : {}),
+    });
     savedModel = endpoint.modelId;
     unchanged =
-      config.baseUrl === stored.baseUrl && input.kind === stored.kind && !input.apiKey?.trim();
+      config.baseUrl === stored.baseUrl &&
+      config.kind === stored.kind &&
+      draftBuiltin?.id === (builtinProvider(endpoint.builtinId)?.id ?? null) &&
+      !input.apiKey?.trim();
   } else {
-    const baseUrl = clean(input.baseUrl ?? "", 300);
-    if (!baseUrl) return { models: [], note: "a base URL is required", test: null };
+    const builtin = builtinProvider(clean(input.builtinId ?? "", 60));
     let parsed: string;
-    try {
-      parsed = assertPublicEndpointUrl(baseUrl);
-    } catch (error) {
-      return { models: [], note: error instanceof Error ? error.message : "that base URL is not allowed", test: null };
+    if (builtin) {
+      parsed = assertPublicEndpointUrl(builtin.baseUrl);
+    } else {
+      const baseUrl = clean(input.baseUrl ?? "", 300);
+      if (!baseUrl) return { models: [], note: "a base URL is required", test: null };
+      try {
+        parsed = assertPublicEndpointUrl(baseUrl);
+      } catch (error) {
+        return { models: [], note: error instanceof Error ? error.message : "that base URL is not allowed", test: null };
+      }
     }
+    builtinId = builtin?.id ?? null;
     const apiKey = input.apiKey?.trim();
-    config = { kind: input.kind, baseUrl: parsed, model: "", ...(apiKey ? { apiKey } : {}) };
+    // A provider's key is proven before it is saved, so a wrong key fails its
+    // Test with the provider's own words rather than on the first message.
+    config = endpointConfigForRow({
+      kind: builtin?.kind ?? input.kind,
+      baseUrl: parsed,
+      builtinId: builtin?.id ?? null,
+      model: "",
+      session: PROBE_SESSION,
+      ...(apiKey ? { apiKey } : {}),
+    });
   }
 
   const failure = await listEndpointModels(config, { fetch: publicOnlyFetch }).then(
@@ -714,6 +885,7 @@ export async function probeProviderEndpoint(input: {
   const test = await testModelEndpoint({
     kind: config.kind,
     baseUrl: config.baseUrl,
+    builtinId,
     modelId,
     ...(config.apiKey ? { apiKey: config.apiKey } : {}),
   });
@@ -830,6 +1002,8 @@ export interface TestEndpointInput {
   /** An already saved endpoint. */
   endpointId?: string;
   kind?: EndpointKind;
+  /** A built-in's id; its URL comes from the table. */
+  builtinId?: string | null;
   baseUrl?: string;
   modelId?: string;
   apiKey?: string;
@@ -874,24 +1048,32 @@ export async function testModelEndpoint(input: TestEndpointInput): Promise<TestE
       } catch (error) {
         return fail(error instanceof Error ? error.message : "the base URL is not allowed");
       }
-      config = await endpointConfigFor(db, endpoint, input.modelId ? clean(input.modelId, 200) : undefined);
+      config = await endpointConfigFor(db, endpoint, {
+        ...(input.modelId ? { modelId: clean(input.modelId, 200) } : {}),
+        session: PROBE_SESSION,
+      });
     } else {
-      const kind = input.kind ?? "openai-chat";
+      const builtin = builtinProvider(clean(input.builtinId ?? "", 60));
       const baseUrlRaw = clean(input.baseUrl ?? "", 2000);
       const modelId = clean(input.modelId ?? "", 200);
-      if (!baseUrlRaw || !modelId) return fail("a base URL and a model id are required");
+      if (!modelId) return fail("a model id is required");
+      if (!builtin && !baseUrlRaw) return fail("a base URL and a model id are required");
       let baseUrl: string;
       try {
-        baseUrl = await assertPublicDestination(baseUrlRaw);
+        baseUrl = await assertPublicDestination(builtin?.baseUrl ?? baseUrlRaw);
       } catch (error) {
         return fail(error instanceof Error ? error.message : "the base URL is not a valid URL");
       }
-      config = {
-        kind,
+      // The probe proves the key through the same resolver a run uses, so a
+      // provider that needs a header is tested with that header.
+      config = endpointConfigForRow({
+        kind: builtin?.kind ?? input.kind ?? "openai-chat",
         baseUrl,
+        builtinId: builtin?.id ?? null,
         model: modelId,
+        session: PROBE_SESSION,
         ...(input.apiKey ? { apiKey: input.apiKey } : {}),
-      };
+      });
     }
   } catch (error) {
     return fail(error instanceof Error ? error.message : "the endpoint could not be prepared");
