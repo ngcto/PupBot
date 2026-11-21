@@ -218,8 +218,8 @@ describe("requests", () => {
 });
 
 describe("streaming a run", () => {
-  const frame = (event: string, payload: unknown) =>
-    `event: ${event}\ndata: ${JSON.stringify({ seq: 1, type: event, payload })}\n\n`;
+  const frame = (event: string, payload: unknown, seq = 1) =>
+    `event: ${event}\ndata: ${JSON.stringify({ seq, type: event, payload })}\n\n`;
 
   it("delivers each frame as it arrives, in order", async () => {
     const chunks = [
@@ -264,6 +264,63 @@ describe("streaming a run", () => {
     });
 
     await expect(client.streamRun("run-1", { onEvent: () => {} })).rejects.toBeInstanceOf(StreamUnsupportedError);
+  });
+
+  it("resumes from the last sequence when the socket closes early", async () => {
+    const reopened = [
+      "event: open\ndata: {}\n\n",
+      frame("run.started", { messageId: "m1" }, 1),
+      frame("text_delta", { text: "Hel" }, 2),
+    ];
+    const resumed = [frame("text_delta", { text: "lo" }, 3), frame("run.completed", { status: "done" }, 4)];
+
+    const { fetch, calls } = fakeFetch([streamResponse(reopened), streamResponse(resumed)]);
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      session: createMemorySessionStore("c=1"),
+      fetch,
+    });
+
+    const text: string[] = [];
+    const result = await client.streamRun("run-1", {
+      onEvent: (event) => {
+        if (event.type === "text_delta") text.push(String(event.payload.text));
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(text.join("")).toBe("Hello");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.url).toBe("http://api.test/runs/run-1/events?after=2");
+  });
+
+  it("reports a stream that never finishes instead of a truncated reply", async () => {
+    const truncated = [frame("text_delta", { text: "half" })];
+    const { fetch, calls } = fakeFetch([streamResponse(truncated)]);
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      session: createMemorySessionStore("c=1"),
+      fetch,
+    });
+
+    await expect(client.streamRun("run-1", { onEvent: () => {} })).rejects.toMatchObject({
+      code: "stream_incomplete",
+    });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("treats a terminal run event as the end even without a done frame", async () => {
+    const { fetch, calls } = fakeFetch([
+      streamResponse([frame("text_delta", { text: "ok" }), frame("run.completed", { status: "done" })]),
+    ]);
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      session: createMemorySessionStore("c=1"),
+      fetch,
+    });
+
+    await expect(client.streamRun("run-1", { onEvent: () => {} })).resolves.toEqual({ status: "done" });
+    expect(calls).toHaveLength(1);
   });
 
   it("surfaces a run error frame", async () => {

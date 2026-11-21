@@ -23,9 +23,15 @@ export interface ByteStream {
   getReader(): ByteReader;
 }
 
-const decoder = new TextDecoder();
-
-function toText(value: Uint8Array | string | undefined): string {
+/**
+ * One decoder per frame reader. A `TextDecoder` in streaming mode holds the
+ * partial bytes of a multi-byte character between calls, so a module-wide one
+ * would let two interleaved replies consume each other's state.
+ */
+function toText(
+  value: Uint8Array | string | undefined,
+  decoder: TextDecoder,
+): string {
   if (value === undefined) return "";
   if (typeof value === "string") return value;
   return decoder.decode(value, { stream: true });
@@ -37,9 +43,10 @@ function toText(value: Uint8Array | string | undefined): string {
  */
 export class SseDecoder {
   private buffer = "";
+  private decoder = new TextDecoder();
 
   push(chunk: Uint8Array | string): SseEvent[] {
-    this.buffer += toText(chunk);
+    this.buffer += toText(chunk, this.decoder);
     const events: SseEvent[] = [];
 
     for (;;) {
@@ -62,6 +69,7 @@ export class SseDecoder {
   }
 
   flush(): SseEvent[] {
+    this.buffer += this.decoder.decode();
     const rest = this.buffer.endsWith("\r") ? this.buffer.slice(0, -1) : this.buffer;
     this.buffer = "";
     if (rest !== "") {

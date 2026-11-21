@@ -61,7 +61,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setStatus("signed-in");
       },
       async signOut() {
-        await api.signOut();
+        // The cookie is gone from the keychain even if the request fails, so a
+        // network error must not leave the app looking signed in.
+        await api.signOut().catch(() => {});
         setUser(null);
         setStatus("signed-out");
       },

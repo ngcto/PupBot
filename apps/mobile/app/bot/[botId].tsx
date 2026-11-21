@@ -3,10 +3,11 @@ import type { BotDetail } from "@pupbot/api-client";
 import { COLORS, SHAPES, colorHex } from "@pupbot/avatars";
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, errorMessage } from "../../src/api.ts";
+import { useSession } from "../../src/session.tsx";
 import { Avatar } from "../../src/components/avatar.tsx";
 import { Card, Divider, Screen, StatusDot } from "../../src/components/ui.tsx";
 import { color, radius, space, type, weight } from "../../src/theme.ts";
@@ -14,6 +15,7 @@ import { color, radius, space, type, weight } from "../../src/theme.ts";
 export default function BotDetailScreen() {
   const { botId } = useLocalSearchParams<{ botId: string }>();
   const router = useRouter();
+  const { status: sessionStatus } = useSession();
   const [bot, setBot] = useState<BotDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,6 +62,8 @@ export default function BotDetailScreen() {
       setSaving(false);
     }
   };
+
+  if (sessionStatus === "signed-out") return <Redirect href="/sign-in" />;
 
   if (!bot) {
     return (

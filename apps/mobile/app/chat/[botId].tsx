@@ -2,7 +2,7 @@ import { blockReason, botStatusLine } from "@pupbot/api-client";
 import type { ChatMessage } from "@pupbot/api-client";
 import { ArrowLeft01Icon, ArrowUp02Icon, ChevronRightIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react-native";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import {
   FlatList,
@@ -18,11 +18,13 @@ import { Avatar } from "../../src/components/avatar.tsx";
 import { MessageBubble, StreamingBubble } from "../../src/components/message-bubble.tsx";
 import { Card, Screen, StatusDot } from "../../src/components/ui.tsx";
 import { useChat } from "../../src/hooks/use-chat.ts";
+import { useSession } from "../../src/session.tsx";
 import { color, radius, space, type, weight } from "../../src/theme.ts";
 
 export default function ChatScreen() {
   const { botId } = useLocalSearchParams<{ botId: string }>();
   const router = useRouter();
+  const { status: sessionStatus } = useSession();
   const { bot, state, loading, sending, send, refreshBot, dismissError } = useChat(botId);
   const [draft, setDraft] = useState("");
   const list = useRef<FlatList<ChatMessage>>(null);
@@ -37,12 +39,17 @@ export default function ChatScreen() {
   const status = bot ? botStatusLine(bot) : null;
   const blocked = bot ? blockReason(bot) : null;
 
+  // Nothing can be sent before the bot (and its conversation id) has loaded.
+  const canSend = Boolean(bot) && !sending && draft.trim().length > 0;
+
   const submit = () => {
+    if (!canSend) return;
     const text = draft.trim();
-    if (!text) return;
     setDraft("");
     void send(text);
   };
+
+  if (sessionStatus === "signed-out") return <Redirect href="/sign-in" />;
 
   const rows = state.messages;
   const streaming = state.streaming && !state.streaming.completed ? state.streaming : null;
@@ -158,23 +165,23 @@ export default function ChatScreen() {
               style={styles.input}
               multiline
               maxLength={8000}
-              editable={!sending}
+              editable={Boolean(bot) && !sending}
             />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send"
               onPress={submit}
-              disabled={!draft.trim() || sending}
+              disabled={!canSend}
               style={({ pressed }) => [
                 styles.send,
-                !draft.trim() || sending ? styles.sendInactive : null,
+                canSend ? null : styles.sendInactive,
                 pressed ? styles.sendPressed : null,
               ]}
             >
               <HugeiconsIcon
                 icon={ArrowUp02Icon}
                 size={18}
-                color={draft.trim() && !sending ? color.canvas : color.textMuted}
+                color={canSend ? color.canvas : color.textMuted}
                 strokeWidth={2}
               />
             </Pressable>

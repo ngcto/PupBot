@@ -65,6 +65,8 @@ export function createMemorySessionStore(initial: string | null = null): Session
   };
 }
 
+const STREAM_RECONNECTS = 2;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -246,47 +248,64 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     },
 
     async streamRun(runId, streamOptions) {
-      const cookie = await session.read();
-      const after = streamOptions.after ?? 0;
-      const response = await doFetch(`${baseUrl}/runs/${encodeURIComponent(runId)}/events?after=${after}`, {
-        headers: {
-          accept: "text/event-stream",
-          ...(cookie ? { cookie } : {}),
-        },
-        ...(streamOptions.signal === undefined ? {} : { signal: streamOptions.signal }),
-      });
-
-      if (response.status === 401) {
-        await session.clear();
-        options.onUnauthorized?.();
-        throw new UnauthorizedError();
-      }
-      if (!response.ok) {
-        throw new ApiError(response.status, "stream_failed", `The reply could not be opened (${response.status}).`);
-      }
-      if (!response.body) throw new StreamUnsupportedError();
-
+      let after = streamOptions.after ?? 0;
       let status = "unknown";
-      for await (const frame of readSseEvents(response.body)) {
-        if (frame.event === "open") continue;
-        if (frame.event === "done") {
-          const payload = safeJson(frame.data) as { status?: string } | null;
-          status = payload?.status ?? "done";
-          return { status };
+
+      // The replay log is resumable by sequence, so a dropped socket reconnects
+      // exactly where it stopped instead of rendering a half-finished reply.
+      for (let attempt = 0; attempt <= STREAM_RECONNECTS; attempt += 1) {
+        const cookie = await session.read();
+        const response = await doFetch(`${baseUrl}/runs/${encodeURIComponent(runId)}/events?after=${after}`, {
+          headers: {
+            accept: "text/event-stream",
+            ...(cookie ? { cookie } : {}),
+          },
+          ...(streamOptions.signal === undefined ? {} : { signal: streamOptions.signal }),
+        });
+
+        if (response.status === 401) {
+          await session.clear();
+          options.onUnauthorized?.();
+          throw new UnauthorizedError();
         }
-        if (frame.event === "error") {
-          const payload = safeJson(frame.data) as { message?: string } | null;
-          throw new ApiError(502, "run_error", payload?.message ?? "The reply stopped unexpectedly.");
+        if (!response.ok) {
+          throw new ApiError(response.status, "stream_failed", `The reply could not be opened (${response.status}).`);
+        }
+        if (!response.body) throw new StreamUnsupportedError();
+
+        let terminal = false;
+        for await (const frame of readSseEvents(response.body)) {
+          if (frame.event === "open") continue;
+          if (frame.event === "done") {
+            const payload = safeJson(frame.data) as { status?: string } | null;
+            status = payload?.status ?? "done";
+            return { status };
+          }
+          if (frame.event === "error") {
+            const payload = safeJson(frame.data) as { message?: string } | null;
+            throw new ApiError(502, "run_error", payload?.message ?? "The reply stopped unexpectedly.");
+          }
+
+          const event = safeJson(frame.data) as RunEvent | null;
+          if (!event || typeof event.type !== "string") continue;
+          if (typeof event.seq === "number") after = Math.max(after, event.seq);
+          streamOptions.onEvent(event);
+          if (event.type === "run.completed") {
+            terminal = true;
+            status = typeof event.payload.status === "string" ? event.payload.status : "done";
+          }
         }
 
-        const event = safeJson(frame.data) as RunEvent | null;
-        if (!event || typeof event.type !== "string") continue;
-        streamOptions.onEvent(event);
-        if (event.type === "run.completed") {
-          status = typeof event.payload.status === "string" ? event.payload.status : "done";
-        }
+        if (terminal) return { status };
       }
-      return { status };
+
+      // Ending here means the connection closed without the run finishing: say so
+      // rather than reporting a truncated answer as a complete one.
+      throw new ApiError(
+        502,
+        "stream_incomplete",
+        "The reply stopped before it finished. Reopen the chat to pick it up.",
+      );
     },
   };
 }

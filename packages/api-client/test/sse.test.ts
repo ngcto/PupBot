@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SseDecoder, readSseEvents } from "../src/sse.ts";
 import type { ByteStream } from "../src/sse.ts";
 
-function streamOf(chunks: string[]): ByteStream {
+function streamOf(chunks: (string | Uint8Array)[]): ByteStream {
   let index = 0;
   return {
     getReader() {
@@ -70,6 +70,27 @@ describe("readSseEvents", () => {
     for await (const frame of readSseEvents(stream)) seen.push(frame.event);
 
     expect(seen).toEqual(["open", "text_delta", "done"]);
+  });
+
+  it("decodes a character split across two reads", async () => {
+    const frame = new TextEncoder().encode('event: text_delta\ndata: {"text":"\u2603"}\n\n');
+    const cut = frame.indexOf(0xe2) + 1;
+    const stream = streamOf([frame.slice(0, cut), frame.slice(cut)]);
+
+    const seen: string[] = [];
+    for await (const event of readSseEvents(stream)) seen.push(event.data);
+    expect(seen).toEqual(['{"text":"\u2603"}']);
+  });
+
+  it("keeps the byte decoder inside each stream", () => {
+    const first = new SseDecoder();
+    const second = new SseDecoder();
+    const snowman = new TextEncoder().encode('event: a\ndata: "\u2603"\n\n');
+    const cut = snowman.indexOf(0xe2) + 1;
+
+    expect(first.push(snowman.slice(0, cut))).toEqual([]);
+    expect(second.push('event: b\ndata: "ok"\n\n')).toEqual([{ event: "b", data: '"ok"', id: null }]);
+    expect(first.push(snowman.slice(cut))).toEqual([{ event: "a", data: '"\u2603"', id: null }]);
   });
 
   it("flushes a trailing frame with no blank line", async () => {
