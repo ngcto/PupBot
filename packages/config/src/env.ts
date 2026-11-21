@@ -34,6 +34,14 @@ const serverSchema = z.object({
   INSTABOX_CAPACITY: z.coerce.number().int().positive().default(1),
   BOAT_API_KEY: optionalSecret,
   /**
+   * A commercial CAPTCHA solver, so a bot can get through a hard challenge on a
+   * service its owner already has an account on. Optional: with no key, a
+   * challenge is reported to the owner as needing a person instead.
+   */
+  CAPTCHA_SOLVER_PROVIDER: z.string().optional(),
+  CAPTCHA_SOLVER_API_KEY: optionalSecret,
+  CAPTCHA_SOLVER_BASE_URL: optionalUrl,
+  /**
    * Agent37: a deployment key here turns on managed Agent37 computers.
    * https://agent37.com/dashboard/cloud/api-keys
    */
@@ -46,6 +54,7 @@ const serverSchema = z.object({
   AGENT37_CAPACITY: z.coerce.number().int().positive().default(1),
   /** Template a new Agent37 instance starts from. */
   AGENT37_TEMPLATE: z.string().min(1).default("agent37-hermes"),
+
   /** Composio Platform project API key. Server-side only: it never reaches the client bundle. */
   COMPOSIO_PROJECT_API_KEY: optionalSecret,
   /** Overrides Composio's base URL. Only for tests, which point it at a local stub. */
