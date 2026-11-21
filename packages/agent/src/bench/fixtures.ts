@@ -146,8 +146,26 @@ export function fixtureImplementations(world: WorldState): Record<string, (input
       return { effect: "confirmed", verified: true, app: name, windows: [{ id: "w9", app: name, title: `${name} — Untitled` }] };
     },
     observeWindow: ({ windowId, screenshot }) => {
-      const id = str(windowId) || "w1";
-      const window = WINDOWS.find((w) => w.id === id) ?? WINDOWS[0]!;
+      const id = str(windowId);
+      const window = WINDOWS.find((w) => w.id === id);
+      // An unknown or missing window id is refused, not quietly answered with the first
+      // window. The silent default made a wrong argument look like a wrong *answer*: a
+      // program that read `observeWindow({ window: "w2" })` — the native schema's name
+      // for the argument, not the program's — got Invoices back and reported that the
+      // tool "returned the wrong window". The real driver refuses an id it does not
+      // know, and a fixture that does not is measuring the model's patience with a lie.
+      if (!window) {
+        return {
+          effect: "refused",
+          verified: false,
+          target: id || "(missing)",
+          refusal: {
+            code: id ? "unknown_window" : "missing_window_id",
+            message: id ? `no window with id ${id}` : "observeWindow needs a windowId from listWindows",
+          },
+          escalation: { recommended: "observe", reason: "list the windows and use one of those ids" },
+        };
+      }
       const rows = tree(id);
       return {
         windowId: window.id,

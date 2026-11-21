@@ -107,6 +107,37 @@ describe("anthropic-messages adapter", () => {
     expect(events[0]).toMatchObject({ type: "error", code: "overloaded", retryable: true, status: 529 });
   });
 
+  /**
+   * `message_start` on this endpoint arrives reporting zero for both counts, with the
+   * real numbers on the delta. Emitting a usage event for it was harmless to a caller
+   * that overwrites and wrong for one that sums: the benchmark sums, and it recorded a
+   * turn at 0 input tokens and then the delta's count beside it, so a column of ~6-token
+   * turns appeared for prompts with a 98-token system message.
+   */
+  it("does not emit a usage event for a message_start that reports nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse(
+          [
+            'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":0}}}',
+            'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}',
+            'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":31,"output_tokens":7}}',
+            'event: message_stop\ndata: {"type":"message_stop"}',
+            "",
+          ].join("\n\n"),
+        ),
+      ),
+    );
+
+    const events = await collect(anthropicMessagesAdapter({ endpoint, messages: [{ role: "user", content: "hi" }] }));
+    const usages = events.filter((event) => event.type === "usage");
+    expect(usages).toHaveLength(1);
+    expect(usages[0]).toMatchObject({ inputTokens: 31, outputTokens: 7 });
+    const summed = usages.reduce((total, event) => total + ((event as { inputTokens?: number }).inputTokens ?? 0), 0);
+    expect(summed).toBe(31);
+  });
+
   it("maps a max_tokens stop reason to the max_tokens error code", async () => {
     vi.stubGlobal(
       "fetch",

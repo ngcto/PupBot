@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildArm } from "../src/bench/arms.ts";
 import { renderTable } from "../src/bench/runner.ts";
 import { TASKS, task10Expected } from "../src/bench/tasks.ts";
+import { fixtureImplementations, freshWorld } from "../src/bench/fixtures.ts";
 import { armA, armB, armC, availableToolNames, STALE_TOKEN } from "../src/bench/arms.ts";
 import { treeFor, WINDOWS } from "../src/bench/fixtures.ts";
 
@@ -224,21 +225,67 @@ describe("the table", () => {
   it("reports the median of the reps, not the fastest", () => {
     // Three reps where one is an outlier: the fastest would flatter whichever arm
     // varies most, and code mode is the arm most likely to.
-    const base = { attemptable: true, ok: true, why: "", answer: "", outputTokens: 0, wallMsModel: 0 };
+    const base = {
+      attemptable: true,
+      ok: true,
+      why: "",
+      answer: "",
+      outputTokens: 0,
+      wallMsModel: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
     const table = renderTable(
       [
-        { ...base, arm: "c", taskId: 1, turns: 10, inputTokens: 1000, wallMsInclusive: 100 },
-        { ...base, arm: "c", taskId: 1, turns: 4, inputTokens: 400, wallMsInclusive: 40 },
-        { ...base, arm: "c", taskId: 1, turns: 6, inputTokens: 600, wallMsInclusive: 60 },
+        { ...base, arm: "c", taskId: 1, turns: 10, inputTokens: 1000, promptTokens: 1000, wallMsInclusive: 100 },
+        { ...base, arm: "c", taskId: 1, turns: 4, inputTokens: 400, promptTokens: 400, wallMsInclusive: 40 },
+        { ...base, arm: "c", taskId: 1, turns: 6, inputTokens: 600, promptTokens: 600, wallMsInclusive: 60 },
       ],
       3,
     );
+    // The median row's uncached column, between the prompt total and the output count.
     expect(table).toContain("| 6 | 600 |");
     expect(table).not.toContain("| 4 | 400 |");
   });
 
   it("names the turn unit, so nobody reads it as tool calls", () => {
-    expect(renderTable([], 1)).toContain("Turns (model round trips)");
+    expect(renderTable([], 1)).toContain("| Turns |");
+    expect(renderTable([], 1)).not.toContain("Turns (tool calls)");
+  });
+
+  /**
+   * The column that decides the surface question.
+   *
+   * `inputTokens` is the uncached remainder, so a run whose prompt is served from the
+   * provider's cache reports a handful of tokens for a four-thousand-token prompt. The
+   * table has to show all of it, or it compares two arms' cache misses and calls that
+   * their cost — which is what it did, reading `in=6` and `in=10` for turns that each
+   * carried a 98-token system prompt.
+   */
+  it("shows every billed prompt token, not just the uncached remainder", () => {
+    const table = renderTable(
+      [
+        {
+          attemptable: true,
+          ok: true,
+          why: "",
+          answer: "",
+          arm: "b",
+          taskId: 1,
+          turns: 2,
+          inputTokens: 6,
+          outputTokens: 50,
+          cacheReadTokens: 3900,
+          cacheWriteTokens: 100,
+          promptTokens: 4006,
+          wallMsModel: 0,
+          wallMsInclusive: 60,
+        },
+      ],
+      1,
+    );
+    expect(table).toContain("Prompt tokens (all, billed)");
+    expect(table).toContain("| 4006 | 6 | 4000 |");
   });
 });
 
@@ -248,5 +295,38 @@ describe("buildArm", () => {
     first.world.clicked.push("t1");
     const second = buildArm("b");
     expect(second.world.clicked).toHaveLength(0);
+  });
+});
+
+describe("the fixtures refuse what a driver would refuse", () => {
+  const observed = (args: Record<string, unknown>) => {
+    const impl = fixtureImplementations(freshWorld());
+    return impl.observeWindow!(args) as { effect?: string; windowId?: string; refusal?: { code: string } };
+  };
+
+  it("reads the window it was asked for", () => {
+    expect(observed({ windowId: "w2" })).toMatchObject({ windowId: "w2" });
+  });
+
+  /**
+   * The silent default was a lie that looked like a bug in the model.
+   *
+   * A program that wrote `observeWindow({ window: "w2" })` — the native schema's name
+   * for the argument — got the *first* window back and reported that the tool "returned
+   * the Invoices window instead". It was, and it was because the fixture defaulted a
+   * missing id to `w1` rather than refusing. Three code-mode arms lost task 6 to this
+   * and the fixture made the model's account sound like a hallucination.
+   */
+  it("refuses a missing window id instead of answering with the first window", () => {
+    const missing = observed({ window: "w2" });
+    expect(missing.effect).toBe("refused");
+    expect(missing.refusal?.code).toBe("missing_window_id");
+    expect(missing).not.toMatchObject({ windowId: "w1" });
+  });
+
+  it("refuses an id it does not know", () => {
+    const unknown = observed({ windowId: "nope" });
+    expect(unknown.effect).toBe("refused");
+    expect(unknown.refusal?.code).toBe("unknown_window");
   });
 });
