@@ -95,7 +95,7 @@ export default function DocsPage() {
               Provisioning goes through an allocator over a provider interface, with Instabox as the provider. It
               creates a machine on request, sleeps it when it goes idle, renews its lease and starts it again when work
               needs it. A wake that times out, or one that finds the box gone, replaces it; a credential or quota
-              failure keeps the box bound and blocks the bot with the reason.
+              failure keeps the box bound and fails that run with the reason.
             </p>
             <p>
               Running commands on that machine from a chat is not wired yet: the harness in this build sends your
