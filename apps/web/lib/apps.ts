@@ -102,7 +102,16 @@ export async function refreshConnections(userId: string): Promise<ConnectedApp[]
   if (client && pending.length > 0) {
     await Promise.all(
       pending.map(async (row) => {
-        const remote = await client.getConnection(row.composioAccountId).catch(() => null);
+        // A timeout or a 5xx says nothing about the connection, and an approval that
+        // lands during one would be lost for good once the row reads as failed: only a
+        // confirmed 404 ends the wait, and everything else leaves the row pending until
+        // the next poll.
+        let remote;
+        try {
+          remote = await client.getConnection(row.composioAccountId);
+        } catch {
+          return;
+        }
         if (!remote) {
           await database()
             .update(appConnection)
@@ -289,14 +298,17 @@ export async function disconnectConnection(input: { userId: string; connectionId
   const row = rows[0];
   if (!row) throw new AppError("That connection is not yours.");
 
-  const client = composioClient();
-  if (client) {
-    try {
-      await client.deleteConnection(row.composioAccountId);
-    } catch (error) {
-      if (!(error instanceof ComposioError) || error.code !== "not_found") {
-        throw new AppError(`Composio could not revoke the connection: ${describeError(error)}`);
-      }
+  // Revocation is the point of disconnect, so a missing key is a refusal, not a
+  // local delete: dropping the row alone would leave the grant live at the provider
+  // with no way for us to find it again.
+  const client = requireComposio();
+  try {
+    await client.deleteConnection(row.composioAccountId);
+  } catch (error) {
+    // Already gone upstream is the outcome we wanted; anything else keeps the row so
+    // the person can retry and the grant stays visible.
+    if (!(error instanceof ComposioError) || error.code !== "not_found") {
+      throw new AppError(`Composio could not revoke the connection: ${describeError(error)}`);
     }
   }
 

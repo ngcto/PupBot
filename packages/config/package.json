@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@vercel/oidc": "^4.0.9",
     "dotenv": "^18.0.10",
     "zod": "^4.1.12"
   },

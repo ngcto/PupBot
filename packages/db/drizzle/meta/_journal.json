@@ -47,8 +47,22 @@
     {
       "idx": 6,
       "version": "7",
-      "when": 1795247731699,
-      "tag": "0006_app_connections",
+      "when": 1795245420686,
+      "tag": "0006_attachment_workspace_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795245420687,
+      "tag": "0007_model_gateway_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795248455218,
+      "tag": "0008_app_connections",
       "breakpoints": true
     }
   ]

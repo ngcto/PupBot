@@ -74,7 +74,11 @@ export function MessageBubble({
   };
 
   return (
-    <div className={cn("group/message flex w-full flex-col", isUser ? "items-end" : "items-start")}>
+    <div
+      data-testid="message"
+      data-role={message.role}
+      className={cn("group/message flex w-full flex-col", isUser ? "items-end" : "items-start")}
+    >
       <div className={cn("relative flex max-w-[560px] flex-col", isUser ? "items-end" : "items-start")}>
         {files.length > 0 ? (
           <div className={cn("mb-1.5 flex flex-wrap gap-2", isUser ? "justify-end" : "justify-start")}>
@@ -88,6 +92,7 @@ export function MessageBubble({
 
         {text || quote ? (
           <div
+            data-testid="message-text"
             className={cn(
               "rounded-lg px-3 py-[7px] text-body text-ink",
               isUser ? "border border-transparent" : "bubble-fill",

@@ -62,8 +62,13 @@ export interface ConnectionLink {
   expiresAt: string;
 }
 
-/** Schemas a hosted connect page can collect from the user itself. */
-const USER_SUPPLIED_SCHEMES = ["API_KEY", "BEARER_TOKEN", "BASIC"];
+/**
+ * Schemas a hosted connect page can collect from the user itself. Exported so the
+ * client picks a custom-auth scheme out of exactly the set `supportFor` tests: a
+ * toolkit that is `user-key` for its API key must not be asked for OAuth client
+ * credentials it does not have.
+ */
+export const USER_SUPPLIED_SCHEMES = ["API_KEY", "BEARER_TOKEN", "BASIC"];
 
 /**
  * Which connect flow a toolkit gets. Composio-managed OAuth is the beta path:

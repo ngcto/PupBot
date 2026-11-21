@@ -28,6 +28,7 @@ export type AppsAction =
   | { type: "query"; query: string }
   | { type: "category"; category: string | null }
   | { type: "loaded"; page: AppList }
+  | { type: "more"; page: AppList }
   | { type: "failed"; error: string }
   | { type: "select"; slug: string }
   | { type: "busy"; toolkit: string | null }
@@ -55,6 +56,21 @@ export function appsReducer(state: AppsState, action: AppsAction): AppsState {
       return { ...state, query: action.query, loading: true };
     case "category":
       return { ...state, category: action.category, loading: true };
+    case "more": {
+      // A second page appends; the cursor moves on so scrolling keeps reaching
+      // further into the catalogue instead of re-reading the first page forever.
+      if (!state.page) return { ...state, page: action.page, loading: false, error: action.page.error };
+      const seen = new Set(state.page.items.map((item) => item.slug));
+      return {
+        ...state,
+        page: {
+          ...state.page,
+          items: [...state.page.items, ...action.page.items.filter((item) => !seen.has(item.slug))],
+          nextCursor: action.page.nextCursor,
+        },
+        loading: false,
+      };
+    }
     case "loaded": {
       // Keep the current pick if it survived the filter; otherwise land on the first
       // result, so the detail panel is never empty beside a full grid.
@@ -112,8 +128,18 @@ export function actionFor(app: AppCard, connection: ConnectedApp | null): AppAct
   if (connection?.status === "active") return "disconnect";
   if (connection?.status === "pending") return "pending";
   if (connection?.status === "error") return "retry";
-  if (app.support === "needs-setup") return "needs-setup";
+  if (!connectable(app)) return "needs-setup";
   return "connect";
+}
+
+/**
+ * Whether the card can actually connect. A toolkit Composio has no managed app for
+ * still connects when the project already holds an auth config for it: that config
+ * is what `ensureAuthConfig` would reuse, so hiding the button would block the one
+ * path an administrator has already set up.
+ */
+function connectable(app: AppCard): boolean {
+  return app.support !== "needs-setup" || app.authConfigId !== null;
 }
 
 /** The one-line state under an app's name in the grid. */
@@ -121,6 +147,6 @@ export function tileStateFor(app: AppCard, connection: ConnectedApp | null): str
   if (connection?.status === "active") return "Connected";
   if (connection?.status === "pending") return "Waiting for approval";
   if (connection?.status === "error") return "Couldn't connect";
-  if (app.support === "needs-setup") return "Needs setup";
+  if (!connectable(app)) return "Needs setup";
   return "Available";
 }

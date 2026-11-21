@@ -12,8 +12,20 @@ for (const candidate of [resolve(process.cwd(), "../../.env"), resolve(process.c
 }
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@terabot/ui", "@terabot/avatars", "@terabot/db", "@terabot/config", "@terabot/composio"],
+  transpilePackages: [
+    "@terabot/api",
+    "@terabot/agent",
+    "@terabot/avatars",
+    "@terabot/composio",
+    "@terabot/computers",
+    "@terabot/config",
+    "@terabot/db",
+    "@terabot/providers",
+    "@terabot/storage",
+    "@terabot/ui",
+  ],
   experimental: { externalDir: true },
+  serverExternalPackages: ["pg", "pg-boss"],
   devIndicators: false,
 };
 

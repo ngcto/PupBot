@@ -53,6 +53,27 @@ export function AppsDialog({
     if (result.error) toast(result.error);
   }, []);
 
+  // Composio pages the catalogue: without following its cursor, everything after the
+  // first page is unreachable unless a person guesses a narrower search.
+  const loadingMore = useRef(false);
+  const loadMore = useCallback(async (cursor: string) => {
+    // The button stays clickable while the request is out; a second press would
+    // append the same page twice and burn a call.
+    if (loadingMore.current) return;
+    loadingMore.current = true;
+    const ticket = inFlight.current;
+    const result = await loadApps({
+      search: state.query.trim() || undefined,
+      category: state.category ?? undefined,
+      cursor,
+    });
+    loadingMore.current = false;
+    // A search or category change while this was in flight makes it stale.
+    if (ticket !== inFlight.current) return;
+    dispatch({ type: "more", page: result });
+    if (result.error) toast(result.error);
+  }, [state.query, state.category]);
+
   // Opening reloads the catalogue, so a connection made on another device shows up.
   useEffect(() => {
     if (!open) return;
@@ -168,6 +189,7 @@ export function AppsDialog({
                 stateFor={(card) => tileStateFor(card, connectionFor(state, card.slug))}
                 onSelect={(slug) => dispatch({ type: "select", slug })}
                 onRetry={bumpRetry}
+                onLoadMore={loadMore}
               />
             </div>
           </div>
@@ -291,11 +313,13 @@ function Grid({
   stateFor,
   onSelect,
   onRetry,
+  onLoadMore,
 }: {
   state: ReturnType<typeof initialAppsState>;
   stateFor: (app: AppCard) => string;
   onSelect: (slug: string) => void;
   onRetry: () => void;
+  onLoadMore: (cursor: string) => void;
 }) {
   if (state.error) {
     return (
@@ -335,32 +359,44 @@ function Grid({
     );
   }
 
+  const cursor = state.page.nextCursor;
+
   return (
-    <div
-      data-testid="apps-grid"
-      className={cn("grid grid-cols-3 gap-1.5 transition-opacity", state.loading && "opacity-60")}
-    >
-      {state.page.items.map((card) => (
-        <button
-          key={card.slug}
-          type="button"
-          data-testid={`app-tile-${card.slug}`}
-          onClick={() => onSelect(card.slug)}
-          className={cn(
-            "flex items-center gap-2.5 rounded-lg p-2.5 text-left transition-colors",
-            card.slug === state.selected ? "bg-raised-2" : "hover:bg-raised",
-          )}
+    <div className={cn("transition-opacity", state.loading && "opacity-60")}>
+      <div data-testid="apps-grid" className="grid grid-cols-3 gap-1.5">
+        {state.page.items.map((card) => (
+          <button
+            key={card.slug}
+            type="button"
+            data-testid={`app-tile-${card.slug}`}
+            onClick={() => onSelect(card.slug)}
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg p-2.5 text-left transition-colors",
+              card.slug === state.selected ? "bg-raised-2" : "hover:bg-raised",
+            )}
+          >
+            <AppLogo app={card} size={34} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-body font-medium text-ink">{card.name}</p>
+              <p className="truncate text-sm text-ink-muted">{stateFor(card)}</p>
+            </div>
+            {stateFor(card) === "Connected" ? (
+              <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} className="text-[#2f7cf6]" />
+            ) : null}
+          </button>
+        ))}
+      </div>
+      {cursor ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="mt-2 w-full"
+          onClick={() => onLoadMore(cursor)}
+          data-testid="apps-more"
         >
-          <AppLogo app={card} size={34} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-body font-medium text-ink">{card.name}</p>
-            <p className="truncate text-sm text-ink-muted">{stateFor(card)}</p>
-          </div>
-          {stateFor(card) === "Connected" ? (
-            <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} className="text-[#2f7cf6]" />
-          ) : null}
-        </button>
-      ))}
+          Show more apps
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -400,11 +436,17 @@ function connectCopy(app: AppCard, kind: string): string {
     return `${app.name} is linked. Disconnecting revokes the access at ${app.name} itself, not just here.`;
   }
   if (kind === "pending") return "Approve the request in the window that opened, and this becomes connected.";
-  if (app.support === "managed") {
+  // An auth config the project already holds decides the flow, whatever the toolkit
+  // itself advertises: that is the config `ensureAuthConfig` reuses.
+  if (app.support === "managed" || app.authConfigManaged === true) {
     return `${app.name} opens its own sign-in page. Approve access and this app shows connected here; disconnect any time. Your password never passes through PupBot.`;
   }
-  if (app.support === "user-key") {
+  if (app.support === "user-key" || app.authConfigManaged === false) {
     return `${app.name} signs in with an API key. Composio's page asks you to paste one; it is stored there, not here.`;
+  }
+  // Reached only with an auth config this project registered itself.
+  if (app.authConfigId) {
+    return `${app.name} uses the app registration this workspace already has, so it can connect now.`;
   }
   return `${app.name} can't be connected with the shared sign-in. It needs its own app registration first.`;
 }

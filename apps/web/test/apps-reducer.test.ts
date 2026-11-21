@@ -149,6 +149,27 @@ describe("connection state", () => {
   });
 });
 
+describe("browsing the catalogue", () => {
+  it("appends a second page and moves the cursor on", () => {
+    const first = appsReducer(initialAppsState(), { type: "loaded", page: page([app({ slug: "gmail" })], { nextCursor: "c1" }) });
+    const second = appsReducer(first, {
+      type: "more",
+      page: page([app({ slug: "slack" })], { nextCursor: "c2" }),
+    });
+    expect(second.page?.items.map((item) => item.slug)).toEqual(["gmail", "slack"]);
+    expect(second.page?.nextCursor).toBe("c2");
+  });
+
+  it("does not repeat an app the next page overlaps on", () => {
+    const first = appsReducer(initialAppsState(), { type: "loaded", page: page([app({ slug: "gmail" })]) });
+    const second = appsReducer(first, {
+      type: "more",
+      page: page([app({ slug: "gmail" }), app({ slug: "notion" })]),
+    });
+    expect(second.page?.items.map((item) => item.slug)).toEqual(["gmail", "notion"]);
+  });
+});
+
 describe("what an app offers", () => {
   it("offers Connect for an app this beta can link", () => {
     expect(actionFor(app(), null)).toBe("connect");
@@ -159,6 +180,14 @@ describe("what an app offers", () => {
     const twitter = app({ slug: "twitter", support: "needs-setup" });
     expect(actionFor(twitter, null)).toBe("needs-setup");
     expect(tileStateFor(twitter, null)).toBe("Needs setup");
+  });
+
+  it("connects a toolkit that needs setup once the project holds an auth config for it", () => {
+    // An administrator registered an OAuth client, so the one thing that blocked the
+    // app is gone; ensureAuthConfig would reuse that config.
+    const registered = app({ slug: "twitter", support: "needs-setup", authConfigId: "ac_1", authConfigManaged: false });
+    expect(actionFor(registered, null)).toBe("connect");
+    expect(tileStateFor(registered, null)).toBe("Available");
   });
 
   it("says it is waiting while the user is on Composio's page", () => {

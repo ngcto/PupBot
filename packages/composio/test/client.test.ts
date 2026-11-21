@@ -227,6 +227,31 @@ describe("ensureAuthConfig", () => {
     });
   });
 
+  it("prefers the key-based scheme when a toolkit also advertises OAuth", async () => {
+    // Notion advertises OAUTH2 and API_KEY. Picking OAUTH2 here would create a custom
+    // OAuth config with empty client credentials, which cannot complete.
+    const { composio, calls } = client((call) => {
+      if (call.method === "GET") return { status: 200, body: { items: [], next_cursor: null } };
+      return {
+        status: 201,
+        body: {
+          toolkit: { slug: "notion" },
+          auth_config: { id: "ac_notion", auth_scheme: "API_KEY", is_composio_managed: false },
+        },
+      };
+    });
+
+    await composio.ensureAuthConfig({
+      toolkit: "notion",
+      authSchemes: ["OAUTH2", "API_KEY"],
+      managedAuthSchemes: [],
+    });
+
+    expect(JSON.parse(calls[1]!.body!)).toMatchObject({
+      auth_config: { type: "use_custom_auth", authScheme: "API_KEY" },
+    });
+  });
+
   it("refuses a toolkit that needs its own OAuth client, with a readable reason", async () => {
     const { composio } = client(() => ({ status: 200, body: { items: [], next_cursor: null } }));
 

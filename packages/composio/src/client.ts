@@ -12,7 +12,7 @@ import {
   toolkitListSchema,
 } from "./wire.ts";
 import type { AuthConfig, Connection, ConnectionLink, ToolkitPage, ToolkitSummary } from "./types.ts";
-import { supportFor } from "./types.ts";
+import { USER_SUPPLIED_SCHEMES, supportFor } from "./types.ts";
 
 /**
  * Composio Platform REST v3.1 (docs.composio.dev/reference). The base URL ends
@@ -52,7 +52,6 @@ export interface EnsureAuthConfigInput {
   name?: string;
 }
 
-const USER_SUPPLIED_ORDER = ["OAUTH2", "API_KEY", "BEARER_TOKEN", "BASIC", "OAUTH1"];
 
 export class ComposioClient {
   readonly #apiKey: string;
@@ -165,7 +164,10 @@ export class ComposioClient {
     }
 
     if (support === "user-key") {
-      const scheme = USER_SUPPLIED_ORDER.find((candidate) => input.authSchemes.includes(candidate));
+      // Only the key-based schemes, the same set `supportFor` tests: an OAuth2 toolkit
+      // reaching this branch has no managed app, so a custom OAuth config with empty
+      // credentials would be created and then fail at the provider's consent screen.
+      const scheme = USER_SUPPLIED_SCHEMES.find((candidate) => input.authSchemes.includes(candidate));
       const body = await this.#request("POST", "/auth_configs", {
         body: {
           toolkit: { slug: input.toolkit },

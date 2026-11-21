@@ -12,11 +12,14 @@ import { Avatar } from "@terabot/avatars/react";
 import { Button, MenuItem, MenuPopup, MenuRoot, MenuTrigger, Tooltip, cn, toast } from "@terabot/ui";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import type { UploadedFile } from "./use-run-stream.ts";
 import type { BotView } from "../lib/types.ts";
 
 interface ComposerProps {
   bot: BotView;
-  onSend: (text: string, quote?: { messageId: string; text: string }) => void;
+  /** Resolves true once the message is accepted, so a failed send keeps the draft. */
+  onSend: (text: string, quote?: { messageId: string; text: string }, files?: UploadedFile[]) => Promise<boolean>;
+  onAttach: (file: File) => Promise<UploadedFile>;
   reply: { messageId: string; text: string } | null;
   onCancelReply: () => void;
   onGiveComputer: () => void;
@@ -27,9 +30,13 @@ interface ComposerProps {
 
 const DRAFT_PREFIX = "terabot:draft:";
 
+/** The message API refuses more than this, so the picker stops here. */
+const MAX_ATTACHMENTS = 8;
+
 export function Composer({
   bot,
   onSend,
+  onAttach,
   reply,
   onCancelReply,
   onGiveComputer,
@@ -37,7 +44,36 @@ export function Composer({
   pending,
 }: ComposerProps) {
   const [value, setValue] = useState("");
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+
+  const attach = async (picked: FileList | null) => {
+    const chosen = Array.from(picked ?? []);
+    if (chosen.length === 0) return;
+    const room = MAX_ATTACHMENTS - files.length;
+    if (room <= 0) {
+      toast(`A message can carry ${MAX_ATTACHMENTS} files.`);
+      if (picker.current) picker.current.value = "";
+      return;
+    }
+    if (chosen.length > room) toast(`Only ${room} more file${room === 1 ? "" : "s"} fit in this message.`);
+    setUploading(true);
+    try {
+      for (const file of chosen.slice(0, room)) {
+        try {
+          const uploaded = await onAttach(file);
+          setFiles((existing) => [...existing, uploaded]);
+        } catch (error) {
+          toast(error instanceof Error ? error.message : "That file did not upload.");
+        }
+      }
+    } finally {
+      setUploading(false);
+      if (picker.current) picker.current.value = "";
+    }
+  };
 
   useEffect(() => {
     setValue(window.localStorage.getItem(`${DRAFT_PREFIX}${bot.id}`) ?? "");
@@ -87,13 +123,20 @@ export function Composer({
     );
   }
 
-  const canSend = value.trim().length > 0;
+  const canSend = value.trim().length > 0 || files.length > 0;
 
-  const submit = () => {
-    // A reply is in flight: keep the draft instead of clearing text that send drops.
-    if (!canSend || pending) return;
-    onSend(value, reply ?? undefined);
-    setValue("");
+  const submit = async () => {
+    // A send in flight keeps the draft rather than clearing text it drops.
+    if (!canSend || uploading || pending) return;
+    const sent = value;
+    const sentFiles = files;
+    const accepted = await onSend(sent, reply ?? undefined, sentFiles);
+    if (!accepted) return;
+    // The composer stays editable while the POST is in flight, so a draft typed
+    // during it, and files attached or removed during it, belong to the next
+    // message. Only what actually went out is dropped.
+    setValue((current) => (current === sent ? "" : current));
+    setFiles((current) => current.filter((file) => !sentFiles.some((sent) => sent.id === file.id)));
     onCancelReply();
     area.current?.focus();
   };
@@ -121,8 +164,38 @@ export function Composer({
           </div>
         ) : null}
 
+        {files.length > 0 || uploading ? (
+          <div className="flex flex-wrap gap-1.5 border-b border-menu px-3 py-2" data-testid="attachment-chips">
+            {files.map((file) => (
+              <span
+                key={file.id}
+                className="flex items-center gap-1.5 rounded-pill bg-raised-2 py-1 pl-2.5 pr-1.5 text-sm text-ink-secondary"
+              >
+                <span className="max-w-[220px] truncate">{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  className="text-ink-faint hover:text-ink"
+                  onClick={() => setFiles((existing) => existing.filter((entry) => entry.id !== file.id))}
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} size={13} />
+                </button>
+              </span>
+            ))}
+            {uploading ? <span className="text-sm text-ink-faint">Uploading…</span> : null}
+          </div>
+        ) : null}
+
         <div className="flex items-end gap-2.5 px-2 py-2">
-          <RowTools bot={bot} />
+          <RowTools bot={bot} onAttach={() => picker.current?.click()} />
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            data-testid="file-input"
+            className="hidden"
+            onChange={(event) => void attach(event.target.files)}
+          />
           <textarea
             ref={area}
             rows={1}
@@ -226,7 +299,7 @@ function ComputerGate({ bot, onConnect }: { bot: BotView; onConnect: () => void 
   );
 }
 
-function RowTools({ bot }: { bot: BotView }) {
+function RowTools({ bot, onAttach }: { bot: BotView; onAttach: () => void }) {
   return (
     <div className="flex items-center gap-1.5">
       <MenuRoot>
@@ -240,10 +313,7 @@ function RowTools({ bot }: { bot: BotView }) {
           </button>
         </MenuTrigger>
         <MenuPopup align="start" side="top">
-          <MenuItem onClick={() => toast("File uploads arrive with storage in P2.")}>
-            Attach files
-            <span className="ml-auto text-sm text-ink-faint">P2</span>
-          </MenuItem>
+          <MenuItem onClick={onAttach}>Attach files</MenuItem>
           <MenuItem onClick={() => toast("Teach a task arrives with screen recording in P2.")}>
             Teach a task
             <span className="ml-auto text-sm text-ink-faint">P2</span>

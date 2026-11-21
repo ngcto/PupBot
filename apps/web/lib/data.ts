@@ -202,7 +202,27 @@ export async function loadShellData(input: {
     }
   }
 
-  if (activeBot) await attachBotApps(activeBot);
+  // Every bot, not only the active one: settings can be opened for a bot from the
+  // sidebar without switching to it, and an empty list would read as "nothing granted"
+  // for a bot that has grants. One query for all of them.
+  if (bots.length > 0) {
+    const appRows = await db
+      .select({ botId: botApp.botId, connectionId: botApp.connectionId })
+      .from(botApp)
+      .where(
+        inArray(
+          botApp.botId,
+          bots.map((bot) => bot.id),
+        ),
+      );
+    const byBot = new Map<string, string[]>();
+    for (const row of appRows) {
+      const list = byBot.get(row.botId);
+      if (list) list.push(row.connectionId);
+      else byBot.set(row.botId, [row.connectionId]);
+    }
+    for (const bot of bots) bot.appIds = byBot.get(bot.id) ?? [];
+  }
 
   const connections: ConnectedApp[] = await listConnectionsFor(input.user.id);
 
@@ -218,17 +238,4 @@ export async function loadShellData(input: {
     usage,
     connections,
   };
-}
-
-async function botAppIdsFor(botId: string): Promise<string[]> {
-  const rows = await database()
-    .select({ connectionId: botApp.connectionId })
-    .from(botApp)
-    .where(eq(botApp.botId, botId));
-  return rows.map((row) => row.connectionId);
-}
-
-/** Fills one bot's allow-list: enough for the settings surface, one query not N. */
-async function attachBotApps(bot: BotView): Promise<void> {
-  bot.appIds = await botAppIdsFor(bot.id);
 }

@@ -4,14 +4,19 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { devStubRoutes } from "./dev/stub.ts";
+import { attachmentRoutes } from "./routes/attachments.ts";
 import { createConversationRoutes } from "./routes/conversations.ts";
 import type { EnqueueRun } from "./routes/conversations.ts";
 import { mobileRoutes } from "./routes/mobile.ts";
 import { runRoutes } from "./routes/runs.ts";
+import { createInlineEnqueue } from "./run-inline.ts";
 import type { AppEnv } from "./types.ts";
 
 export interface AppOptions {
+  /** Overrides where a run is handed off; tests pass a no-op. */
   enqueue?: EnqueueRun;
+  /** Defaults to RUN_MODE. */
+  inline?: boolean;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -42,6 +47,13 @@ export function createApp(options: AppOptions = {}) {
     await next();
   });
 
+  app.use("/attachments/*", async (c, next) => {
+    const session = await betterAuth().api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    c.set("user", session.user);
+    await next();
+  });
+
   app.use("/runs/*", async (c, next) => {
     const session = await betterAuth().api.getSession({ headers: c.req.raw.headers });
     if (!session) return c.json({ error: "unauthorized" }, 401);
@@ -49,8 +61,12 @@ export function createApp(options: AppOptions = {}) {
     await next();
   });
 
-  app.route("/", createConversationRoutes({ enqueue: options.enqueue }));
+  const inline = options.inline ?? env.RUN_MODE === "inline";
+  const enqueue = options.enqueue ?? (inline ? createInlineEnqueue() : undefined);
+
+  app.route("/", createConversationRoutes({ enqueue }));
   app.route("/", runRoutes);
+  app.route("/", attachmentRoutes);
   app.route("/", mobileRoutes);
 
   // Dev-only OpenAI-compatible endpoint: the whole chat path works with no key.

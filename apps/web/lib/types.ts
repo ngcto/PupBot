@@ -57,6 +57,11 @@ export type AppState = "available" | "pending" | "connected" | "failed";
  * One app row as the browser sees it. Declared here, beside the other view types,
  * so a client component never imports the server module that holds the API key.
  */
+/**
+ * A toolkit the project already holds an auth config for. `authConfigId` and
+ * `authConfigManaged` describe that config; the card reads "Needs setup" only when
+ * there is neither one nor a flow this beta can drive.
+ */
 export interface AppCard {
   slug: string;
   name: string;

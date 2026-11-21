@@ -306,6 +306,60 @@ describe("app connection scoping", () => {
     }
   });
 
+  it("refuses to disconnect when the project key is gone, instead of orphaning the grant", async () => {
+    // A configuration change while a marketplace tab is open. Deleting the row here
+    // would leave a live grant at the provider with nothing left to revoke it by.
+    const alice = await person("Alice");
+    const [row] = await database()
+      .insert(appConnection)
+      .values({
+        id: newId(),
+        workspaceId: alice.workspaceId,
+        userId: alice.userId,
+        toolkit: "slack",
+        name: "Slack",
+        composioAccountId: `ca_nokey_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        authConfigId: "ac_1",
+        status: "active",
+      })
+      .returning();
+    delete process.env.COMPOSIO_PROJECT_API_KEY;
+    resetEnvCache();
+
+    try {
+      await expect(
+        disconnectConnection({ userId: alice.userId, connectionId: row!.id }),
+      ).rejects.toThrow(/not configured/);
+      expect(await database().select().from(appConnection).where(eq(appConnection.id, row!.id))).toHaveLength(1);
+    } finally {
+      process.env.COMPOSIO_PROJECT_API_KEY = "test-key-not-real";
+      resetEnvCache();
+    }
+  });
+
+  it("keeps waiting through a transient poll failure, so an approval is not lost", async () => {
+    const stub = installComposioStub();
+    const realFetch = globalThis.fetch;
+    try {
+      const alice = await person("Alice");
+      await startConnection({ userId: alice.userId, workspaceId: alice.workspaceId, toolkit: "gmail" });
+
+      // One 500 from Composio says nothing about the connection.
+      globalThis.fetch = (async () =>
+        Response.json({ error: { message: "boom" } }, { status: 500 })) as typeof fetch;
+      const during = await refreshConnections(alice.userId);
+      expect(during[0]).toMatchObject({ toolkit: "gmail", status: "pending" });
+
+      // The next poll after the blip sees the approval and flips it.
+      globalThis.fetch = realFetch;
+      const after = await refreshConnections(alice.userId);
+      expect(after[0]).toMatchObject({ toolkit: "gmail", status: "active" });
+    } finally {
+      globalThis.fetch = realFetch;
+      stub.restore();
+    }
+  });
+
   it("refuses a toolkit this beta cannot connect, naming what it needs", async () => {
     const stub = installComposioStub();
     try {
