@@ -21,7 +21,7 @@ export type { InstaboxProviderOptions } from "./instabox/provider.ts";
 export { FakeComputerProvider } from "./fake.ts";
 export type { FakeFailure, FakeOperation, FakeProviderOptions } from "./fake.ts";
 
-export { ALLOCATOR_DEFAULTS, ComputerAllocator, describeFailures } from "./allocator/allocator.ts";
+export { ALLOCATOR_DEFAULTS, ComputerAllocator, describeFailures, eligibleAccounts } from "./allocator/allocator.ts";
 export type { AllocatorConfig, AllocatorOptions, ReconcileOptions } from "./allocator/allocator.ts";
 export { DrizzleComputerStore } from "./allocator/drizzle-store.ts";
 export { MemoryComputerStore } from "./allocator/memory-store.ts";
@@ -45,3 +45,11 @@ export type {
 
 export { createProviderFactory } from "./registry.ts";
 export type { ProviderRegistryOptions } from "./registry.ts";
+
+export { MANAGED_PROVIDERS, ensureManagedComputerAccounts, managedProviderSpecs } from "./accounts.ts";
+export type {
+  EnsureManagedAccountsResult,
+  ManagedAccountEnv,
+  ManagedProvider,
+  ManagedProviderSpec,
+} from "./accounts.ts";

@@ -38,6 +38,8 @@ export class MemoryComputerStore implements ComputerStore {
       encryptedCredential: "memory",
       status: "active",
       capacity: 5,
+      managed: false,
+      ownerUserId: null,
       parkedUntil: null,
       lastError: null,
       ...input,
@@ -82,6 +84,13 @@ export class MemoryComputerStore implements ComputerStore {
 
   async botExists(botId: string): Promise<boolean> {
     return this.bots.has(botId);
+  }
+
+  /** Owners are optional in the in-memory store; tests set them when they care. */
+  readonly botOwners = new Map<string, string>();
+
+  async botOwnerUserId(botId: string): Promise<string | null> {
+    return this.botOwners.get(botId) ?? null;
   }
 
   async botBinding(botId: string): Promise<BindingRecord | null> {

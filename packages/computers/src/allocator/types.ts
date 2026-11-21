@@ -15,6 +15,14 @@ export interface AccountRecord {
   status: "active" | "draining" | "error";
   /** How many boxes this account's plan allows. */
   capacity: number;
+  /** True when the deployment provides this account, false when a user connected it. */
+  managed: boolean;
+  /**
+   * The user who connected an unmanaged account; null on a managed row. The
+   * allocator prefers this user's own account over a managed one for their own
+   * bots, and never hands one user's account to another user's bot.
+   */
+  ownerUserId: string | null;
   /** Set when the provider rate-limits the account: do not start a box before then. */
   parkedUntil: string | null;
   lastError: string | null;
@@ -84,6 +92,12 @@ export interface ComputerStore {
   updateComputer(id: string, patch: ComputerPatch): Promise<void>;
 
   botExists(botId: string): Promise<boolean>;
+  /**
+   * The user who owns the bot's workspace, so the allocator can prefer that
+   * user's own connected account over a deployment-provided one. Null when the
+   * bot or its owner cannot be resolved.
+   */
+  botOwnerUserId(botId: string): Promise<string | null>;
   /** The bot's binding and the box currently linked to it, if any. */
   botBinding(botId: string): Promise<BindingRecord | null>;
   setBindingState(botId: string, state: BindingState, reason: string | null): Promise<void>;

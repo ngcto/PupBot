@@ -430,3 +430,111 @@ describe("allocator — capacity, account health and wake auth", () => {
     expect((await store.listAccounts()).find((account) => account.id === "a")?.status).toBe("error");
   });
 });
+
+describe("allocator — managed and user-supplied accounts", () => {
+  it("gives a bot with no plan a managed computer with no configuration", async () => {
+    const { store, allocator } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-new");
+    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 1 });
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("ready");
+    expect((await store.botBinding("bot-1"))?.state).toBe("ready");
+  });
+
+  it("prefers the user's own account over a managed one for their own bot", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-a");
+    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 5 });
+    store.addAccount({ id: "mine", label: "My Instabox", ownerUserId: "user-a", capacity: 5 });
+
+    await allocator.allocateForBot("bot-1");
+
+    expect(fake("mine").calls.provision).toBe(1);
+    expect(fake("managed").calls.provision).toBe(0);
+  });
+
+  it("falls back to managed capacity when the user's own account is full", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-a");
+    store.addAccount({ id: "mine", label: "My Instabox", ownerUserId: "user-a", capacity: 1 });
+    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 1 });
+    // Their own single box is already taken by another of their bots.
+    store.addBot("bot-2");
+    store.botOwners.set("bot-2", "user-a");
+    store.addComputer({ accountId: "mine", externalId: "mine-box-1", metadata: { botId: "bot-2" } });
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("ready");
+    expect(fake("managed").calls.provision).toBe(1);
+  });
+
+  it("does not hand one user's account to another user's bot", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-a");
+    store.addAccount({ id: "theirs", label: "Their Instabox", ownerUserId: "user-b", capacity: 5 });
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("blocked");
+    expect(fake("theirs").calls.provision).toBe(0);
+    expect((await store.botBinding("bot-1"))?.reason).toContain("no managed capacity");
+  });
+
+  it("says no managed computer is available rather than spinning when capacity is gone", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-new");
+    store.addAccount({ id: "managed", label: "Terabot's Instabox", managed: true, capacity: 1 });
+    fake("managed").fail("provision", new ProviderError("no_capacity", "no host has room"), 99);
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("blocked");
+    expect(result.reason).toBe("No managed computer is available right now.");
+    // Blocked, not stuck: the binding carries the sentence the composer shows.
+    const binding = await store.botBinding("bot-1");
+    expect(binding?.state).toBe("blocked");
+    expect(binding?.reason).toBe("No managed computer is available right now.");
+  });
+
+  it("tries every provider before failing, so one out of capacity does not end it", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-new");
+    // Labels decide the order between two otherwise equal managed accounts, so
+    // name them to put Instabox first: it is the one that is out of capacity.
+    store.addAccount({ id: "ibx", label: "A Instabox", managed: true, capacity: 1 });
+    store.addAccount({ id: "a37", label: "B Agent37", managed: true, capacity: 1 });
+    fake("ibx").fail("provision", new ProviderError("quota", "full"), 99);
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("ready");
+    expect(fake("ibx").calls.provision).toBe(1);
+    expect(fake("a37").calls.provision).toBe(1);
+  });
+
+  it("reports every account being full by name, not as a single provider's failure", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.botOwners.set("bot-1", "user-new");
+    store.addAccount({ id: "ibx", label: "A Instabox", managed: true, capacity: 1 });
+    store.addAccount({ id: "a37", label: "B Agent37", managed: true, capacity: 1 });
+    fake("ibx").fail("provision", new ProviderError("quota", "full"), 99);
+    fake("a37").fail("provision", new ProviderError("quota", "full"), 99);
+
+    const result = await allocator.allocateForBot("bot-1");
+
+    expect(result.state).toBe("blocked");
+    expect(result.reason).toBe("Every computer account is full right now.");
+    expect(fake("ibx").calls.provision).toBe(1);
+    expect(fake("a37").calls.provision).toBe(1);
+  });
+});

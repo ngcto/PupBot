@@ -101,8 +101,16 @@ export class ComputerAllocator {
         return { state: "ready", computerId: current.computer.id };
       }
 
-      const accounts = (await this.store.listAccounts()).filter((account) => account.status === "active");
-      if (accounts.length === 0) return this.#block(botId, "No computer account is connected.");
+      const ownerUserId = await this.store.botOwnerUserId(botId);
+      const accounts = eligibleAccounts(await this.store.listAccounts(), ownerUserId);
+      if (accounts.length === 0) {
+        return this.#block(
+          botId,
+          ownerUserId
+            ? "No computer is connected for this bot, and this deployment has no managed capacity."
+            : "No computer account is connected.",
+        );
+      }
 
       const computers = await this.store.listComputers();
       const hosted = new Set(
@@ -113,15 +121,20 @@ export class ComputerAllocator {
         if (!computer.accountId || computer.status === "deleted") continue;
         used.set(computer.accountId, (used.get(computer.accountId) ?? 0) + 1);
       }
+      // Every provider is tried before a bot is told no: a box it already lives
+      // on first (a wake, not a move), then the user's own key for this provider
+      // before the deployment's, then the least-full account. A managed account
+      // is never special-cased ahead of another.
       const ordered = [...accounts].sort((a, b) => {
         const rank = (account: AccountRecord) => [
           hosted.has(account.id) ? 0 : 1,
+          account.managed ? 1 : 0,
           (used.get(account.id) ?? 0) / Math.max(account.capacity, 1),
           account.label,
         ];
-        const [hostedA, ratioA, labelA] = rank(a) as [number, number, string];
-        const [hostedB, ratioB, labelB] = rank(b) as [number, number, string];
-        return hostedA - hostedB || ratioA - ratioB || labelA.localeCompare(labelB);
+        const [hostedA, managedA, ratioA, labelA] = rank(a) as [number, number, number, string];
+        const [hostedB, managedB, ratioB, labelB] = rank(b) as [number, number, number, string];
+        return hostedA - hostedB || managedA - managedB || ratioA - ratioB || labelA.localeCompare(labelB);
       });
 
       await this.store.setBindingState(botId, "binding", null);
@@ -862,13 +875,31 @@ type InventoryEntry = ComputerRef & {
   metadata?: Record<string, string>;
 };
 
+/**
+ * Which accounts may serve this bot.
+ *
+ * A managed account belongs to the deployment, and an account with no recorded
+ * owner came from the deployment too (an operator's environment key, a seed, or
+ * a row that predates `owner_user_id`) — both are available to everyone. An
+ * account a user connected belongs to one person and is never handed to another
+ * person's bot: that would spend their key and put their box under someone
+ * else's agent.
+ */
+export function eligibleAccounts(accounts: AccountRecord[], ownerUserId: string | null): AccountRecord[] {
+  return accounts.filter(
+    (account) =>
+      account.status === "active" &&
+      (account.managed || account.ownerUserId === null || account.ownerUserId === ownerUserId),
+  );
+}
+
 export function describeFailures(failures: Array<{ code: ProviderErrorCode; message: string }>): string {
   const codes = new Set(failures.map((failure) => failure.code));
   if (codes.has("auth")) return "The computer account's credentials were rejected.";
   if (codes.has("template_refused")) return "The computer account's plan cannot create this kind of computer.";
   if (codes.has("quota") && codes.has("rate_limited")) return "Every computer account is full or rate-limited right now.";
   if (codes.has("quota")) return "Every computer account is full right now.";
-  if (codes.has("no_capacity")) return "There is no capacity for a computer right now.";
+  if (codes.has("no_capacity")) return "No managed computer is available right now.";
   if (codes.has("rate_limited")) return "The computer accounts are rate-limited right now.";
   if (codes.size === 0) return "A computer could not be provisioned.";
   return "A computer could not be provisioned.";

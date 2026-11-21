@@ -64,6 +64,13 @@
       "when": 1795248455218,
       "tag": "0008_app_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795254505562,
+      "tag": "0009_managed_computer_accounts",
+      "breakpoints": true
     }
   ]
 }

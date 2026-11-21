@@ -144,4 +144,36 @@ export interface ShellData {
   endpoints: EndpointView[];
   connections: ConnectedApp[];
   usage: UsageView[];
+  /** The computer pool Settings > Computer shows; managed rows first. */
+  computerAccounts: ComputerAccountView[];
+  /** One entry per supported provider: whether it is included, and connectable. */
+  computerProviders: ProviderAvailability[];
+}
+
+/**
+ * A computer account as Settings shows it. The credential is never part of this
+ * shape — the browser learns whether a key is stored, never what it is.
+ */
+export interface ComputerAccountView {
+  id: string;
+  provider: string;
+  label: string;
+  status: "active" | "draining" | "error";
+  capacity: number;
+  /** How many of this account's boxes exist right now. */
+  used: number;
+  /** True when the deployment provided it: no key to edit, no delete. */
+  managed: boolean;
+  hasKey: boolean;
+  lastError: string | null;
+  parkedUntil: string | null;
+}
+
+export interface ProviderAvailability {
+  provider: string;
+  label: string;
+  /** True when the deployment lends this provider out, so no key is needed. */
+  managed: boolean;
+  /** A user may not connect a second account of this provider. */
+  canConnect: boolean;
 }

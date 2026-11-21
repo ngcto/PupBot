@@ -21,6 +21,10 @@ import {
 import type { EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import {
+  connectComputerAccount as connectComputerAccountFor,
+  disconnectComputerAccount as removeComputerAccountFor,
+} from "../lib/computer-accounts.ts";
 import { allocateComputerInline, inlineComputers, sweepComputersInline } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { endpointConfigFor } from "../lib/endpoint-config.ts";
@@ -947,3 +951,26 @@ export async function testModelEndpoint(input: TestEndpointInput): Promise<TestE
   };
 }
 
+
+/**
+ * Connect the user's own computer account. Their key is encrypted before it is
+ * stored and never comes back to the browser: the settings panel only ever
+ * learns whether a key exists.
+ */
+export async function connectComputerAccount(input: { provider: string; apiKey: string }): Promise<{ id: string }> {
+  const { user } = await context();
+  const result = await connectComputerAccountFor(user.id, input);
+  revalidatePath("/", "layout");
+  return result;
+}
+
+/**
+ * Remove one of the user's own computer accounts. A managed account is refused
+ * on the server, not just hidden in the UI: it belongs to the deployment and
+ * deleting it would take every user's fallback computer away.
+ */
+export async function disconnectComputerAccount(accountId: string): Promise<void> {
+  const { user } = await context();
+  await removeComputerAccountFor(user.id, accountId);
+  revalidatePath("/", "layout");
+}

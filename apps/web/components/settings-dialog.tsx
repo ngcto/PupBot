@@ -30,7 +30,8 @@ import {
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "../lib/auth-client.ts";
-import type { BotView, EndpointView, ShellUser, UsageView } from "../lib/types.ts";
+import type { BotView, ComputerAccountView, EndpointView, ProviderAvailability, ShellUser, UsageView } from "../lib/types.ts";
+import { ComputerPanel } from "./computer-panel.tsx";
 import { ProvidersPanel } from "./settings-providers.tsx";
 
 const NAV = [
@@ -50,6 +51,8 @@ export function SettingsDialog({
   bots,
   usage,
   endpoints,
+  computerAccounts,
+  computerProviders,
   initialSection = "general",
 }: {
   open: boolean;
@@ -58,6 +61,8 @@ export function SettingsDialog({
   bots: BotView[];
   usage: UsageView[];
   endpoints: EndpointView[];
+  computerAccounts: ComputerAccountView[];
+  computerProviders: ProviderAvailability[];
   /** A link elsewhere in the app can land straight on a section. */
   initialSection?: string;
 }) {
@@ -170,22 +175,7 @@ export function SettingsDialog({
 
             <TabsPanel value="computer">
               <DialogTitle className="text-xl font-semibold">Computer</DialogTitle>
-              <GroupLabel>Providers</GroupLabel>
-              <Card>
-                <Row label="Instabox" helper="Pause and wake with processes preserved.">
-                  <Status text="No account" />
-                </Row>
-                <Row label="Boat" helper="Cheaper per hour; a stop loses memory.">
-                  <Status text="No account" />
-                </Row>
-                <Row label="Stub" helper="In-memory provider used until real ones are wired.">
-                  <Status text="Active" tone="success" />
-                </Row>
-              </Card>
-              <p className="mt-3 max-w-[520px] text-base text-ink-muted">
-                Provider keys live in <span className="font-mono">.env</span> for now. Pooling many accounts,
-                automatic allocation and the idle sweep land with the runtime phase.
-              </p>
+              <ComputerPanel accounts={computerAccounts} providers={computerProviders} />
             </TabsPanel>
 
             <TabsPanel value="permissions">
