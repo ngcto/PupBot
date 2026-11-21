@@ -58,14 +58,16 @@ test("a provider is configured in Settings, then a bot is created from it and st
   await expect(page.getByTestId("streaming-text")).toBeHidden({ timeout: 20_000 });
   await expect(scoutRow).toContainText("Woof");
 
-  // The provider the bot uses is a Settings row, with its base URL and model count.
+  // The provider the bot uses is a Settings row, with its base URL and its key state.
+  // It is a private (localhost) endpoint, so the server does not read its model
+  // list — chat still reaches it, the listing is simply not fetched.
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await page.getByRole("tab", { name: "Providers" }).click();
   const providerRow = page.getByTestId(/^provider-row-/).first();
   await expect(providerRow).toContainText("Local stub endpoint");
   await expect(providerRow).toContainText("dev/stub/v1");
-  await expect(providerRow).toContainText(/model/);
+  await expect(providerRow).toContainText("Model list not read yet");
   await expect(providerRow).toContainText("no key");
 
   // Removing the only provider leaves bot creation on the empty state with a

@@ -23,7 +23,12 @@ import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "driz
 import { revalidatePath } from "next/cache";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { endpointConfigFor } from "../lib/endpoint-config.ts";
-import { assertPublicDestination, assertPublicEndpointUrl, publicOnlyFetch } from "../lib/outbound.ts";
+import {
+  assertPublicDestination,
+  assertPublicEndpointUrl,
+  isPublicDestination,
+  publicOnlyFetch,
+} from "../lib/outbound.ts";
 import { enqueueComputerProvision } from "../lib/queue.ts";
 import { currentWorkspace, requireUser } from "../lib/session.ts";
 
@@ -307,7 +312,7 @@ async function defaultModelFor(
   db: ReturnType<typeof database>,
   config: ModelEndpointConfig,
 ): Promise<string> {
-  const listed = await listEndpointModels(config)
+  const listed = await listEndpointModels(config, { fetch: publicOnlyFetch })
     .then((listing) => listing.models[0]?.id ?? "")
     .catch(() => "");
   if (listed) return listed;
@@ -421,9 +426,18 @@ export async function refreshEndpointModels(endpointId: string): Promise<Endpoin
     .limit(1);
   if (!endpoint) throw new Error("that endpoint is not in this workspace");
 
+  if (!(await isPublicDestination(endpoint.baseUrl))) {
+    return {
+      source: "catalogue",
+      fetchedAt: null,
+      models: [],
+      note: "This provider is on a private network, so its model list is not read; set the model by hand.",
+    };
+  }
+
   try {
     const config = await endpointConfigFor(db, endpoint);
-    const listing = await listEndpointModels(config);
+    const listing = await listEndpointModels(config, { fetch: publicOnlyFetch });
     if (listing.models.length === 0) {
       return {
         source: "catalogue",
@@ -673,7 +687,7 @@ export async function probeProviderEndpoint(input: {
       : `Could not read its model list — ${failure.error.message}`
     : `Model list: from this provider · ${models.length} model${models.length === 1 ? "" : "s"}`;
 
-  const modelId = models[0] ?? savedModel;
+  const modelId = models[0] ?? (unchanged ? savedModel : await defaultModelFor(db, config));
   if (!modelId) return { models, note, test: null };
   const test = await testModelEndpoint({
     kind: config.kind,
