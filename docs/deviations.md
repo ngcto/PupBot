@@ -174,3 +174,4 @@ The phone is a client of the same API, and v1 only claims what a phone is good f
   through a server action, shows the model name by default and adds context window plus per-million
   prices only when Details/Advanced is enabled (the sign-in picker, when there was one, never showed them), and
   allows an id outside the catalogue with a warning rather than a block.
+
