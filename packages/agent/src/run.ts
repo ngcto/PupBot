@@ -21,6 +21,7 @@ import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
 import { createToolRegistry, schemasOf, summariseToolError } from "./tools.ts";
 import { codemodeTool } from "./codemode-tool.ts";
+import { runCommandTool } from "./run-command.ts";
 import type { RunTool, ToolContext } from "./tools.ts";
 import { parseToolArguments } from "@terabot/providers";
 import type { ChatMessage } from "@terabot/providers";
@@ -32,17 +33,10 @@ export interface ResolvedEndpoint {
   pricing?: ModelPricing | null;
 }
 
-/** What the harness needs from the computer layer: wake before the first token. */
-export interface RunComputer {
-  ensureReady: (botId: string) => Promise<{
-    ok: boolean;
-    reason?: string;
-    blocked?: boolean;
-    leaseId?: string;
-    woke?: boolean;
-  }>;
-  release: (botId: string, leaseId: string) => Promise<void>;
-}
+import type { RunComputer } from "./computer.ts";
+
+/** What the harness needs from the computer layer: a machine for the length of some work. */
+export type { RunComputer } from "./computer.ts";
 
 export interface ExecuteRunOptions {
   db: Database;
@@ -51,7 +45,10 @@ export interface ExecuteRunOptions {
   /** How often the in-flight run checks `run.abort_requested`. */
   abortPollMs?: number;
   signal?: AbortSignal;
-  /** Wakes the bot's computer before the model runs; chat is blocked without one. */
+  /**
+   * The bot's computer, obtained on first use of a tool. Without one, runs are
+   * plain chat: a bot that only talks never provisions a machine.
+   */
   computer?: RunComputer;
   /**
    * Resolves the endpoint for a bot. `session` is the run's conversation, which
@@ -313,12 +310,19 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   // The conversation the loop grows: system prompt and transcript, then each
   // assistant tool-call turn and its results.
   const conversation: ChatMessage[] = [...context];
-  // Code mode is the harness's own tool, so it is added here rather than passed in by
-  // every caller: it wraps whatever `options.tools` holds, so a surface registered
-  // later (the Cua Driver's, when its package lands) appears in the index with no
-  // change at the call sites. `codemodeTool` returns null for a run with nothing worth
-  // wrapping, so a tools-less run stays exactly as it was.
-  const runTools = options.tools ?? [];
+  /*
+   * The computer is offered as a tool, not woken up front: the machine is
+   * obtained inside `run_command`, so a bot that only chats never provisions
+   * one. That is the whole point of the lazy lifecycle, and it is why no step
+   * label says "Waking your computer" before the model has asked for anything.
+   */
+  const runTools = [
+    ...(options.tools ?? []),
+    ...(options.computer ? [runCommandTool(options.computer, row.bot.id)] : []),
+  ];
+
+  // Added after the run's own tools so `run_command` is in the index code mode
+  // builds from, rather than being the one tool a program cannot call.
   const code = codemodeTool(runTools);
   const registry = createToolRegistry(code ? [...runTools, code] : runTools);
 
@@ -357,6 +361,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
   let cacheReadTokens: number | undefined;
   let cacheWriteTokens: number | undefined;
   let failure: string | undefined;
+  /** The last refusal a tool produced, if the model never spoke after it. */
+  let lastObstacle: string | undefined;
   let rotate: ReturnType<typeof setInterval> | undefined;
 
 
@@ -381,28 +387,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     }
   };
 
-  let leaseId: string | undefined;
-
   try {
-    // Wake on first use, explicitly: Instabox refuses exec on a paused box and
-    // does not wake it, so the run shows what is happening instead of a spinner.
-    if (options.computer) {
-      await events.append({ type: "step", payload: { label: "Waking your computer" } });
-      const ready = await options.computer.ensureReady(row.bot.id);
-      if (!ready.ok) {
-        const reason = ready.reason ?? "Your computer could not be started.";
-        await finishMessage(db, { messageId: assistantMessageId, text: "", status: "error" });
-        await events.append({
-          type: "message.completed",
-          payload: { messageId: assistantMessageId, text: "", status: "error" },
-        });
-        await events.append({ type: "run.completed", payload: { status: "error", error: reason } });
-        await setRunTerminal(db, { runId, status: "error", error: reason, finishedAt: now() });
-        return { status: "error", assistantMessageId, text: "", error: reason };
-      }
-      leaseId = ready.leaseId;
-    }
-
     rotate = setInterval(() => {
       if (sawToken || controller.signal.aborted) return;
       void events
@@ -530,6 +515,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
           runId,
           now,
         });
+        if (outcome.result.startsWith("BLOCKED:")) lastObstacle = outcome.result;
         conversation.push({
           role: "tool",
           content: outcome.result,
@@ -557,9 +543,26 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     clearInterval(poll);
     if (rotate) clearInterval(rotate);
     options.signal?.removeEventListener("abort", onExternalAbort);
-    if (options.computer && leaseId) {
-      await options.computer.release(row.bot.id, leaseId).catch(() => undefined);
-    }
+  }
+
+  /*
+   * The model is what tells the user about a blocked tool. When it says nothing
+   * at all, the run must still answer: an empty bubble reads as the bot ignoring
+   * the request, and the refusal is the one thing the user needs to know.
+   */
+  if (!text.trim() && !failure && lastObstacle) {
+    const lines = lastObstacle.split("\n");
+    const summary = lines.find((line) => line.startsWith("BLOCKED: "));
+    const resolution = lines.find((line) => line.startsWith("What the user can do: "));
+    const retry = lines.find((line) => line.startsWith("Trying again"));
+    text = [
+      summary?.replace(/^BLOCKED: /, "I could not use my computer: "),
+      resolution?.replace(/^What the user can do: /, "What you can do: "),
+      retry,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    pendingText = text;
   }
 
   await flush(true).catch(() => {});

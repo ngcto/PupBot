@@ -112,7 +112,6 @@ export function AppShell({ data }: { data: ShellData }) {
           initialMessages={data.messages}
           activeRunId={data.activeRunId}
           pendingRequest={data.pendingRequest}
-          onGiveComputer={onGiveComputer}
           onManageProviders={openProviders}
         />
       ) : (

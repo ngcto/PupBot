@@ -27,10 +27,20 @@ export async function registerComputerJobs(boss: PgBoss, allocator: ComputerAllo
     const sweep = await allocator.sweepIdle();
     const leases = await allocator.renewLeases();
     const stalled = await allocator.retryStalledBindings();
-    if (sweep.slept || sweep.destroyed || leases.renewed || leases.released || stalled.retried) {
+    const orphans = await allocator.reapOrphans();
+    if (
+      sweep.slept ||
+      sweep.destroyed ||
+      leases.renewed ||
+      leases.released ||
+      stalled.retried ||
+      orphans.reaped ||
+      orphans.failed
+    ) {
       console.log(
         `[computers] slept=${sweep.slept} destroyed=${sweep.destroyed} renewed=${leases.renewed} ` +
-          `released=${leases.released} retried=${stalled.retried} ready=${stalled.ready}`,
+          `released=${leases.released} retried=${stalled.retried} ready=${stalled.ready} ` +
+          `orphans_reaped=${orphans.reaped} orphans_failed=${orphans.failed}`,
       );
     }
   });

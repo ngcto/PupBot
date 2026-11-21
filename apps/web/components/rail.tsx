@@ -43,7 +43,15 @@ function technicalDetails(bot: BotView): Array<{ label: string; value: string }>
 function computerCardState(bot: BotView): ComputerCardState {
   const computer = bot.computer;
   if (computer.binding === "unbound") {
-    return { label: "No computer", dot: null, connect: true, thumbnail: "none" };
+    // Unbound is the normal, free state now: nothing is provisioned until the bot
+    // actually uses a computer, so this must not read as a fault to fix.
+    return {
+      label: "Not built yet",
+      detail: "Built the first time this bot uses a computer.",
+      dot: null,
+      connect: true,
+      thumbnail: "none",
+    };
   }
   if (computer.binding === "binding") {
     return { label: "Connecting…", detail: "This takes a few seconds.", dot: "#8d8d8d", connect: false, thumbnail: "none" };
@@ -53,7 +61,7 @@ function computerCardState(bot: BotView): ComputerCardState {
       label: "Error",
       detail: computer.reason ?? undefined,
       dot: "#e5484d",
-      connect: true,
+      connect: false,
       thumbnail: "none",
     };
   }

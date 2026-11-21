@@ -17,11 +17,8 @@ test("sign up, create a bot, stream a reply, and keep it after reload", async ({
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByTestId("bot-chip")).toContainText("Scout", { timeout: 60_000 });
 
-  const blocked = page.getByTestId("composer-blocked");
-  await expect(blocked).toBeVisible();
-  await page.getByRole("button", { name: "Connect a computer" }).click();
-  await expect(blocked).toBeHidden({ timeout: 60_000 });
-
+  // No computer is configured or provisioned on this deployment, and chat does not
+  // need one: the composer is available from the first message.
   const composer = page.getByLabel("Message Scout");
   await composer.fill("In one short sentence, what are you?");
   await page.getByTestId("send").click();

@@ -10,7 +10,6 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Avatar } from "@terabot/avatars/react";
 import { Button, MenuItem, MenuPopup, MenuRoot, MenuTrigger, Tooltip, cn, toast } from "@terabot/ui";
-import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import type { UploadedFile } from "./use-run-stream.ts";
 import type { BotView } from "../lib/types.ts";
@@ -22,7 +21,6 @@ interface ComposerProps {
   onAttach: (file: File) => Promise<UploadedFile>;
   reply: { messageId: string; text: string } | null;
   onCancelReply: () => void;
-  onGiveComputer: () => void;
   /** Opens Settings > Providers when the bot has none yet. */
   onManageProviders: () => void;
   pending?: boolean;
@@ -39,7 +37,6 @@ export function Composer({
   onAttach,
   reply,
   onCancelReply,
-  onGiveComputer,
   onManageProviders,
   pending,
 }: ComposerProps) {
@@ -111,14 +108,6 @@ export function Composer({
             </Button>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  if (bot.computer.binding !== "ready") {
-    return (
-      <div className="mx-auto w-[960px] max-w-full px-4 pb-[18px]">
-        <ComputerGate bot={bot} onConnect={onGiveComputer} />
       </div>
     );
   }
@@ -237,63 +226,6 @@ export function Composer({
             </Tooltip>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The three states that are not a composer: no computer, a computer being
- * allocated, and a blocked bot. Each says what is true and offers one action,
- * so nothing spins without a reason on screen.
- */
-function ComputerGate({ bot, onConnect }: { bot: BotView; onConnect: () => void }) {
-  const reduced = useReducedMotion();
-  const { binding, reason } = bot.computer;
-
-  if (binding === "binding") {
-    return (
-      <div
-        data-testid="composer-allocating"
-        className="flex items-center gap-3 rounded-lg border border-card bg-raised px-4 py-3.5"
-      >
-        <span className="relative flex size-8 items-center justify-center">
-          <motion.span
-            className="absolute inset-0 rounded-pill"
-            style={{ background: bot.accentColor }}
-            animate={reduced ? { opacity: 0.2 } : { opacity: [0.12, 0.3, 0.12], scale: [1, 1.08, 1] }}
-            transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-          />
-          <Avatar shape={bot.shape as never} color={bot.color} size={26} title="" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-body text-ink">Connecting a computer…</p>
-          <p className="text-body text-ink-secondary">This takes a few seconds.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const unbound = binding === "unbound";
-
-  return (
-    <div
-      data-testid="composer-blocked"
-      className="rounded-lg border border-card bg-raised px-4 py-3.5"
-    >
-      <div className="flex items-center gap-3">
-        <Avatar shape={bot.shape as never} color={bot.color} size={32} title="" />
-        <div className="min-w-0 flex-1">
-          <p className="text-body text-ink">
-            {unbound ? "This bot doesn't have a computer yet." : "This bot's computer isn't available."}
-          </p>
-          <p className="text-body text-ink-secondary">
-            {unbound ? "Connect one and it can start working." : (reason ?? "Something went wrong on the computer side.")}
-          </p>
-        </div>
-        <Button size="sm" variant="primary" className="h-8 px-3" onClick={onConnect}>
-          {unbound ? "Connect a computer" : "Try again"}
-        </Button>
       </div>
     </div>
   );
