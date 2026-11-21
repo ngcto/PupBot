@@ -92,6 +92,26 @@ describe("disclosure", () => {
     expect(lazy).toBeLessThan(inline / 3);
   });
 
+  it("names the capabilities when asked for names, without describing them", () => {
+    const entries = [tool("click", ["press a button"]), tool("typeText", ["fill a field"])];
+    const schema = codemodeSchema(entries, "host", { disclosure: "names" });
+    // Evidence of existence, which is the point, and not what they do.
+    expect(schema.description).toContain("click");
+    expect(schema.description).toContain("typeText");
+    expect(schema.description).not.toContain("press a button");
+    expect(schema.description).not.toContain("click description");
+  });
+
+  it("orders the three disclosures by size: lazy < names < inline", () => {
+    const entries = Array.from({ length: 26 }, (_, i) =>
+      tool(`tool${i}`, [`the situation where tool ${i} answers`, `another phrasing for ${i}`]),
+    );
+    const size = (d: "inline" | "lazy" | "names") =>
+      codemodeSchema(entries, "host", { disclosure: d }).description.length;
+    expect(size("lazy")).toBeLessThan(size("names"));
+    expect(size("names")).toBeLessThan(size("inline"));
+  });
+
   it("defaults to inline, so nothing changes for an existing caller", () => {
     const entries = [tool("click", ["press a button"])];
     expect(codemodeSchema(entries).description).toBe(codemodeSchema(entries, "host", {}).description);

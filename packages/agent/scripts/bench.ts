@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   };
   const gateway: ModelGateway = new Gateway();
 
-  const arms = ARM_ARG.split("").filter((c): c is Arm => c === "a" || c === "b" || c === "c" || c === "d");
+  const arms = ARM_ARG.split("").filter((c): c is Arm => c === "a" || c === "b" || c === "c" || c === "d" || c === "e");
   const tasks = TASK_ARG === "all" ? TASKS : TASKS.filter((t) => TASK_ARG.split(",").includes(String(t.id)));
 
   const runs: ArmRun[] = [];

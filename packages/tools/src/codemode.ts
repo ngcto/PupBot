@@ -25,7 +25,7 @@
  *    "it timed out" needs to know which three actions had already landed.
  */
 
-import { availableIndex, declarationsFor, renderIndex, searchIndex } from "@terabot/tools";
+import { availableIndex, declarationsFor, namesOf, renderIndex, searchIndex } from "@terabot/tools";
 import type { ToolEntry, ToolPlacement } from "@terabot/tools";
 import { runProgram } from "@terabot/sandbox";
 import type { CallRecord, SandboxResult, SandboxTool, ToolCallContext } from "@terabot/sandbox";
@@ -68,10 +68,21 @@ export interface CodeModeSchemaOptions {
    * `inline` (the default) is 1,877 tokens on the 26-entry surface and costs no turn.
    * `lazy` is 146: the index is dropped and a program calls `searchTools` to find what
    * it needs, which costs one call inside the sandbox rather than a model round trip.
-   * Neither is known to be better — it depends on whether a model can phrase a useful
-   * query for a capability it was never told exists, which is a behavioural question.
+   * `names` is 227: the names alone, comma-joined, with no descriptions. It is evidence
+   * that a capability exists without saying what it does, which is the smallest thing
+   * that might work — `lazy` at 146 failed because the model read a prompt with nothing
+   * in it and concluded there was nothing it could do.
+   *
+   * Measured on the same eleven tasks at three reps, with the full 26-entry surface:
+   * **inline 5/11 cells, names 1/11, lazy 1/11.** Names failed because a name does not
+   * say how to use it — the model called `listApps` as a top-level tool and got a real
+   * refusal. Lazy failed because a model cannot search for what it does not know exists.
+   *
+   * `inline` is therefore the default. `lazy` and `names` stay constructible because
+   * they are the evidence for what the 1,731 tokens buy; a default recorded without its
+   * alternatives is a decision nobody can revisit.
    */
-  disclosure?: "inline" | "lazy";
+  disclosure?: "inline" | "lazy" | "names";
 }
 
 export function codemodeSchema(
@@ -92,7 +103,7 @@ export function codemodeSchema(
     "",
     // Lazy keeps the discovery instructions — which are what make a search-only
     // surface usable — and drops only the index itself.
-    ...(options.disclosure === "lazy" ? ["The tools available here are listed by `searchTools`; nothing is listed in this prompt."] : ["Available here:", renderIndex(index)]),
+    ...disclosureLines(index, options.disclosure ?? "inline"),
   ].join("\n");
   return {
     name: "codemode",
@@ -108,6 +119,22 @@ export function codemodeSchema(
       required: ["code"],
     },
   };
+}
+
+/**
+ * What the schema says about which tools exist.
+ *
+ * Three answers, each measured or being measured. `inline` lists every tool with what it
+ * does; `names` lists the names only; `lazy` lists nothing and points at `searchTools`.
+ */
+function disclosureLines(index: ToolEntry[], disclosure: "inline" | "lazy" | "names"): string[] {
+  if (disclosure === "lazy") {
+    return ["The tools available here are listed by `searchTools`; nothing is listed in this prompt."];
+  }
+  if (disclosure === "names") {
+    return ["Available here (call `searchTools` for what each one does):", namesOf(index).join(", ")];
+  }
+  return ["Available here:", renderIndex(index)];
 }
 
 /**

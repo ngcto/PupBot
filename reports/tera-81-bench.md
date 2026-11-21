@@ -142,6 +142,30 @@ program's trace is empty.
    several cells read "fail — and here is why it passed". The reason now comes from a rep that agrees
    with the verdict, and every verdict carries `(n/m)`.
 
+## The disclosure curve: three variants measured, and only the full index works
+
+| | B (26 schemas) | C inline (1,877) | **E names (227)** | **D lazy (146)** |
+|---|---|---|---|---|
+| Cells passed | **6/11** | 5/11 | 1/11 | 1/11 |
+| Turns | 31 | 29 | 22 | 17 |
+| Input tokens | 43,701 | 50,623 | 25,095 | **20,994** |
+
+**Cheaper is not better, and the curve does not flatten — it falls off a cliff.** Dropping from 1,877
+to 227 tokens costs four of five passing cells; dropping to 146 costs the rest. The two cheap
+variants are the two worst arms ever measured here.
+
+**Names failed differently from lazy, and the difference is instructive.** Arm D concluded there was
+nothing it could do and never called anything. Arm E *did* reach for the tools — and called them as if
+they were top-level tools rather than capabilities inside the program:
+
+> "The environment lists `listApps` and `listWindows` as available, but calling them fails in this
+> session (`listApps` returned "there is no tool called `listApps`")"
+
+That refusal is real: those names are not registered in the outer tool loop, only inside the
+sandbox. So a bare list of names is **ambiguous about how to use them**, and the ambiguity costs more
+than the tokens saved. The inline index is not just larger — each entry carries its cost and a
+situation phrase, which together say "this is a capability, here is when to reach for it".
+
 ## The lazy-index experiment: measured, and it lost decisively
 
 The open question was whether the index should travel inline (1,877 tokens) or be fetched by
@@ -180,11 +204,29 @@ search when it has no evidence that searching would find anything.
 buying something specific and nameable — **evidence that a capability exists**. A model cannot search
 for what it does not know might be there.
 
-This is the single most useful number in the benchmark. It converts "we are not sure whether
-discovery works" into "discovery does not fire without a hint, and 146 tokens is too few to buy one."
-A middle option remains untested — names only, 227 tokens, which is evidence-of-existence without
-descriptions — and it is worth a run precisely because D shows the failure mode is *absence of
-evidence* rather than *absence of instructions*.
+This was the most useful number in the benchmark until names-only was measured, and between them they
+close the question. Lazy proved that a model cannot search for what it does not know exists.
+Names-only proved that a model told only *that* tools exist will call them wrongly. **The fixed cost
+is not instructions and not evidence alone: it is a description precise enough to use.**
+
+## The lesson that generalises
+
+**A code-mode surface's fixed cost is not its instructions — it is the evidence it carries that
+capabilities exist, at the precision needed to use them.**
+
+Three variants isolate the three parts, each measured at 1,877, 227 and 146 tokens:
+
+| Carries | Tokens | Cells | What failed |
+|---|---|---|---|
+| Instructions, names, descriptions, situation phrases | 1,877 | 5/11 | — |
+| Instructions and names | 227 | 1/11 | Named tools are called as top-level tools, because a name does not say *how* |
+| Instructions only | 146 | 1/11 | The model concludes it has no capabilities and never searches |
+
+Shortening the surface works only down to the point where a model can still tell what a capability
+is for and how to reach it. Below that, every token saved is bought from the pass rate. Anyone
+building the next agent with a code-mode surface should read this as: do not prune the capability
+description to save prompt space unless you have measured what the pruning costs — and do not assume a
+search tool compensates for a prompt that says nothing.
 
 ## What this does not tell you
 

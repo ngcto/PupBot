@@ -24,7 +24,7 @@ import type { WorldState } from "./fixtures.ts";
  * surfaces are measured side by side on the same tasks, against the same B numbers.
  * Reporting only the lazy variant would lose the evidence that laziness helps.
  */
-export type Arm = "a" | "b" | "c" | "d";
+export type Arm = "a" | "b" | "c" | "d" | "e";
 
 /**
  * The token task 9 asks for, which the fixture refuses once.
@@ -150,7 +150,12 @@ export function armD(): ArmBuild {
   return codeModeArm("d", "lazy");
 }
 
-function codeModeArm(arm: "c" | "d", disclosure: "inline" | "lazy"): ArmBuild {
+/** Arm E: the names only — evidence that a capability exists, without what it does. */
+export function armE(): ArmBuild {
+  return codeModeArm("e", "names");
+}
+
+function codeModeArm(arm: "c" | "d" | "e", disclosure: "inline" | "lazy" | "names"): ArmBuild {
   const world = freshWorld();
   world.staleToken = STALE_TOKEN;
   const impl = fixtureImplementations(world);
@@ -192,6 +197,7 @@ export function buildArm(arm: Arm): ArmBuild {
   if (arm === "a") return armA();
   if (arm === "b") return armB();
   if (arm === "d") return armD();
+  if (arm === "e") return armE();
   return armC();
 }
 
