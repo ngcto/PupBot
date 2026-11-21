@@ -26,8 +26,8 @@ this machine on 2026-11-21, and the command or script is reproducible from the n
 ## 0. The short version
 
 1. Our tool surface is 26 functions today and grows. As schemas it costs **3,546 tokens per
-   request** (mine). As an index it costs **1,200**, as names only **81**, and a code-mode
-   tool with a one-line description **46**.
+   request** (mine). As an index it costs **1,759** in full and **1,255** without result notes,
+   as names only **81**, and a code-mode tool with a one-line description **46**.
 2. The bigger number is not the schemas, it is results: a 10,000-row read is **294,592
    tokens** through the model and **149** filtered in code (mine). That ratio is the whole
    argument for code mode and it is about 2,000×, not 2×.
@@ -90,10 +90,12 @@ representative they are.
 | 26 schemas, OpenAI chat `tools` block | 3,734 |
 | 26 schemas, OpenAI Responses `tools` block | 3,650 |
 | pi-style `declare const tools` TypeScript declarations | 3,984 |
-| Tool index: name + description + `when[]` + cost | **1,200** |
-| Tool index: names only | 81 |
+| Tool index: name + description + `when[]` + cost, no result notes | **1,200** |
+| Tool index: names only | **81** |
 | One `codemode` tool, one-line description (in a real `tools` block) | **46** |
-| One `codemode` tool + the full index in its description (real `tools` block) | **1,232** |
+| One `codemode` tool + the index, no per-tool result notes | **1,255** |
+| One `codemode` tool + the index, 10 load-bearing result notes | **1,584** |
+| One `codemode` tool + the index, every result note (what `packages/tools` renders) | **1,759** |
 
 **Variable cost, by result shape:**
 
@@ -160,8 +162,9 @@ Mechanism: the request carries a capability index (name, situation phrases, cost
 model asks for signatures only when it needs them. Anthropic describe a `detail` parameter on
 `search_tools` (name-only / name+description / full definition); LangChain call the same thing
 skills-style progressive disclosure and say the point is that upfront front-matter degrades
-performance before the agent starts. On our surface: 3,546 → 46 (bare) or 1,232 (with the
-index inline), i.e. a 2.9× to 77× reduction in the fixed term.
+performance before the agent starts. On our surface: 3,546 → 46 (bare) or 1,759 (with the full
+index inline), i.e. a 2× to 77× reduction in the fixed term — and the index is where the
+situations live, which is what makes discovery work at all.
 
 **M3 — Cache-shape discipline.**
 Mechanism: a byte-stable prefix (tools, then system, then the append-only transcript) with
@@ -345,7 +348,8 @@ equivalent loop.
 #### Q2 — Where does the sandbox actually run?
 
 **Default: in our process, in a worker thread. For a run whose tool set is the bot's computer,
-the same VM runs on the bot's box, next to the driver daemon.**
+the same VM runs on the bot's box, next to the driver daemon.** §7.0 states the scope of the
+argument that justifies this, and its limits. Read that first.
 
 The number that decides this is TERA-74's, measured on a live box: **an in-box call costs
 ~10 ms; an exec round trip costs ~0.5 s.** The daemon owns the session, so a call is local
@@ -501,6 +505,34 @@ Code mode is not free. From Claude Code's own limitations list plus our shape:
 
 ## 7. Proposed architecture
 
+### 7.0 Placement: the box is justified by computer tools alone
+
+Read this before quoting any latency number at someone: **the case for running a program on the
+bot's box is the CUA call rate, and nothing else.** It is not a general-purpose fast path, and a
+task that is mostly vault fills is *not* the task the box placement wins.
+
+The number, and its exact scope:
+
+- In-box CUA call ≈ **10 ms**; the same call over exec ≈ **0.5 s** (TERA-74, measured on a live
+  box). A program making ~20 observation and click calls is therefore **~0.2 s** in the box
+  against **~10 s** from our process. That is the whole argument, and it applies only to tools
+  that live on the box.
+- A **vault fill is two crossings** from a box-side program — box→host for the request, then
+  host→box to drive the driver to type — against **one** exec if the program runs host-side. The
+  fill has to be applied by whatever holds the credential, so it cannot be local to the box.
+- Every host-side tool (storage, messages, our own data) is a crossing *or* a refusal when the
+  program is in the box, depending on whether that tool is allowed to be reached.
+
+So the rule is stated as a rule, not as an optimisation: **the sandbox goes where the tools are.**
+A computer task's tool set is the CUA functions, so the VM goes to the box. A task whose tools are
+ours stays in our process. If the tool set is mixed, in-process is the default and the box is
+chosen only when the CUA calls dominate — which is measurable per task with the call counts the
+sandbox already returns.
+
+An earlier revision of this report described a box-side fill as "one crossing" and let the
+0.2 s-versus-10 s figure imply general placement advice. Both were wrong. If this page is ever
+cited to justify running everything on the box, it is being cited against itself.
+
 ### 7.1 Shape
 
 ```
@@ -514,11 +546,14 @@ model ──1 tool──▶ codemode({ code })  ──▶ Sandbox (QuickJS/wasm,
 ```
 
 - **One primary tool** `codemode({ code })`, **46** tokens.
-- **The index travels with it**, at 1,200 tokens, because a model that has to make a discovery
-  call before it can act pays a turn for it. 1,200 cached tokens (≈120 token-equivalents at
+- **The index travels with it**, at 1,759 tokens, because a model that has to make a discovery
+  call before it can act pays a turn for it. 1,759 cached tokens (≈176 token-equivalents at
   Sonnet 5.5 cache-read pricing) is cheaper than one extra turn. **This is a deliberate
   departure from "47 tokens"** and the reason is the turn, not the token.
-  *Measured:* index inline **1,232** vs bare **46**. *Cheaper than:* one round trip, which costs the
+  *Measured:* index inline **1,759** vs bare **46**, with the breakdown of what the notes cost —
+  **504** tokens for every `resultNote`, **1,584** for the ten that prevent a wrong action, **1,255**
+  for none. Kept in full, because a note that stops one wrong click is worth more than the ~25
+  token-equivalents it costs at cache-read pricing. *Cheaper than:* one round trip, which costs the
   whole replayed prefix again.
 - **Signatures on demand**: a `describe(names)` capability that returns pi-style declarations
   for the 2–5 tools a program actually wants, rendered per-capability rather than for all 26
@@ -550,7 +585,7 @@ free to inject, and the cost lands on the host before any code runs. Two consequ
 
 ```
 zone 1 (cached, byte-stable):
-  tools:   codemode(code) + the 1,200-token capability index      ← breakpoint 1
+  tools:   codemode(code) + the 1,759-token capability index      ← breakpoint 1
   system:  bot instructions + harness rules + result-reading rules  ← breakpoint 2
   history: append-only, tool calls as one-line records              ← breakpoint 3 (sliding)
 zone 2 (rebuilt every turn, never cached):
@@ -851,7 +886,7 @@ with the implementation, not before it.
    the case that matters most and safer on escape. The cost is a runner on the box and a
    transport abstraction. **I recommend two, with the box placement built second** so we can
    ship the loop with one placement and measure the difference.
-2. **The index inline or fetched? — DECIDED: inline.** I propose inline (**1,232** tokens) because a discovery
+2. **The index inline or fetched? — DECIDED: inline.** I propose inline (**1,759** tokens) because a discovery
    call costs a whole turn. Cloudflare's codemode passes the whole API as TypeScript in the tool
    description, which is the same bet at a larger size.
 3. **Native tool calling for simple tools, alongside code mode?** Anthropic and pi both keep

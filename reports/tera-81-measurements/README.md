@@ -17,6 +17,12 @@ Counts come from `POST /v1/messages/count_tokens` on `claude-sonnet-5-5` through
 endpoint `ANTHROPIC_BASE_URL` names. A different tokenizer moves these by a few percent, not by
 the order of magnitude the report relies on.
 
+`verify-index.mts` renders the index through `packages/tools` and prices it through a real
+`tools` block — the 1,759 / 1,584 / 1,255 numbers in §1.2. `verify-index-notes.mts` is the
+same measurement with the per-tool result notes removed and selectively kept, which is what
+says those notes cost 504 tokens. Both are the check that the renderer in the product matches
+the number in the report.
+
 `dump-index.mts` writes `index.json` from the CUA `tool-index.ts`, which lives in PR #38's
 branch until it merges; a copy is committed here as `tool-index.ts` and is the input that
 mattered. `decls.mts` renders pi-style TypeScript declarations for the 26 tools — the 3,984-token
