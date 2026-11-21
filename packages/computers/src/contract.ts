@@ -157,6 +157,32 @@ export class ProviderError extends Error {
 }
 
 /**
+ * What a provider can actually do, readable from code rather than from a
+ * document.
+ *
+ * The contract lets a provider be partial, and `screenshot` is the one that
+ * matters in practice: a bot's computer use drives a real desktop, and a
+ * provider with no PNG of the screen is not the same product. Callers that need
+ * a capability check `supports` before offering it, so a missing one becomes an
+ * honest "this bot cannot do that" instead of a click that throws.
+ *
+ * `partial` names a capability that exists only for some templates or accounts.
+ */
+export interface ProviderCapabilities {
+  exec: boolean;
+  files: boolean;
+  screenshot: boolean;
+  /** Pause keeps memory and running processes, so a wake does not re-run work. */
+  pausePreservesMemory: boolean;
+  /** The provider can be asked to delete a box after a deadline. */
+  deleteAfter: boolean;
+  /** Human-readable reasons, keyed by the capability they explain. */
+  unsupported: Partial<Record<keyof Omit<ProviderCapabilities, "unsupported">, string>>;
+  /** Capabilities that work only on some templates, with the rule. */
+  partial?: Partial<Record<keyof Omit<ProviderCapabilities, "unsupported" | "partial">, string>>;
+}
+
+/**
  * What a provider must implement.
  *
  * Contract obligations that the spike proved the hard way:
@@ -173,10 +199,16 @@ export class ProviderError extends Error {
  * - `destroy` resolves once the computer is gone, and never throws `not_found`
  *   for one that was already gone.
  * - Every method throws `ProviderError` and nothing else.
+ *
+ * A provider that cannot satisfy a method must declare it false in
+ * `capabilities` and throw a named `unsupported` error rather than no-op: a
+ * silent success is indistinguishable from work that happened.
  */
 export interface ComputerProvider {
   readonly name: string;
   readonly account: string;
+  /** What this provider can do, read from code by callers that need a gate. */
+  readonly capabilities: ProviderCapabilities;
 
   provision(options?: ProvisionOptions): Promise<ComputerRef>;
   start(ref: ComputerRef, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<ComputerStatus>;

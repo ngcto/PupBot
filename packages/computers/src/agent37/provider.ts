@@ -8,11 +8,12 @@ import type {
   ExecOptions,
   ExecResult,
   FileEntry,
+  ProviderCapabilities,
   ProvisionOptions,
   Screenshot,
 } from "../contract.ts";
 import { Agent37Client, AGENT37_TRANSITIONAL, providerErrorFrom } from "./client.ts";
-import type { Agent37Instance } from "./client.ts";
+import type { Agent37CreateBody, Agent37Instance } from "./client.ts";
 
 export interface Agent37ProviderOptions {
   /** Pool account key, e.g. "agent37:acct-1". Capacity is counted per account. */
@@ -31,11 +32,17 @@ export interface Agent37ProviderOptions {
   resources?: { cpu?: number; memory?: number; disk?: number };
   region?: "us" | "eu" | "ap-south";
   /**
-   * Auto-sleep, which is the only idle release Agent37 offers. It is off by
-   * default so the allocator's own idle sweep stays the single authority over
-   * when a box sleeps, exactly as it is for Instabox.
+   * Auto-sleep, which is the only idle release Agent37 offers. Off by default so
+   * the allocator's own idle sweep stays the single authority over when a box
+   * sleeps, exactly as it is for Instabox.
    */
   autoSleep?: boolean;
+  /**
+   * Opt a box into auto-sleep purely as a leak backstop, even when `autoSleep`
+   * is off. Agent37 has no delete-after equivalent, so without this a box whose
+   * allocator crashed runs and bills until a human notices.
+   */
+  leakBackstop?: boolean;
   idleTimeoutSeconds?: number;
   provisionTimeoutMs?: number;
   startTimeoutMs?: number;
@@ -44,6 +51,13 @@ export interface Agent37ProviderOptions {
 const DEFAULT_TEMPLATE = "agent37-hermes";
 const DEFAULT_PROVISION_TIMEOUT_MS = 300_000;
 const DEFAULT_START_TIMEOUT_MS = 300_000;
+/**
+ * Agent37 has no delete-after field, unlike Instabox's `deleteAfterSeconds`, so a
+ * box leaked by a crashed allocator has nothing else to stop it. One day is the
+ * provider's own maximum idle window: an orphan stops billing compute by itself
+ * and reconcile destroys it on the next pass.
+ */
+const LEAK_BACKSTOP_IDLE_SECONDS = 86_400;
 
 /**
  * Which contract methods this provider cannot satisfy.
@@ -87,10 +101,35 @@ export class Agent37Provider implements ComputerProvider {
   readonly account: string;
   readonly client: Agent37Client;
 
+  /**
+   * Screenshot is the gap worth reading before building on this provider: there
+   * is no framebuffer endpoint, so anything driving a real desktop (Cua Driver,
+   * computer-use) has no PNG to steer by. Files are marked partial because they
+   * exist only on agent templates.
+   */
+  readonly capabilities: ProviderCapabilities = {
+    exec: true,
+    files: true,
+    screenshot: false,
+    pausePreservesMemory: true,
+    deleteAfter: false,
+    unsupported: {
+      screenshot:
+        "Agent37 serves no framebuffer: agent37-hermes has a headless browser, and a visible screen exists only as a noVNC desktop on a custom template, not as a PNG",
+      deleteAfter:
+        "Agent37 has no delete-after field; a leaked box is bounded by auto-sleep plus reconcile instead",
+    },
+    partial: {
+      files:
+        "list/putFile/getFile need the agent file API, which agent37-base, agent37-n8n, agent37-android and agent37-ubuntu do not serve",
+    },
+  };
+
   readonly #template: string;
   readonly #resources: Agent37ProviderOptions["resources"];
   readonly #region: Agent37ProviderOptions["region"];
   readonly #autoSleep: boolean;
+  readonly #leakBackstop: boolean;
   readonly #idleTimeoutSeconds: number | undefined;
   readonly #provisionTimeoutMs: number;
   readonly #startTimeoutMs: number;
@@ -108,6 +147,7 @@ export class Agent37Provider implements ComputerProvider {
     this.#resources = options.resources;
     this.#region = options.region;
     this.#autoSleep = options.autoSleep ?? false;
+    this.#leakBackstop = options.leakBackstop ?? true;
     this.#idleTimeoutSeconds = options.idleTimeoutSeconds;
     this.#provisionTimeoutMs = options.provisionTimeoutMs ?? DEFAULT_PROVISION_TIMEOUT_MS;
     this.#startTimeoutMs = options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS;
@@ -122,20 +162,26 @@ export class Agent37Provider implements ComputerProvider {
    * obligation. Agent37's create already answers with the full instance object
    * once the machine has started, but it documents that the field can trail
    * reality around a wake, so this confirms with one read.
+   *
+   * Agent37 has no delete-after field (Instabox does), so a box leaked by a
+   * crashed allocator would run and bill until someone noticed. The backstop is
+   * auto-sleep: an orphan stops billing compute on its own, and reconcile then
+   * destroys it. It is off by default, so a deployment that wants the allocator
+   * to be the only thing that sleeps a box must accept that reconcile is what
+   * bounds a leak.
    */
   async provision(options: ProvisionOptions = {}): Promise<ComputerRef> {
     const deadline = Date.now() + (options.timeoutMs ?? this.#provisionTimeoutMs);
-    const body = {
+    const autoSleep = this.#autoSleep || this.#leakBackstop;
+    const body: Agent37CreateBody = {
       template: options.template ?? this.#template,
       ...(this.#resources ? { resources: this.#resources } : {}),
       ...(this.#region ? { region: this.#region } : {}),
       ...(options.metadata ? { metadata: options.metadata } : {}),
-      ...(this.#autoSleep
+      ...(autoSleep
         ? {
             auto_sleep: true,
-            ...(this.#idleTimeoutSeconds !== undefined
-              ? { idle_timeout_seconds: clampIdle(this.#idleTimeoutSeconds) }
-              : {}),
+            idle_timeout_seconds: clampIdle(this.#idleTimeoutSeconds ?? LEAK_BACKSTOP_IDLE_SECONDS),
           }
         : {}),
     };
@@ -251,13 +297,17 @@ export class Agent37Provider implements ComputerProvider {
   async exec(ref: ComputerRef, command: string, options: ExecOptions = {}): Promise<ExecResult> {
     const seconds = clamp(options.timeoutSeconds ?? 60, 1, 900);
     let wrapped = command;
-    if (options.cwd) wrapped = `cd ${shellQuote(options.cwd)} && ${wrapped}`;
+    // A `KEY=v cmd` prefix only scopes the variable to that one simple command,
+    // so `KEY=v cd /d && run` would leave `run` without it, and a compound body
+    // would only see it on its first word. Exports are set before the cd and
+    // apply to the whole shell, which is what a caller means.
     if (options.env && Object.keys(options.env).length > 0) {
-      const prefix = Object.entries(options.env)
-        .map(([key, value]) => `${key}=${shellQuote(value)}`)
-        .join(" ");
-      wrapped = `${prefix} ${wrapped}`;
+      const exports = Object.entries(options.env)
+        .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
+        .join("; ");
+      wrapped = `${exports}; ${wrapped}`;
     }
+    if (options.cwd) wrapped = `cd ${shellQuote(options.cwd)} && ${wrapped}`;
     // Agent37 has no per-call timeout field: the endpoint waits up to 15 minutes
     // and then answers, leaving the command running. A caller asking for less
     // gets a `timeout` wrapper inside the instance, so the deadline is honoured
@@ -356,8 +406,7 @@ export class Agent37Provider implements ComputerProvider {
     }));
   }
 
-  /** The instance's own URL, which is where its file API lives. */
-  async #instanceUrl(ref: ComputerRef): Promise<string> {
+  /** The instance's own URL, which is where its file API lives. */  async #instanceUrl(ref: ComputerRef): Promise<string> {
     const instance = await this.client.getInstance(ref.id);
     if (!instance.url) throw notFound(ref.id);
     if (instance.template && !hasFileApi(instance.template)) {

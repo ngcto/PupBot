@@ -10,6 +10,7 @@ export type {
   FileEntry,
   ProvisionOptions,
   ProviderErrorCode,
+  ProviderCapabilities,
   Screenshot,
 } from "./contract.ts";
 

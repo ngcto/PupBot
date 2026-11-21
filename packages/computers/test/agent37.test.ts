@@ -56,7 +56,7 @@ function provider(routes: (call: Call) => { status: number; body?: unknown } | R
   const stub = stubAgent37(routes);
   const instanceProvider = new Agent37Provider({
     account: "agent37:test",
-    apiKey: "not-a-real-agent37-key",
+    apiKey: "example-not-a-real-agent37-key",
     fetch: stub.impl,
   });
   return { provider: instanceProvider, calls: stub.calls };
@@ -130,13 +130,28 @@ describe("agent37 — lifecycle", () => {
     const body = JSON.parse(create.body!);
     expect(body.template).toBe("agent37-hermes");
     expect(body.metadata).toEqual({ terabot: "1", botId: "bot-1" });
-    // auto_sleep is off by default so the allocator's idle sweep stays the only
-    // authority over when a box sleeps.
-    expect(body.auto_sleep).toBeUndefined();
+    // Agent37 has no delete-after field, so a leaked box is bounded by auto-sleep
+    // at the provider's maximum idle window: it stops billing compute by itself.
+    expect(body.auto_sleep).toBe(true);
+    expect(body.idle_timeout_seconds).toBe(86_400);
     // The control plane authenticates with a Bearer token, and the key is never
     // in the URL.
-    expect(create.headers.authorization).toBe("Bearer not-a-real-agent37-key");
-    expect(create.url).not.toContain("not-a-real-agent37-key");
+    expect(create.headers.authorization).toBe("Bearer example-not-a-real-agent37-key");
+    expect(create.url).not.toContain("example-not-a-real-agent37-key");
+  });
+
+  it("lets a deployment turn the leak backstop off and own the sleep itself", async () => {
+    const stub = stubAgent37(() => ({ status: 201, body: instance() }));
+    const box = new Agent37Provider({
+      account: "agent37:test",
+      apiKey: "example-not-a-real-agent37-key",
+      fetch: stub.impl,
+      leakBackstop: false,
+    });
+    await box.provision();
+    const body = JSON.parse(stub.calls.find((call) => call.method === "POST")!.body!);
+    expect(body.auto_sleep).toBeUndefined();
+    expect(body.idle_timeout_seconds).toBeUndefined();
   });
 
   it("wakes a stopped instance through start, and start is the only wake path used", async () => {
@@ -248,7 +263,7 @@ describe("agent37 — exec", () => {
     const exec = calls.find((call) => call.url.includes("/exec"))!;
     expect(exec.url.startsWith(AGENT37_SANDBOX_URL)).toBe(true);
     // The instance plane takes the key as a header, not a Bearer token.
-    expect(exec.headers["x-agent37-key"]).toBe("not-a-real-agent37-key");
+    expect(exec.headers["x-agent37-key"]).toBe("example-not-a-real-agent37-key");
     expect(exec.headers.authorization).toBeUndefined();
   });
 
@@ -276,7 +291,7 @@ describe("agent37 — exec", () => {
     expect(sent.startsWith("timeout 5s sh -c ")).toBe(true);
   });
 
-  it("passes cwd and env into the instance's shell", async () => {
+  it("passes cwd and env into the instance's shell, with env applying to the command", async () => {
     const { provider: box, calls } = provider(() => ({
       status: 200,
       body: { exit_code: 0, stdout: "", stderr: "", truncated: false },
@@ -286,8 +301,23 @@ describe("agent37 — exec", () => {
       env: { NODE_ENV: "test" },
     });
     const sent = JSON.parse(calls.find((call) => call.url.includes("/exec"))!.body!).command as string;
-    expect(sent).toContain("cd '/home/node/app'");
-    expect(sent).toContain("NODE_ENV='test'");
+    // A `KEY=v cmd` prefix would scope the variable to `cd` alone, leaving the
+    // real command without it, so the export must come first and the cd after.
+    expect(sent).toBe("cd '/home/node/app' && export NODE_ENV='test'; pwd");
+    expect(sent.indexOf("export NODE_ENV")).toBeGreaterThan(sent.indexOf("cd "));
+  });
+
+  it("keeps env applying to a compound command, not only its first word", async () => {
+    const { provider: box, calls } = provider(() => ({
+      status: 200,
+      body: { exit_code: 0, stdout: "", stderr: "", truncated: false },
+    }));
+    await box.exec({ provider: "agent37", account: "a", id: "ab12cd34ef" }, "a && b", {
+      env: { FLAG: "1" },
+    });
+    const sent = JSON.parse(calls.find((call) => call.url.includes("/exec"))!.body!).command as string;
+    // An export is what reaches both halves of an && chain.
+    expect(sent.startsWith("export FLAG='1'; ")).toBe(true);
   });
 
   it("reports truncation instead of pretending it got the whole output", async () => {
@@ -316,7 +346,7 @@ describe("agent37 — files", () => {
     const write = calls.find((call) => call.url.includes("/v1/files/content"))!;
     expect(write.method).toBe("PUT");
     expect(write.url).toContain("path=%2Fhome%2Fnode%2Fnote.txt");
-    expect(write.headers["x-agent37-key"]).toBe("not-a-real-agent37-key");
+    expect(write.headers["x-agent37-key"]).toBe("example-not-a-real-agent37-key");
   });
 
   it("reads bytes back from the file API", async () => {
@@ -435,9 +465,9 @@ describe("agent37 — capabilities the contract asks for", () => {
 describe("agent37 — the client itself", () => {
   it("never puts the key in a URL", async () => {
     const stub = stubAgent37(() => ({ status: 200, body: { data: [] } }));
-    const client = new Agent37Client({ apiKey: "not-a-real-agent37-key", account: "a", fetch: stub.impl });
+    const client = new Agent37Client({ apiKey: "example-not-a-real-agent37-key", account: "a", fetch: stub.impl });
     await client.listInstances();
-    for (const call of stub.calls) expect(call.url).not.toContain("not-a-real-agent37-key");
+    for (const call of stub.calls) expect(call.url).not.toContain("example-not-a-real-agent37-key");
   });
 
   it("reports a timeout as a timeout, not an unavailable", async () => {

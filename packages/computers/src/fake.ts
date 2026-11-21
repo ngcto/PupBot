@@ -7,6 +7,7 @@ import type {
   ExecOptions,
   ExecResult,
   FileEntry,
+  ProviderCapabilities,
   ProvisionOptions,
 } from "./contract.ts";
 
@@ -76,6 +77,16 @@ const ONE_PIXEL_PNG = Uint8Array.from(
 export class FakeComputerProvider implements ComputerProvider {
   readonly name = "fake";
   readonly account: string;
+
+  /** The fake stands in for a full provider, so the contract suite can assert every method. */
+  readonly capabilities: ProviderCapabilities = {
+    exec: true,
+    files: true,
+    screenshot: true,
+    pausePreservesMemory: true,
+    deleteAfter: true,
+    unsupported: {},
+  };
 
   readonly calls: Record<FakeOperation, number> = {
     provision: 0,

@@ -1,4 +1,4 @@
-import { computerAccount, database, encryptSecret, newId } from "@terabot/db";
+import { computerAccount, computer, database, encryptSecret, newId } from "@terabot/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { ComputerAccountView, ProviderAvailability } from "./types.ts";
 
@@ -168,6 +168,23 @@ export async function disconnectComputerAccount(userId: string, accountId: strin
       managed
         ? "this computer is provided by the deployment and cannot be removed"
         : "that account is not yours to remove",
+    );
+  }
+
+  // `computer.account_id` is ON DELETE SET NULL, so deleting the row would leave
+  // every box it owns attached to nothing: the idle sweep skips a box with no
+  // account and reconcile only walks accounts that still exist, so nothing would
+  // ever destroy it. Refuse while a box is alive rather than orphan it.
+  const [attached] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(computer)
+    .where(and(eq(computer.accountId, accountId), sql`${computer.status} <> 'deleted'`));
+  const live = Number(attached?.count ?? 0);
+  if (live > 0) {
+    throw new Error(
+      live === 1
+        ? "this computer is running one bot's box. Let it sleep, or delete that bot, then disconnect."
+        : `this computer is running ${live} boxes. Let them sleep, or delete those bots, then disconnect.`,
     );
   }
 
