@@ -14,7 +14,7 @@ import type {
   RequiredCapability,
   SweepSummary,
 } from "./types.ts";
-import { rowStatusFrom, toRef } from "./types.ts";
+import { DEFAULT_REQUIREMENTS, rowStatusFrom, toRef } from "./types.ts";
 
 const LEASE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -104,7 +104,7 @@ export class ComputerAllocator {
    */
   async allocateForBot(botId: string, options: AllocateOptions = {}): Promise<AllocateResult> {
     return this.#withBotLock(botId, async () => {
-      const requires = options.requires ?? [];
+      const requires = options.requires ?? DEFAULT_REQUIREMENTS;
       const current = await this.store.botBinding(botId);
       if (current?.state === "ready" && current.computer && current.computer.status !== "deleted") {
         // A box the bot already has is only reused when it can do the job: moving
@@ -203,7 +203,7 @@ export class ComputerAllocator {
     // The account's own label, not the provider implementation's name: that is
     // the string Settings shows, so the sentence matches what a person can act on.
     const why = provider.capabilities.unsupported[missing];
-    return `${account.label} cannot ${missing}${why ? `: ${why}` : ""}`;
+    return `${account.label} cannot ${missing}${why ? ` (${why})` : ""}`;
   }
 
   /** The same check for a box the bot already has, so a move is justified. */
@@ -290,7 +290,7 @@ export class ComputerAllocator {
   }
 
   async #ensureReady(botId: string, options: EnsureReadyOptions, depth: number): Promise<EnsureReadyResult> {
-    const requires = options.requires ?? [];
+    const requires = options.requires ?? DEFAULT_REQUIREMENTS;
     const binding = await this.store.botBinding(botId);
     if (!binding || binding.state !== "ready" || !binding.computer || binding.computer.status === "deleted") {
       const allocation = await this.allocateForBot(botId, { requires });
@@ -1056,16 +1056,19 @@ function accountClass(account: AccountRecord, ownerUserId: string | null): numbe
 }
 
 /**
- * The reason a bot is blocked when every eligible account's provider lacks a
- * capability the run needs. It names the capability and the provider, because
- * "no computer is available" would send someone to check capacity when the real
- * problem is that nothing in the pool can show a screen.
+ * What a person is told when every eligible account's provider lacks something
+ * the run needs.
+ *
+ * This sentence is the whole user-visible value of the capability check: it has
+ * to say what is missing and which account, because "no computer is available"
+ * sends someone to look at capacity, which is not the problem. It is written in
+ * the second person and names the thing they can do about it.
  */
 export function describeMissingCapabilities(reasons: string[]): string {
-  if (reasons.length === 1) {
-    return `This bot needs a computer that can do something none is available for. ${reasons[0]}. Connect a provider that can, or turn the feature off.`;
-  }
-  return `This bot needs a computer that can do something no connected account can. ${reasons.join("; ")}. Connect a provider that can, or turn the feature off.`;
+  const detail = reasons.join("; ");
+  return reasons.length === 1
+    ? `No connected computer can do what this bot needs. ${detail}. Connect one that can, or ask for a task that does not need it.`
+    : `None of your connected computers can do what this bot needs. ${detail}. Connect one that can, or ask for a task that does not need it.`;
 }
 
 export function describeFailures(failures: Array<{ code: ProviderErrorCode; message: string }>): string {

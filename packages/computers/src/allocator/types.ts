@@ -136,13 +136,25 @@ export interface AllocateResult {
  */
 export type RequiredCapability = "exec" | "files" | "screenshot";
 
+/**
+ * What a bot's computer must be able to do unless a caller says otherwise.
+ *
+ * `screenshot` is the default because of what computer use is: a bot that drives
+ * a desktop looks at the screen the same way a person does, so a box with no
+ * framebuffer is not a smaller computer, it is the wrong one. A caller that
+ * knows its run never needs to look — a shell-only task — passes `requires: []`
+ * and is placed on anything.
+ */
+export const DEFAULT_REQUIREMENTS: readonly RequiredCapability[] = ["screenshot"];
+
 export interface AllocateOptions {
   /**
-   * Capabilities the box must have. Absent or empty means "any box", which is
-   * what every current caller wants: the harness has no screen tool yet, so
-   * nothing asks for `screenshot`. The requirement exists so that the day one
-   * is added, placement already knows how to honour it rather than silently
-   * handing out a box that cannot do the job.
+   * Capabilities the box must have. Absent means `DEFAULT_REQUIREMENTS`, which
+   * is `["screenshot"]`; pass `[]` to accept a box that cannot show a screen.
+   *
+   * This lives on the placement call rather than in the run loop so the rule is
+   * enforced where the choice of account is made: the run path only has to pass
+   * what its tool layer already knows, and nothing else changes.
    */
   requires?: readonly RequiredCapability[];
 }
@@ -152,9 +164,10 @@ export interface EnsureReadyOptions {
   leaseId?: string;
   timeoutMs?: number;
   /**
-   * Capabilities this run needs. Checked against a box the bot already has, so
-   * a bot whose computer was connected before the requirement existed fails
-   * with a reason naming the gap rather than at the first screenshot call.
+   * Capabilities this run needs. Absent means `DEFAULT_REQUIREMENTS`; `[]`
+   * accepts a box that cannot show a screen. Checked against a box the bot
+   * already has, so a bot bound before the requirement existed fails with a
+   * reason naming the gap rather than at the first screenshot call.
    */
   requires?: readonly RequiredCapability[];
 }
