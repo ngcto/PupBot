@@ -380,39 +380,75 @@ export const botComputer = pgTable(
   ],
 );
 
-/* ──────────────────────── connectors, skills, routines ─────────────── */
+/* ────────────────────────── apps (Composio) ────────────────────────── */
 
-export const connector = pgTable(
-  "connector",
+/**
+ * A connected app account, one row per end user and toolkit.
+ *
+ * The row holds a reference, never a credential: Composio stores the OAuth
+ * tokens or the user's API key and refreshes them, and we keep the connected
+ * account id plus the auth config it was created against. That is exactly the
+ * pair Composio's execution API needs later, so wiring tools into a run is an
+ * addition rather than a migration. Moving from Composio-managed credentials to
+ * our own per-toolkit OAuth app also changes no column: only which auth config
+ * a new connection is created against.
+ */
+export const appConnectionStatus = pgEnum("app_connection_status", ["pending", "active", "error"]);
+
+export const appConnection = pgTable(
+  "app_connection",
   {
     id: uuid("id").primaryKey(),
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspace.id, { onDelete: "cascade" }),
-    provider: text("provider").notNull().default("composio"),
+    /** The person who authorized it; every read is scoped to this. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
     toolkit: text("toolkit").notNull(),
+    /** The app's display name when it was connected, so a list never needs the catalog. */
     name: text("name").notNull(),
-    description: text("description"),
-    enabled: boolean("enabled").notNull().default(false),
+    composioAccountId: text("composio_account_id").notNull(),
+    authConfigId: text("auth_config_id").notNull(),
+    status: appConnectionStatus("status").notNull().default("pending"),
+    /** Composio's own status word (INITIALIZING, INITIATED, ACTIVE, ...) as last read. */
+    statusDetail: text("status_detail"),
+    lastError: text("last_error"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex("connector_workspace_toolkit_idx").on(t.workspaceId, t.toolkit)],
+  (t) => [
+    uniqueIndex("app_connection_account_idx").on(t.composioAccountId),
+    index("app_connection_user_idx").on(t.userId, t.status),
+    index("app_connection_workspace_idx").on(t.workspaceId),
+  ],
 );
 
-export const connectorAccount = pgTable("connector_account", {
-  id: uuid("id").primaryKey(),
-  connectorId: uuid("connector_id")
-    .notNull()
-    .references(() => connector.id, { onDelete: "cascade" }),
-  workspaceId: uuid("workspace_id")
-    .notNull()
-    .references(() => workspace.id, { onDelete: "cascade" }),
-  externalAccountId: text("external_account_id"),
-  label: text("label").notNull().default("default"),
-  status: text("status").notNull().default("starting"),
-  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-  createdAt: createdAt(),
-});
+/**
+ * Which connected apps a bot may use. Nothing reads this during a run yet —
+ * the harness has no tool loop — so it is a stored choice, and the UI says so.
+ */
+export const botApp = pgTable(
+  "bot_app",
+  {
+    id: uuid("id").primaryKey(),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bot.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => appConnection.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("bot_app_bot_connection_idx").on(t.botId, t.connectionId),
+    index("bot_app_connection_idx").on(t.connectionId),
+  ],
+);
+
+/* ──────────────────────── skills and routines ──────────────────────── */
 
 export const skill = pgTable(
   "skill",
@@ -519,8 +555,8 @@ export const schema = {
   computer,
   computerLease,
   botComputer,
-  connector,
-  connectorAccount,
+  appConnection,
+  botApp,
   skill,
   routine,
   attachment,

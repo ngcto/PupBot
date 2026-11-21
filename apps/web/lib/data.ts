@@ -1,5 +1,6 @@
 import {
   bot as botTable,
+  botApp,
   botComputer,
   botSection,
   computer,
@@ -12,8 +13,10 @@ import {
 } from "@terabot/db";
 import { providerHintForBaseUrl } from "@terabot/providers";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { listConnectionsFor } from "./apps.ts";
 import type {
   BotView,
+  ConnectedApp,
   EndpointView,
   MessageView,
   SectionView,
@@ -85,6 +88,7 @@ function toBotView(row: BotRow): BotView {
       reason: row.computerReason,
     },
     endpointId: row.modelEndpointId,
+    appIds: [],
   };
 }
 
@@ -198,6 +202,30 @@ export async function loadShellData(input: {
     }
   }
 
+  // Every bot, not only the active one: settings can be opened for a bot from the
+  // sidebar without switching to it, and an empty list would read as "nothing granted"
+  // for a bot that has grants. One query for all of them.
+  if (bots.length > 0) {
+    const appRows = await db
+      .select({ botId: botApp.botId, connectionId: botApp.connectionId })
+      .from(botApp)
+      .where(
+        inArray(
+          botApp.botId,
+          bots.map((bot) => bot.id),
+        ),
+      );
+    const byBot = new Map<string, string[]>();
+    for (const row of appRows) {
+      const list = byBot.get(row.botId);
+      if (list) list.push(row.connectionId);
+      else byBot.set(row.botId, [row.connectionId]);
+    }
+    for (const bot of bots) bot.appIds = byBot.get(bot.id) ?? [];
+  }
+
+  const connections: ConnectedApp[] = await listConnectionsFor(input.user.id);
+
   return {
     user: input.user,
     apiUrl: input.apiUrl,
@@ -208,5 +236,6 @@ export async function loadShellData(input: {
     activeRunId,
     endpoints,
     usage,
+    connections,
   };
 }

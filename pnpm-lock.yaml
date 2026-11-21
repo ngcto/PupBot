@@ -401,6 +401,9 @@ importers:
       '@terabot/avatars':
         specifier: workspace:*
         version: link:../../packages/avatars
+      '@terabot/composio':
+        specifier: workspace:*
+        version: link:../../packages/composio
       '@terabot/computers':
         specifier: workspace:*
         version: link:../../packages/computers
@@ -592,6 +595,22 @@ importers:
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 5.1.1
+        version: 5.1.1(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15))
+
+  packages/composio:
+    dependencies:
+      zod:
+        specifier: ^4.1.12
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
       typescript:
         specifier: 5.9.3
         version: 5.9.3

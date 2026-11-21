@@ -16,6 +16,7 @@ const nextConfig: NextConfig = {
     "@terabot/api",
     "@terabot/agent",
     "@terabot/avatars",
+    "@terabot/composio",
     "@terabot/computers",
     "@terabot/config",
     "@terabot/db",

@@ -1,10 +1,11 @@
 "use client";
 
 import { Button, toast } from "@terabot/ui";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { giveComputer } from "../app/actions.ts";
 import type { ShellData } from "../lib/types.ts";
+import { AppsDialog } from "./apps-dialog.tsx";
 import { BotSettingsDialog } from "./bot-settings-dialog.tsx";
 import { Chat } from "./chat.tsx";
 import { CreateBotDialog } from "./create-bot-dialog.tsx";
@@ -16,12 +17,14 @@ import { Sidebar } from "./sidebar.tsx";
 
 export function AppShell({ data }: { data: ShellData }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [createOpen, setCreateOpen] = useState(data.bots.length === 0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [primaryOpen, setPrimaryOpen] = useState(false);
   const [settingsBotId, setSettingsBotId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appsOpen, setAppsOpen] = useState(searchParams.get("apps") === "1");
   const [settingsSection, setSettingsSection] = useState("general");
 
   const openProviders = useCallback(() => {
@@ -98,6 +101,7 @@ export function AppShell({ data }: { data: ShellData }) {
         onOpenSettings={(botId) => setSettingsBotId(botId)}
         onOpenAccount={() => setSettingsOpen(true)}
         onOpenSettingsDialog={() => setSettingsOpen(true)}
+        onOpenApps={() => setAppsOpen(true)}
       />
 
       {activeBot ? (
@@ -153,10 +157,12 @@ export function AppShell({ data }: { data: ShellData }) {
         endpoints={data.endpoints}
         initialSection={settingsSection}
       />
+      <AppsDialog open={appsOpen} onOpenChange={setAppsOpen} initialConnections={data.connections} />
       {settingsBot ? (
         <BotSettingsDialog
           bot={settingsBot}
           endpoints={data.endpoints}
+          connections={data.connections}
           open={Boolean(settingsBotId)}
           onOpenChange={(open) => setSettingsBotId(open ? settingsBotId : null)}
           onManageProviders={openProviders}

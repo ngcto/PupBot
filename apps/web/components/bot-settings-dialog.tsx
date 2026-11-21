@@ -10,6 +10,7 @@ import {
   DialogTitle,
   Input,
   Select,
+  Switch,
   Textarea,
   cn,
   toast,
@@ -18,7 +19,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { deleteBot, giveComputer, setBotFlags, testModelEndpoint, updateBotSettings } from "../app/actions.ts";
 import type { TestEndpointResult } from "../app/actions.ts";
-import type { BotView, EndpointView } from "../lib/types.ts";
+import { loadConnections, toggleBotApp } from "../app/apps/actions.ts";
+import type { BotView, ConnectedApp, EndpointView } from "../lib/types.ts";
 import { AvatarPicker } from "./avatar-picker.tsx";
 import { TestResultLine } from "./provider-form.tsx";
 import { ModelPicker } from "./model-picker.tsx";
@@ -26,12 +28,15 @@ import { ModelPicker } from "./model-picker.tsx";
 export function BotSettingsDialog({
   bot,
   endpoints,
+  connections,
   open,
   onOpenChange,
   onManageProviders,
 }: {
   bot: BotView;
   endpoints: EndpointView[];
+  /** Connected apps, as the page last read them; refreshed when the panel opens. */
+  connections: ConnectedApp[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Opens Settings > Providers; the bot dialog never takes a key itself. */
@@ -60,6 +65,24 @@ export function BotSettingsDialog({
     if (typeof window === "undefined") return;
     window.localStorage.setItem("terabot:model-details", modelDetails ? "1" : "0");
   }, [modelDetails]);
+
+  const [allowed, setAllowed] = useState<string[]>(bot.appIds);
+  const [apps, setApps] = useState<ConnectedApp[]>(
+    connections.filter((connection) => connection.status === "active"),
+  );
+
+  // Read the connections when the panel opens rather than trusting the page-level
+  // snapshot: an app linked a moment ago belongs here immediately.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void loadConnections().then((next) => {
+      if (live) setApps(next.filter((connection) => connection.status === "active"));
+    });
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   const accent = COLORS.find((entry) => entry.id === color)?.hex ?? bot.accentColor;
   const endpoint = endpoints.find((entry) => entry.id === endpointId);
@@ -203,6 +226,49 @@ export function BotSettingsDialog({
                 </button>
               )}
             </div>
+          </Group>
+
+          <Group label="Apps">
+            {apps.length === 0 ? (
+              <div className="px-4 py-3" data-testid="bot-apps-empty">
+                <p className="text-body text-ink">No apps connected yet</p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Use “Connect apps” at the bottom of the sidebar to link an account. Apps you connect
+                  appear here, and you choose which ones this bot may use.
+                </p>
+              </div>
+            ) : (
+              <>
+                {apps.map((connection) => (
+                  <div
+                    key={connection.id}
+                    className="flex items-center justify-between gap-4 border-b border-hairline px-4 py-3 last:border-b-0"
+                    data-testid={`bot-app-${connection.toolkit}`}
+                  >
+                    <span className="text-body text-ink">{connection.name}</span>
+                    <Switch
+                      aria-label={`Let ${bot.name} use ${connection.name}`}
+                      checked={allowed.includes(connection.id)}
+                      onCheckedChange={async (checked) => {
+                        const result = await toggleBotApp(bot.id, connection.id, checked);
+                        if (result.error) {
+                          toast(result.error);
+                          return;
+                        }
+                        setAllowed((current) =>
+                          checked ? [...current, connection.id] : current.filter((id) => id !== connection.id),
+                        );
+                        router.refresh();
+                      }}
+                    />
+                  </div>
+                ))}
+                <p className="border-t border-hairline px-4 py-3 text-sm leading-relaxed text-ink-muted">
+                  Saved for this bot. Nothing uses it in a chat yet: the harness has no tool-calling
+                  loop, so a connected app is a stored, revocable link and nothing more.
+                </p>
+              </>
+            )}
           </Group>
 
           <Group label="Computer">

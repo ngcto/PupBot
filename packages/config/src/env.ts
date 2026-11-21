@@ -33,7 +33,10 @@ const serverSchema = z.object({
   /** How many boxes the Instabox account's plan allows (free: 1, grandfathered accounts: 5). */
   INSTABOX_CAPACITY: z.coerce.number().int().positive().default(1),
   BOAT_API_KEY: optionalSecret,
-  COMPOSIO_API_KEY: optionalSecret,
+  /** Composio Platform project API key. Server-side only: it never reaches the client bundle. */
+  COMPOSIO_PROJECT_API_KEY: optionalSecret,
+  /** Overrides Composio's base URL. Only for tests, which point it at a local stub. */
+  COMPOSIO_BASE_URL: optionalUrl,
   OPENAI_API_KEY: optionalSecret,
   ANTHROPIC_API_KEY: optionalSecret,
   MODELS_DEV_URL: url.default("https://models.dev/api.json"),

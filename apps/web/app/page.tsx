@@ -4,7 +4,12 @@ import { currentWorkspace, getSessionUser } from "../lib/session.ts";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
   const user = await getSessionUser();
   if (!user) redirect("/sign-in");
 
@@ -16,6 +21,9 @@ export default async function Home() {
   });
 
   const target = data.activeBot;
-  if (!target) redirect("/b/new");
-  redirect(`/b/${target.id}`);
+  // Composio's callback sends the person back with ?apps=1, so the marketplace
+  // reopens on the bot they were on instead of dropping them into the chat blind.
+  const suffix = params.apps ? "?apps=1" : "";
+  if (!target) redirect(`/b/new${suffix}`);
+  redirect(`/b/${target.id}${suffix}`);
 }
