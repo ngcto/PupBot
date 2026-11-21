@@ -70,13 +70,33 @@ export function resetEnvCache(): void {
  * explicit key elsewhere. Without one we never hand out a gateway endpoint,
  * because a keyless request would fail at the first message instead of at
  * setup time.
+ *
+ * A Vercel deployment gets its token per request in the `x-vercel-oidc-token`
+ * header, not the environment, and rotates it about every hour — so it is read
+ * on each request rather than cached with the rest of the environment.
  */
-export function gatewayCredential(env: ServerEnv = serverEnv()): string | undefined {
-  return env.AI_GATEWAY_API_KEY ?? env.VERCEL_OIDC_TOKEN;
+let requestOidcToken: string | undefined;
+
+/** Called by the serverless entry point with the token of the current request. */
+export function setRequestOidcToken(token: string | null | undefined): void {
+  requestOidcToken = token ?? undefined;
+}
+
+export async function gatewayCredential(env: ServerEnv = serverEnv()): Promise<string | undefined> {
+  if (env.AI_GATEWAY_API_KEY) return env.AI_GATEWAY_API_KEY;
+  if (requestOidcToken) return requestOidcToken;
+  if (env.VERCEL_OIDC_TOKEN) return env.VERCEL_OIDC_TOKEN;
+  if (!env.VERCEL) return undefined;
+  const { getVercelOidcToken } = await import("@vercel/oidc");
+  try {
+    return await getVercelOidcToken();
+  } catch {
+    return undefined;
+  }
 }
 
 export function isGatewayAvailable(env: ServerEnv = serverEnv()): boolean {
-  return Boolean(gatewayCredential(env)) || Boolean(env.VERCEL);
+  return Boolean(env.AI_GATEWAY_API_KEY ?? env.VERCEL_OIDC_TOKEN) || Boolean(env.VERCEL);
 }
 
 export function isStubProviderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

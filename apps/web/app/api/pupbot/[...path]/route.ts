@@ -1,4 +1,5 @@
 import { createApp } from "@pupbot/api";
+import { setRequestOidcToken } from "@pupbot/config";
 import { Hono } from "hono";
 import { after } from "next/server";
 
@@ -35,6 +36,9 @@ function executionContext(): { waitUntil: WaitUntil; passThroughOnException: () 
 }
 
 async function handle(request: Request): Promise<Response> {
+  // Vercel hands the project's OIDC token to this invocation; the AI Gateway
+  // endpoint authenticates with it, and it rotates hourly.
+  setRequestOidcToken(request.headers.get("x-vercel-oidc-token"));
   const context = executionContext();
   return hono().fetch(request, {}, context as never);
 }

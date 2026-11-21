@@ -4,6 +4,7 @@ export {
   resetEnvCache,
   isStubProviderEnabled,
   gatewayCredential,
+  setRequestOidcToken,
   isGatewayAvailable,
   publicEnvSchema,
 } from "./env.ts";

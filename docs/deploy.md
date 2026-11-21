@@ -1,0 +1,86 @@
+# Deploying PupBot
+
+The hosted shape is one Vercel project: Next.js serves the UI and mounts the Hono API at
+`/api/pupbot`, so there is one origin, one first-party session cookie, and no cross-site CORS.
+Postgres is Supabase. There is no separate worker, no queue, and no second service.
+
+- **App**: <https://terabot-six.vercel.app>
+- **Database**: Supabase project `pupbot` (`glhuwrobszgnrguareic`, `ap-southeast-1`)
+- **Runs**: `RUN_MODE=inline` — a run executes inside the POST that started it and finishes in
+  `waitUntil`, bounded by `maxDuration = 300` on the route
+- **Attachments**: Postgres `attachment_blob` by default; Supabase Storage (S3) when all four
+  `S3_*` variables are set — no code change either way
+
+## Environment
+
+Set these on the Vercel project (Production and Preview). Only `DATABASE_URL`,
+`BETTER_AUTH_SECRET` and `CREDENTIAL_ENCRYPTION_KEY` are secret.
+
+| variable | value |
+| --- | --- |
+| `DATABASE_URL` | Supabase **transaction pooler** string, port 6543, ending `?sslmode=no-verify` |
+| `BETTER_AUTH_SECRET` | `openssl rand -base64 32` |
+| `CREDENTIAL_ENCRYPTION_KEY` | `openssl rand -base64 32` — encrypts provider keys at rest |
+| `BETTER_AUTH_URL` | the deployment origin, `https://terabot-six.vercel.app` |
+| `API_URL` | the same origin **plus the mount path**: `https://terabot-six.vercel.app/api/pupbot` |
+| `NEXT_PUBLIC_API_URL` | same as `API_URL` |
+| `RUN_MODE` | `inline` |
+| `DATABASE_POOL_MAX` | `3` — one Fluid instance per concurrent request, and the free tier caps connections |
+| `STUB_PROVIDER` | `false` |
+| `AI_GATEWAY_MODEL` | `openai/gpt-5.4-mini` (default; any AI Gateway model id works) |
+
+Do **not** set `VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`: the platform injects the OIDC token,
+and the AI Gateway endpoint is keyless because that token authenticates it. Without a Vercel
+deployment, set `AI_GATEWAY_API_KEY` instead.
+
+`sslmode=no-verify` is deliberate. node-postgres 8.23 treats `sslmode=require` as `verify-full`,
+and Supabase's pooler certificate chain is not in the function's trust store, so the connection
+fails with `self-signed certificate in certificate chain`. `no-verify` keeps TLS on and skips
+chain verification — the trade-off of not shipping Supabase's CA bundle.
+
+## Project settings
+
+- Root directory `apps/web`, framework Next.js, Node 24, **Include source files outside the Root
+  Directory** on (the workspace packages live in `packages/`).
+- Build: `turbo run build` (auto-detected). `turbo.json` declares every variable the app reads in
+  `globalEnv`; without that Turborepo strips them and the build fails validating the environment.
+- The API proxy builds the Hono app on the first request rather than at import, so a build machine
+  needs no database or secrets.
+
+## Database
+
+```bash
+# from a checkout with DATABASE_URL pointing at Supabase
+pnpm db:migrate     # uses MIGRATE_DATABASE_URL when set (session/direct connection)
+pnpm db:seed        # demo user, bots, conversation
+```
+
+`pnpm db:migrate` takes a session-level advisory lock, so point `MIGRATE_DATABASE_URL` at the
+session pooler (port 5432) or the direct connection when the transaction pooler refuses it.
+
+## Verification
+
+```bash
+curl -s https://terabot-six.vercel.app/api/pupbot/health   # {"ok":true,"service":"pupbot-api"}
+BASE_URL=https://terabot-six.vercel.app pnpm e2e           # deployed.spec.ts
+pnpm typecheck && pnpm test                                # local, against docker Postgres
+```
+
+`pnpm e2e` with `BASE_URL` set skips the local web servers, the pg-boss worker, and the dev-only
+`smoke.spec.ts`; `deployed.spec.ts` signs up, creates a bot, binds a computer, sends a message,
+waits for the finished assistant bubble, reloads, and asserts the reply is still there.
+
+The local suite needs the Docker database: `pnpm db:up`, `DATABASE_URL=postgres://pupbot:pupbot@localhost:5432/pupbot pnpm db:migrate`, then
+`DATABASE_URL=postgres://pupbot:pupbot@localhost:5432/pupbot pnpm test`. Pointing it at the hosted
+database works for reads but the integration tests time out on the round trip.
+
+## Limits of this shape
+
+- A run is capped by the function's `maxDuration` (300s on Hobby). Longer work needs the queue
+  deployment: `RUN_MODE=queue` plus a host that runs `apps/worker`.
+- The `pg-boss` catalogue sync job does not run here. `model_catalog` stays empty until
+  `pnpm catalog:sync` is run against the hosted database.
+- Each signup gets an AI Gateway endpoint with the gateway's default model; users can still add
+  their own endpoint in Settings › Models.
+- Deploys currently come from a file upload of the `p3/deploy` tree. Push-to-deploy needs the
+  Vercel GitHub App installed on `ngcto/Terabot`; the project has no Git connection yet.

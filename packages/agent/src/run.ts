@@ -86,7 +86,7 @@ class EventLog {
   }
 }
 
-function gatewayKeyFor(baseUrl: string): string | undefined {
+async function gatewayKeyFor(baseUrl: string): Promise<string | undefined> {
   const env = serverEnv();
   const normalise = (value: string) => value.replace(/\/+$/, "");
   if (normalise(baseUrl) !== normalise(env.AI_GATEWAY_BASE_URL)) return undefined;
@@ -117,7 +117,7 @@ async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<Res
   }
   // The AI Gateway endpoint ships with no stored key: the deployment's own
   // OIDC token (or an explicit AI_GATEWAY_API_KEY) authenticates the request.
-  apiKey ??= gatewayKeyFor(endpoint.baseUrl);
+  apiKey ??= await gatewayKeyFor(endpoint.baseUrl);
 
   return {
     label: endpoint.label,
