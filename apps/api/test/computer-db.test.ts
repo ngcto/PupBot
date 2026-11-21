@@ -519,8 +519,13 @@ describe.skipIf(process.env.INSTABOX_LIVE !== "1")("the real provider spends one
       .where(eq(computerAccount.id, accountId));
 
     const providers = createProviderFactory();
+    const account = (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!;
+    const provider = providers(account);
     const a = new ComputerAllocator({ store: new DrizzleComputerStore(), providers });
     const b = new ComputerAllocator({ store: new DrizzleComputerStore(), providers });
+
+    // What is here before the race, so cleanup only touches boxes it made.
+    const before = (await provider.listComputers()).map((entry) => entry.id);
 
     try {
       const [first, second] = await Promise.all([a.allocateForBot(botId), b.allocateForBot(botId)]);
@@ -535,9 +540,16 @@ describe.skipIf(process.env.INSTABOX_LIVE !== "1")("the real provider spends one
         .where(and(eq(computer.workspaceId, space.id), ne(computer.status, "deleted")));
       expect(live).toHaveLength(1);
 
-      const listed = await providers(
-        (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!,
-      ).listComputers();
+      /*
+       * The box must be on *this* account. The allocator is allowed to fall
+       * through to another provider when one refuses — that is the behaviour
+       * `failures.test.ts` covers — but then this test would be asserting
+       * against a box that does not exist here and failing with a bare "0
+       * boxes". Naming the account makes that case say what happened instead.
+       */
+      expect(live[0]?.accountId).toBe(accountId);
+
+      const listed = await provider.listComputers();
       const ids = listed.map((entry) => entry.id);
       console.log(`  boxes at the provider: ${ids.join(", ") || "(none)"}`);
       expect(ids).toHaveLength(1);
@@ -545,13 +557,11 @@ describe.skipIf(process.env.INSTABOX_LIVE !== "1")("the real provider spends one
     } finally {
       // Destroy whatever it made, whatever the assertions did.
       await a.destroyForBot(botId).catch(() => undefined);
-      const remaining = await providers(
-        (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!,
-      ).listComputers().catch(() => []);
+      const remaining = (await provider.listComputers().catch(() => [])).filter(
+        (entry) => !before.includes(entry.id),
+      );
       for (const box of remaining) {
-        await providers(
-          (await new DrizzleComputerStore().listAccounts()).find((entry) => entry.id === accountId)!,
-        ).destroy(box).catch(() => undefined);
+        await provider.destroy(box).catch(() => undefined);
       }
     }
   }, 600_000);
