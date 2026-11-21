@@ -105,6 +105,12 @@ describe.skipIf(!live)("NGS-80 live: a vault item filled into a real page", () =
         const page = await readPage(driver, tab);
         expect(page.title).toBe("Sign in");
 
+        // Before anything is typed, the field must read as empty. Without this the
+        // mask count below proves nothing: a read-back that reported masks for any
+        // field would look identical to a landed value.
+        const beforeAnyFill = page.refs.find((entry) => /password/i.test(`${entry.name ?? ""}`));
+        expect(String(beforeAnyFill?.value ?? "")).toBe("");
+
         const passwordRef = page.refs.find(
           (entry) => entry.actions.includes("type") && /password/i.test(`${entry.name ?? ""} ${entry.role}`),
         );
@@ -162,11 +168,36 @@ describe.skipIf(!live)("NGS-80 live: a vault item filled into a real page", () =
         }
         expect(String(passwordAfter?.value ?? "")).not.toBe("");
 
-        // What the user typed into the page is what the vault held: fill the second
-        // field with the username through the same sink, so a partial fill cannot pass
-        // as a whole one.
-        const userPage = await readPage(driver, tab);
-        expect(userPage.title).toBe("Sign in");
+        /**
+         * The negative control, on the same box and the same field.
+         *
+         * A read-back that reported masks regardless of what was typed would make the
+         * assertion above worthless. So the same sink fills a value of a *different
+         * length*, and the page must report that length instead: if the count were a
+         * property of the field rather than the value, it would still say forty.
+         */
+        const CONTROL = "fake-short-11";
+        expect(CONTROL.length).toBe(13);
+        const controlPage = await readPage(driver, tab);
+        const controlRef = controlPage.refs.find(
+          (entry) => entry.actions.includes("type") && /password/i.test(`${entry.name ?? ""} ${entry.role}`),
+        );
+        expect(controlRef, "the field must still be there for the control").toBeDefined();
+        const control = await sink.fill({
+          url: "http://127.0.0.1:8099/",
+          target: { token: controlRef!.ref, snapshotId: controlPage.snapshotId },
+          field: "password",
+          value: CONTROL,
+        });
+        const afterControl = await readPage(driver, tab);
+        const controlValue = String(
+          afterControl.refs.find((entry) => /password/i.test(`${entry.name ?? ""}`))?.value ?? "",
+        );
+        console.log(`  control fill effect=${control.effect}; the page now reports ${controlValue.length} masks`);
+        // The count follows the value: this is what makes the forty above evidence.
+        expect(controlValue.length).toBe(CONTROL.length);
+        expect(controlValue.length).not.toBe(SECRET.length);
+        expect(controlValue).not.toContain(CONTROL);
       } finally {
         await provider.destroy(box).catch(() => undefined);
       }

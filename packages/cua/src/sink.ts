@@ -24,6 +24,17 @@ import { fillSecret, isStaleTarget } from "./tools/fill.ts";
  *   and one masked sentence; a value never enters a message, a refusal, or a
  *   thrown error. `fillSecret` already has no field a value could travel in, and
  *   this wrapper keeps it that way.
+ *
+ * **Two traps anyone re-implementing this will hit**, both found by running it against
+ * a real box rather than a fake:
+ *
+ * - **Fill in the session that took the observation.** The driver keys its ref cache
+ *   by session, so a sink that builds its own driver at the default session finds none
+ *   of the caller's refs and gets `browser_binding_stale` — a code that reads like "the
+ *   page moved" and means "wrong session". `cuaFillSinkFor` takes `session` for this.
+ * - **A page ref pairs with `CuaPageState.snapshotId`, not the tab's `targetId`.**
+ *   Passing the target id refuses with `stale_element_token`, which is the staleness
+ *   guard doing its job on a caller mistake.
  */
 export interface CuaFillSinkOptions {
   driver: CuaDriver;
