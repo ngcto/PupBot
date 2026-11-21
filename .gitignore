@@ -15,3 +15,6 @@ coverage/
 *.log
 
 e2e/.worker.pid
+
+# Proof images written by packages/cua/scripts/capture-proof.mts
+cua-*-proof.png
