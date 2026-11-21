@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@terabot/computers": "workspace:*",
+    "@terabot/vault": "workspace:*",
     "zod": "^4.1.12"
   },
   "devDependencies": {

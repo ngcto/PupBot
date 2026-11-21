@@ -18,6 +18,8 @@
  */
 
 export { CuaDriver, CuaDriverError, boxEnvironment, execTargetFor, shellQuote, DEFAULT_SOCKET } from "./driver/cli.ts";
+export { createCuaFillSink } from "./sink.ts";
+export type { CuaFillSinkOptions } from "./sink.ts";
 export type { CuaDriverOptions, CuaExecTarget, DriverReply } from "./driver/cli.ts";
 
 export {
