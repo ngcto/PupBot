@@ -110,8 +110,7 @@ export interface ComputerStore {
 export type ProviderFactory = (account: AccountRecord) => ComputerProvider;
 
 export interface AllocateResult {
-  /** `binding`: another host or an earlier request owns this allocation. */
-  state: "ready" | "blocked" | "binding";
+  state: "ready" | "blocked";
   computerId?: string;
   reason?: string;
 }

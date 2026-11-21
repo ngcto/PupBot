@@ -33,16 +33,23 @@ function allocatorFor(): ComputerAllocator {
 }
 
 /**
- * Provisions a bot on this host. `allocateForBot` is idempotent per bot and takes
- * a per-bot lock, but that lock is per process and this runtime is several
- * instances, so the claim is taken through the store first: flipping the bot to
- * `binding` is atomic across instances, and whoever loses the race leaves the
- * work to the winner instead of paying for a second machine.
+ * Provisions a bot on this host. The caller has already claimed it, so this does
+ * not claim again: `allocateForBot` is idempotent per bot and takes a per-bot
+ * lock, which handles everything inside one process.
  */
 export async function allocateComputerInline(botId: string): Promise<AllocateResult> {
-  const allocator = allocatorFor();
-  if (!(await allocator.store.claimBinding(botId))) return { state: "binding" };
-  return allocator.allocateForBot(botId);
+  return allocatorFor().allocateForBot(botId);
+}
+
+/**
+ * Take exclusive ownership of a bot's allocation before provisioning it. The
+ * allocator's own lock is a per-instance Map and this runtime is several
+ * instances, so two requests for one unbound bot could otherwise both create a
+ * machine. The claim is an atomic flip to `binding` from any other state, so one
+ * instance wins across processes; the loser leaves the work to the winner.
+ */
+export async function claimComputerInline(botId: string): Promise<boolean> {
+  return allocatorFor().store.claimBinding(botId);
 }
 
 export function inlineRunComputer(): RunComputer {

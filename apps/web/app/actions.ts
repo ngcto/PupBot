@@ -21,7 +21,7 @@ import {
 import type { EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { allocateComputerInline, inlineComputers } from "../lib/computers-inline.ts";
+import { allocateComputerInline, claimComputerInline, inlineComputers } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { endpointConfigFor } from "../lib/endpoint-config.ts";
 import {
@@ -266,24 +266,29 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
   const { workspace, db } = await context();
   await ownedBot(workspace.id, botId);
 
-  // Mark the bot before publishing the job: the worker can finish the whole
-  // allocation first, and a "binding" write after that would erase a ready or
-  // blocked result the worker already committed.
-  await db
-    .update(botTable)
-    .set({ computerState: "binding", computerReason: null, updatedAt: new Date() })
-    .where(eq(botTable.id, botId));
-
   try {
     await ensureComputerPool();
-    // Inline mode is its own provisioning host: nothing drains the queue here,
-    // so a bot left on a job would sit in `binding` forever. The allocation is
-    // idempotent per bot, so the queue message below stays harmless.
+
+    // Inline mode provisions here: nothing drains the queue on this host, so a
+    // bot left on a job would sit in `binding` forever. The claim is the atomic
+    // flip to `binding`, so this both marks the bot and stops a second instance
+    // from provisioning it; a bot already binding belongs to that other request.
     if (inlineComputers()) {
+      if (!(await claimComputerInline(botId))) {
+        return { state: "binding", reason: null };
+      }
       const result = await allocateComputerInline(botId);
       revalidatePath("/", "layout");
       return { state: result.state, reason: result.reason ?? null };
     }
+
+    // Queue mode marks before publishing: the worker can finish the whole
+    // allocation first, and a "binding" write after that would erase a ready or
+    // blocked result it already committed.
+    await db
+      .update(botTable)
+      .set({ computerState: "binding", computerReason: null, updatedAt: new Date() })
+      .where(eq(botTable.id, botId));
     await enqueueComputerProvision(botId);
   } catch (error) {
     const reason = "The computer service is not reachable; try again.";
