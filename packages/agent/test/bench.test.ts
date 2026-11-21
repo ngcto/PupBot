@@ -330,3 +330,43 @@ describe("the fixtures refuse what a driver would refuse", () => {
     expect(unknown.refusal?.code).toBe("unknown_window");
   });
 });
+
+describe("the fixtures do not invent actions", () => {
+  const clicking = (args: Record<string, unknown>) => {
+    const world = freshWorld();
+    const impl = fixtureImplementations(world);
+    return { result: impl.click!(args) as { effect: string; verified?: boolean; target?: string; refusal?: { code: string } }, world };
+  };
+
+  /**
+   * A click with no target reported `confirmed`, `verified: true`, `target: ""` and
+   * pushed an empty string into the click log. A program passing `{ target: "t1x7" }` —
+   * the native schema's word rather than the program's `token` — therefore produced a
+   * *successful* action that never happened, and task 9 scored it as one. Same shape as
+   * `observeWindow`'s silent default: the fixture made up an outcome.
+   */
+  it("refuses a click with no target instead of confirming one", () => {
+    const { result, world } = clicking({ target: "t1x7" });
+    expect(result.effect).toBe("refused");
+    expect(result.refusal?.code).toBe("missing_target");
+    expect(world.clicked).toEqual([]);
+  });
+
+  it("refuses a click with nothing at all", () => {
+    const { result, world } = clicking({});
+    expect(result.effect).toBe("refused");
+    expect(world.clicked).toEqual([]);
+  });
+
+  it("confirms a click on a real token and records it", () => {
+    const { result, world } = clicking({ token: "te28w" });
+    expect(result).toMatchObject({ effect: "confirmed", target: "te28w" });
+    expect(world.clicked).toEqual(["te28w"]);
+  });
+
+  it("records a point click by its coordinates rather than as an empty target", () => {
+    const { result, world } = clicking({ point: { x: 7, y: 9 } });
+    expect(result.effect).toBe("confirmed");
+    expect(world.clicked).toEqual(["point(7,9)"]);
+  });
+});

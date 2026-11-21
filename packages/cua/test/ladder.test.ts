@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   boxEnvironment,
+  click,
   CuaDriver,
   readActionResult,
   readObservation,
@@ -157,6 +158,55 @@ describe("observation", () => {
 });
 
 describe("the driver transport", () => {
+  /**
+   * A program can pass an argument set our own callers cannot.
+   *
+   * `ActionPosition` is a compile-time union, so `click(driver, target, position)`
+   * cannot be misused in TypeScript. Code mode dispatches untyped JSON, though, and a
+   * model that uses the native schema's word (`target`) instead of the program's
+   * (`token`) sends `element_token: undefined, x: undefined, y: undefined`. Measured
+   * in the benchmark's fixture, that came back `effect: "confirmed"`, `verified: true`,
+   * `target: ""` — a verified success for a click that never happened. The driver may
+   * refuse it, but a surface that reports an invented success is worse than one that
+   * reports a refusal, so the check does not depend on another process.
+   */
+  /** A driver whose driver process answers with one recorded payload. */
+  const driverOn = (payload: unknown): CuaDriver => {
+    const target: CuaExecTarget = {
+      async exec() {
+        return { stdout: JSON.stringify({ ok: true, value: payload }), stderr: "", exitCode: 0, timedOut: false };
+      },
+    };
+    return new CuaDriver(target, { socket: "/tmp/x.sock" });
+  };
+
+  it("refuses an action that names no target, without calling the driver", async () => {
+    const calls: string[] = [];
+    const target: CuaExecTarget = {
+      async exec() {
+        calls.push("called");
+        return { stdout: '{"ok":true}', stderr: "", exitCode: 0, timedOut: false };
+      },
+    };
+    const driver = new CuaDriver(target, { socket: "/tmp/x.sock" });
+    const result = await click(driver, { windowId: "w1" } as never, { x: undefined, y: undefined } as never);
+
+    expect(result.effect).toBe("refused");
+    expect(result.verified).toBe(false);
+    expect(result.refusal?.code).toBe("missing_target");
+    expect(calls).toEqual([]);
+  });
+
+  it("reaches the driver when the target names a token or a point", async () => {
+    // The guard must not block a legitimate action. What the driver then reports is
+    // the ladder's business, so this asserts only that it was called and not refused
+    // for a missing target.
+    for (const position of [{ x: 10, y: 20 }, { elementToken: "snap:w1:31" }]) {
+      const result = await click(driverOn(CONFIRMED_FOREGROUND), { windowId: "w1" }, position as never);
+      expect(result.refusal?.code).not.toBe("missing_target");
+    }
+  });
+
   it("does not forward the host's session paths to the box", async () => {
     // The host and the box are different machines with different UIDs: sending
     // the host's /run/user/1001 to a box whose desktop runs as 1000 points the

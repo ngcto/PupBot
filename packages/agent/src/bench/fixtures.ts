@@ -179,8 +179,26 @@ export function fixtureImplementations(world: WorldState): Record<string, (input
       };
     },
     observeDesktop: () => ({ windows: WINDOWS.map((w) => ({ id: w.id, app: w.app, title: w.title })), screenshot: "<an image>" }),
-    click: ({ token }) => {
+    click: ({ token, point }) => {
       const t = str(token);
+      // A click with no target and no point is refused, never confirmed. Returning
+      // `confirmed` with an empty target recorded a click that never happened and
+      // reported it as verified success — a program passing `{ target: "t1x7" }` (the
+      // native schema's word, not the program's) got `confirmed`, `target: ""`, and a
+      // phantom entry in `world.clicked`. Same defect as `observeWindow`'s silent
+      // default: the fixture invented an outcome instead of refusing an argument it
+      // did not understand.
+      if (!t && (typeof point !== "object" || point === null)) {
+        return {
+          effect: "refused",
+          verified: false,
+          refusal: {
+            code: "missing_target",
+            message: "click needs a `token` from a fresh observation, or a `point`",
+          },
+          escalation: { recommended: "observe", reason: "read the window and use one of its tokens" },
+        } satisfies ActionEffect;
+      }
       if (world.staleToken && t === world.staleToken) {
         return {
           effect: "refused",
@@ -190,8 +208,12 @@ export function fixtureImplementations(world: WorldState): Record<string, (input
           escalation: { recommended: "observe", reason: "re-read the window before acting" },
         } satisfies ActionEffect;
       }
-      world.clicked.push(t);
-      return ok(t);
+      // A point click has no token, so it is recorded by coordinates rather than as an
+      // empty string, which used to read as "a click on nothing" in the log.
+      const at = typeof point === "object" && point !== null ? (point as { x?: unknown; y?: unknown }) : undefined;
+      const label = t || (at ? `point(${String(at.x ?? "?")},${String(at.y ?? "?")})` : "");
+      world.clicked.push(label);
+      return ok(label);
     },
     doubleClick: ({ token }) => ok(str(token)),
     rightClick: ({ token }) => ({ ...ok(str(token)), menu: ["Copy", "Paste", "Inspect"] }),
