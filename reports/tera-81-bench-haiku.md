@@ -35,6 +35,28 @@ Per cell, so variance is visible:
 | 10 filter a large tree | 1/3 | 3/3 | 2/3 | 0/3 |
 | 11 answer without tools | 3/3 | 3/3 | 3/3 | 3/3 |
 
+## The premise this work was commissioned on does not survive
+
+The case for code mode was arithmetic: 26 tool schemas cost 3,546 tokens per request, one `codemode`
+tool costs 1,877, so a program-per-turn surface must save tokens. That arithmetic is correct and it
+priced the wrong thing.
+
+**Nearly every prompt token here is a cache read.** On this endpoint, a repeated block is served from
+the provider's cache and billed as such, so arm B is not paying 3,546 fresh tokens on every turn — it
+is paying a cache read for a block it has already sent. Measured across the four arms, **~93% of every
+arm's prompt tokens are cache reads**, and the two surfaces' *uncached* remainders are almost identical
+(78 tokens for both B and C across all eleven tasks).
+
+The number that shows how badly the old column misled: a turn carrying a 3,900-token prompt reported
+`input_tokens: 6`. That is the uncached remainder, and it is what every earlier conclusion in
+`reports/tera-81-bench.md` was computed from. A comparison built on that column compares two arms'
+cache misses and calls it their cost — and it flatters whichever surface repeats an identical block,
+which is exactly the surface code mode was supposed to beat.
+
+**So the measured saving is 17%, not the several-fold the token counts implied.** That is a real
+saving and it is much smaller than the premise. Anyone reading "code mode saves tokens" should read
+this section first: on a cached endpoint it saves a cache read per turn, not a schema block.
+
 ## What it says
 
 **Code mode is level on correctness and cheaper in tokens.** Arm C ties arm B at 7/11 cells, on the
@@ -60,7 +82,21 @@ token in every arm is a **cache read**, and a repeated block is cheap to re-send
 surface is not paying 3,546 fresh tokens per turn — it is paying a cache read, which narrows the gap
 that looked decisive on paper.
 
+## The bar for revisiting the default
+
+**`inline` stays the default and this table does not change it.** 17% at level correctness, on one
+model, at three reps, is not enough to move a default. The bar, recorded so it can be met or missed
+explicitly rather than argued about later:
+
+1. **Five reps per cell**, not three — this table swings two cells on a rep.
+2. **A second model**, so the result is not a property of `claude-haiku-5-5`.
+3. **The filtering tasks must still win.** Tasks 10 and the large-tree case are the reason code mode
+   exists; if a bigger sample erases that, the surface has no argument left.
+
+Until all three hold, the number is on the record and the default does not move.
+
 ## The four defects this measurement took
+
 
 Three of the four were in the instrument, not the surface. Each was caught by something impossible on
 its face, and that is the only reason any of them were caught.
@@ -77,8 +113,11 @@ its face, and that is the only reason any of them were caught.
    hallucination. Now an unknown or missing id is refused, which is what a driver does.
 
 **Defect 4 is why task 6 is 3/3 for every arm in this table and was 0/3 for the code-mode arms in the
-previous one.** It is also a warning about fixture benchmarks: a permissive fixture converts a
-model's correct report into apparent confabulation, and the transcript is the only place that shows.
+previous one — and it means the phenomenon we were about to fix did not exist.** Two arms were scored
+as failing to read a window they had correctly asked for and were correctly told about; their answers
+said "the read for w2 returned the Invoices window", which was true. Nothing was confabulated. A
+permissive fixture converts a model's accurate report into apparent hallucination, and the transcript
+is the only place that shows it — the score cannot distinguish the two.
 
 ## What this does not tell you
 
