@@ -1,4 +1,9 @@
 {
-  "version": null,
-  "assets": []
+  "version": "0.1.0",
+  "assets": [
+    "Terabot-0.1.0-x86_64.AppImage",
+    "Terabot-0.1.0-amd64.deb",
+    "Terabot-0.1.0-setup.exe",
+    "terabot-0.1.0.apk"
+  ]
 }
