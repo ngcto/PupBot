@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildArm } from "../src/bench/arms.ts";
 import { renderTable } from "../src/bench/runner.ts";
 import { TASKS, task10Expected } from "../src/bench/tasks.ts";
-import { armA, armB, armC, availableToolNames } from "../src/bench/arms.ts";
+import { armA, armB, armC, availableToolNames, STALE_TOKEN } from "../src/bench/arms.ts";
 import { treeFor, WINDOWS } from "../src/bench/fixtures.ts";
 
 /**
@@ -150,6 +150,17 @@ describe("the validators", () => {
     expect(task(10).validate("4 actionable, token tzzzz", build).ok).toBe(false);
     const expected = task10Expected();
     expect(task(10).validate(`${expected.actionable} actionable, token ${expected.targetToken}`, build).ok).toBe(true);
+  });
+
+  it("arms the refusal task 9 depends on, in both tool arms", () => {
+    // Caught by the first real measurement run: without this the fixture never
+    // refuses, so task 9 asked a model to recover from something that cannot happen
+    // and read as a failure of the arm.
+    for (const arm of [armB(), armC()]) expect(arm.world.staleToken).toBe(STALE_TOKEN);
+    const click = armB().tools.find((t) => t.schema.name === "click")!;
+    return click.handler({ token: STALE_TOKEN }).then((outcome) => {
+      expect(outcome.result).toContain("refused");
+    });
   });
 
   it("rejects task 9 when the refusal was never acknowledged", () => {

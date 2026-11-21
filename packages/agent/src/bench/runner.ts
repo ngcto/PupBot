@@ -175,6 +175,9 @@ interface Cell {
   arm: Arm;
   taskId: number;
   ok: boolean;
+  /** Passing reps out of the reps attempted, so variance is visible rather than averaged away. */
+  passed: number;
+  reps: number;
   turns: number;
   input: number;
   output: number;
@@ -194,16 +197,23 @@ function cellRowsFor(runs: ArmRun[]): Cell[] {
   return [...groups.entries()]
     .map(([key, group]) => {
       const [arm, taskId] = key.split(":");
+      const passed = group.filter((r) => r.ok).length;
+      const ok = passed > group.length / 2;
+      // The reason must come from a rep that agrees with the verdict, or the table
+      // reads "fail — and here is why it passed", which is worse than no reason.
+      const witness = group.find((r) => r.ok === ok) ?? group[0]!;
       return {
         arm: arm as Arm,
         taskId: Number(taskId),
-        ok: group.filter((r) => r.ok).length > group.length / 2,
+        ok,
+        passed,
+        reps: group.length,
         turns: median(group.map((r) => r.turns)),
         input: median(group.map((r) => r.inputTokens)),
         output: median(group.map((r) => r.outputTokens)),
         model: median(group.map((r) => r.wallMsModel)),
         inclusive: median(group.map((r) => r.wallMsInclusive)),
-        why: group[0]!.why,
+        why: witness.why,
       };
     })
     .sort((a, b) => a.taskId - b.taskId || a.arm.localeCompare(b.arm));
@@ -224,15 +234,18 @@ export function renderTable(runs: ArmRun[], reps = 1): string {
   // Rows are the cells, each already reduced to its median, so nothing in the table
   // is a single lucky or unlucky rep. `runs` is kept for the JSON, where the spread
   // belongs.
-  const rows = runs
-    .filter((r) => r.arm === "a" && !r.attemptable)
-    .map(
-      (r) =>
-        `| ${r.arm.toUpperCase()} | ${r.taskId} | n/a | 0 | 0 | 0 | 0 | 0 | ${r.why} |`,
-    );
+  // One n/a row per unattemptable (arm, task), not one per rep: three identical
+  // "cannot attempt" rows say nothing the first one did not.
+  const unattemptable = new Map<string, ArmRun>();
+  for (const r of runs) {
+    if (!r.attemptable) unattemptable.set(`${r.arm}:${r.taskId}`, r);
+  }
+  const rows = [...unattemptable.values()].map(
+    (r) => `| ${r.arm.toUpperCase()} | ${r.taskId} | n/a | 0 | 0 | 0 | 0 | 0 | ${r.why} |`,
+  );
   const cellRows = cellRowsFor(runs).map(
     (c) =>
-      `| ${c.arm.toUpperCase()} | ${c.taskId} | ${c.ok ? "pass" : "fail"} | ${c.turns} | ${c.input} | ${c.output} | ${c.model} | ${c.inclusive} | ${c.why} |`,
+      `| ${c.arm.toUpperCase()} | ${c.taskId} | ${c.ok ? "pass" : "fail"} (${c.passed}/${c.reps}) | ${c.turns} | ${c.input} | ${c.output} | ${c.model} | ${c.inclusive} | ${c.why} |`,
   );
   // One median per (arm, task) cell, then summed across tasks, so a noisy single rep
   // cannot move an arm's total.

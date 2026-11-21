@@ -12,6 +12,7 @@
  */
 
 import type { Arm, ArmBuild } from "./arms.ts";
+import { STALE_TOKEN } from "./arms.ts";
 import { treeFor, WINDOWS } from "./fixtures.ts";
 
 export interface Task {
@@ -178,8 +179,7 @@ export const TASKS: Task[] = [
   },
   {
     id: 9,
-    prompt:
-      "Click the element token t1x7 in the Invoices window. If that fails, recover and tell me what you did instead.",
+    prompt: `Click the element token ${STALE_TOKEN} in the Invoices window. If that fails, recover and tell me what you did instead.`,
     property: "Recovery: branching on a refusal rather than claiming success",
     needs: ["click", "observeWindow"],
     attemptable: needsTools,

@@ -19,6 +19,15 @@ import type { WorldState } from "./fixtures.ts";
 
 export type Arm = "a" | "b" | "c";
 
+/**
+ * The token task 9 asks for, which the fixture refuses once.
+ *
+ * Exported so the task text and the fixture cannot drift apart: a task that names a
+ * token the fixture does not refuse is unanswerable, and nobody would notice from a
+ * pass/fail column alone.
+ */
+export const STALE_TOKEN = "t1x7";
+
 export interface ArmBuild {
   arm: Arm;
   tools: RunTool[];
@@ -92,6 +101,11 @@ export function armA(): ArmBuild {
  */
 export function armB(): ArmBuild {
   const world = freshWorld();
+  // Task 9 asks the model to click a token that refuses and then recover. Without
+  // this the refusal never happens and the task is unanswerable by construction —
+  // which is what the first measurement run showed, in both arms, before it was
+  // caught. It is a fixture fact, identical in every arm, not a hint to the model.
+  world.staleToken = STALE_TOKEN;
   const impl = fixtureImplementations(world);
   const log: ArmBuild["log"] = [];
 
@@ -122,6 +136,7 @@ export function armB(): ArmBuild {
  */
 export function armC(): ArmBuild {
   const world = freshWorld();
+  world.staleToken = STALE_TOKEN;
   const impl = fixtureImplementations(world);
   const log: ArmBuild["log"] = [];
 
