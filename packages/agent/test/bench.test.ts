@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildArm } from "../src/bench/arms.ts";
 import { renderTable } from "../src/bench/runner.ts";
 import { TASKS, task10Expected } from "../src/bench/tasks.ts";
+import { fixtureImplementations, freshWorld } from "../src/bench/fixtures.ts";
 import { armA, armB, armC, availableToolNames, STALE_TOKEN } from "../src/bench/arms.ts";
 import { treeFor, WINDOWS } from "../src/bench/fixtures.ts";
 
@@ -294,5 +295,38 @@ describe("buildArm", () => {
     first.world.clicked.push("t1");
     const second = buildArm("b");
     expect(second.world.clicked).toHaveLength(0);
+  });
+});
+
+describe("the fixtures refuse what a driver would refuse", () => {
+  const observed = (args: Record<string, unknown>) => {
+    const impl = fixtureImplementations(freshWorld());
+    return impl.observeWindow!(args) as { effect?: string; windowId?: string; refusal?: { code: string } };
+  };
+
+  it("reads the window it was asked for", () => {
+    expect(observed({ windowId: "w2" })).toMatchObject({ windowId: "w2" });
+  });
+
+  /**
+   * The silent default was a lie that looked like a bug in the model.
+   *
+   * A program that wrote `observeWindow({ window: "w2" })` — the native schema's name
+   * for the argument — got the *first* window back and reported that the tool "returned
+   * the Invoices window instead". It was, and it was because the fixture defaulted a
+   * missing id to `w1` rather than refusing. Three code-mode arms lost task 6 to this
+   * and the fixture made the model's account sound like a hallucination.
+   */
+  it("refuses a missing window id instead of answering with the first window", () => {
+    const missing = observed({ window: "w2" });
+    expect(missing.effect).toBe("refused");
+    expect(missing.refusal?.code).toBe("missing_window_id");
+    expect(missing).not.toMatchObject({ windowId: "w1" });
+  });
+
+  it("refuses an id it does not know", () => {
+    const unknown = observed({ windowId: "nope" });
+    expect(unknown.effect).toBe("refused");
+    expect(unknown.refusal?.code).toBe("unknown_window");
   });
 });
