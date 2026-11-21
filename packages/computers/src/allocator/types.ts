@@ -87,11 +87,6 @@ export interface ComputerStore {
   /** The bot's binding and the box currently linked to it, if any. */
   botBinding(botId: string): Promise<BindingRecord | null>;
   setBindingState(botId: string, state: BindingState, reason: string | null): Promise<void>;
-  /**
-   * Take ownership of a bot's allocation, atomic across processes. False means
-   * another host is already provisioning it, so this one must not start.
-   */
-  claimBinding(botId: string): Promise<boolean>;
   /** Link a box to the bot, releasing the one it had. Also marks the binding ready. */
   bindComputer(botId: string, computer: ComputerRecord): Promise<void>;
   /** Drop the link and leave the bot unbound. */

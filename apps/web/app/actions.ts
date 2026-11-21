@@ -21,7 +21,7 @@ import {
 import type { EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { allocateComputerInline, claimComputerInline, inlineComputers } from "../lib/computers-inline.ts";
+import { allocateComputerInline, inlineComputers } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { endpointConfigFor } from "../lib/endpoint-config.ts";
 import {
@@ -270,14 +270,9 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
     await ensureComputerPool();
 
     // Inline mode provisions here: nothing drains the queue on this host, so a
-    // bot left on a job would sit in `binding` forever. The claim is the atomic
-    // flip to `binding`, so this both marks the bot and stops a second instance
-    // from provisioning it; a bot already binding belongs to that other request.
+    // bot left on a job would sit in `binding` forever. A bound bot returns its
+    // machine without provisioning, and a blocked one retries.
     if (inlineComputers()) {
-      const claim = await claimComputerInline(botId);
-      // Bound already: nothing to do, and re-provisioning would rebuild the box.
-      if (claim === "ready") return { state: "ready", reason: null };
-      if (claim === "busy") return { state: "binding", reason: null };
       const result = await allocateComputerInline(botId);
       revalidatePath("/", "layout");
       return { state: result.state, reason: result.reason ?? null };
