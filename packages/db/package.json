@@ -14,7 +14,8 @@
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check:journal": "node scripts/check-journal-order.mjs"
   },
   "dependencies": {
     "@terabot/config": "workspace:*",

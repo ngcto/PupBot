@@ -217,6 +217,13 @@ jobs:
         working-directory: packages/db
         run: pnpm exec drizzle-kit check
 
+      # The ordering gate `drizzle-kit check` does not perform. Drizzle compares
+      # only the newest `created_at`, so a journal whose timestamps interleave
+      # with a branch that already merged makes the earlier migration skip
+      # forever — silently, with its table missing. Has happened twice here.
+      - name: Migration ordering
+        run: pnpm --filter @terabot/db check:journal
+
       # Schema and migrations must agree. A schema change with no generated
       # migration produces a new .sql file here and fails the job, so nobody
       # ships a schema that only exists in code.
