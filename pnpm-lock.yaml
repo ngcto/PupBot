@@ -395,6 +395,9 @@ importers:
       '@hugeicons/react':
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.1)
+      '@terabot/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
       '@terabot/api':
         specifier: workspace:*
         version: link:../api
