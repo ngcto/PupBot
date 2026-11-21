@@ -296,6 +296,54 @@ describe("what a save writes into the detail columns", () => {
     expect(columns.pricing).toEqual({ input: 1, output: 2 });
   });
 
+  it("keeps a typed window through a retarget to an uncatalogued model", () => {
+    // The retargeted branch has nothing from the fill to work with, so a typed
+    // window would be lost and the user would reopen to a blank field.
+    const columns = detailColumnsFor({
+      retargeted: true,
+      filled: null,
+      current: mine,
+      typedContext: 32_000,
+    });
+    expect(columns.contextWindow).toBe(32_000);
+    // The old provider's other details still must not follow.
+    expect(columns.pricing).toBeNull();
+    expect(columns.toolSupport).toBeNull();
+  });
+
+  it("keeps a typed window when the retarget's model IS in the catalogue", () => {
+    const columns = detailColumnsFor({
+      retargeted: true,
+      filled: { details: { contextWindow: 200_000 }, sources: ["contextWindow"] },
+      current: mine,
+      typedContext: 32_000,
+    });
+    expect(columns.contextWindow).toBe(32_000);
+  });
+
+  it("clears a window on an explicit clear, over the fill and the stored value", () => {
+    const columns = detailColumnsFor({
+      retargeted: false,
+      filled: {
+        details: { contextWindow: 32_000, pricing: { input: 1, output: 2 }, toolSupport: false },
+        sources: [],
+      },
+      current: mine,
+      clearingContextWindow: true,
+    });
+    expect(columns.contextWindow).toBeNull();
+    // Clearing one field leaves the others as the fill resolved them.
+    expect(columns.pricing).toEqual({ input: 1, output: 2 });
+    expect(columns.toolSupport).toBe(false);
+  });
+
+  it("leaves the stored window when neither a value nor a clear is sent", () => {
+    // Omitting the field is "no opinion", not "erase it" — the case that made a
+    // label-only save destructive.
+    const columns = detailColumnsFor({ retargeted: false, filled: null, current: mine });
+    expect(columns.contextWindow).toBe(32_000);
+  });
+
   it("starts a retargeted row blank rather than inheriting the old provider's details", () => {
     // The old provider's window and price say nothing about the new one.
     expect(detailColumnsFor({ retargeted: true, filled: null, current: mine })).toEqual({

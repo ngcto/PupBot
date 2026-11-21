@@ -132,19 +132,6 @@ export function builtinRequestHeaders(
 }
 
 /**
- * A built-in is useless until it holds a key, and a bot created against it would
- * fail on the first message. Every other keyless endpoint stays usable: the dev
- * stub has no key by design and the AI Gateway is authenticated by deployment
- * credentials, so the rule is about built-ins rather than about keys alone.
- */
-export function builtinNeedsKey(endpoint: {
-  builtinId: string | null | undefined;
-  hasKey: boolean;
-}): boolean {
-  return isBuiltinId(endpoint.builtinId) && !endpoint.hasKey;
-}
-
-/**
  * Whether a bot can be created against this endpoint. A built-in with no key
  * cannot answer, so it is not offered; but a built-in the deployment itself
  * authenticates is usable keyless, and hiding it would disable a provider that

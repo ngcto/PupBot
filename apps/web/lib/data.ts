@@ -11,7 +11,7 @@ import {
   run,
   usageEvent,
 } from "@terabot/db";
-import { serverEnv } from "@terabot/config";
+import { isGatewayAvailable, serverEnv } from "@terabot/config";
 import { builtinProvider, endpointUsableForBot, providerHintForBaseUrl } from "@terabot/providers";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { listConnectionsFor } from "./apps.ts";
@@ -34,10 +34,12 @@ import type {
  */
 function gatewayAuthenticatedByDeployment(builtinId: string | null, baseUrl: string): boolean {
   if (builtinId !== "vercel-ai-gateway") return false;
-  const configured = serverEnv().AI_GATEWAY_BASE_URL;
-  if (!configured) return true;
+  // Mirror the server action: a deployment with no credential cannot authenticate
+  // the row, so the dialog must not offer it either.
+  const env = serverEnv();
+  if (!isGatewayAvailable(env)) return false;
   const normalise = (value: string) => value.replace(/\/+$/, "");
-  return normalise(baseUrl) === normalise(configured);
+  return normalise(baseUrl) === normalise(env.AI_GATEWAY_BASE_URL);
 }
 
 function botQuery(workspaceId: string) {

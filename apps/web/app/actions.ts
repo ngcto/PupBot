@@ -25,7 +25,7 @@ import {
   sourcesAfterUserEdit,
 } from "@terabot/providers";
 import type { DetailField, EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
-import { serverEnv } from "@terabot/config";
+import { isGatewayAvailable, serverEnv } from "@terabot/config";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
@@ -354,15 +354,17 @@ export interface EndpointInput {
 
 /**
  * Whether the deployment's own credentials authenticate this row, so it needs no
- * stored key. `ensureWorkspace` seeds the AI Gateway that way on a deployment that
- * has one; every other row needs the key the user pasted.
+ * stored key. `ensureWorkspace` seeds the AI Gateway that way, but only on a
+ * deployment that actually has a credential — a keyless Gateway row on a
+ * deployment without one cannot answer, and calling it ready would offer a
+ * provider whose first message fails.
  */
 function deploymentAuthenticated(endpoint: { builtinId: string | null; baseUrl: string }): boolean {
   if (endpoint.builtinId !== "vercel-ai-gateway") return false;
-  const configured = serverEnv().AI_GATEWAY_BASE_URL;
-  if (!configured) return true;
+  const env = serverEnv();
+  if (!isGatewayAvailable(env)) return false;
   const normalise = (value: string) => value.replace(/\/+$/, "");
-  return normalise(endpoint.baseUrl) === normalise(configured);
+  return normalise(endpoint.baseUrl) === normalise(env.AI_GATEWAY_BASE_URL);
 }
 
 /** A provider a bot may be created against. */
@@ -654,6 +656,16 @@ export async function addModelEndpoint(input: EndpointInput): Promise<EndpointRe
     modelId,
   );
 
+  // The same decision the edit path uses — one function, so a value cannot be
+  // wired into one save and forgotten in the other. That is exactly what happened
+  // once: the window reached the helper and never reached this INSERT.
+  const columns = detailColumnsFor({
+    retargeted: false,
+    filled,
+    current: { contextWindow: null, pricing: null, toolSupport: null, reasoningCapability: null },
+    typedContext,
+  });
+
   await db.insert(modelEndpoint).values({
     id: endpointId,
     workspaceId: workspace.id,
@@ -665,12 +677,7 @@ export async function addModelEndpoint(input: EndpointInput): Promise<EndpointRe
     encryptedKey: apiKey ? encryptSecret(apiKey) : null,
     modelCatalogId: match.row?.id ?? null,
     catalogMatch: match.match,
-    // A window typed in the form is the user's from the first save; a blank
-    // field takes what the catalogue supplied.
-    contextWindow: typedContext ?? filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
-    pricing: filled?.details.pricing ?? match.row?.pricing ?? null,
-    toolSupport: filled?.details.toolSupport ?? null,
-    reasoningCapability: filled?.details.reasoning ?? null,
+    ...columns,
     autoFilledFields: filled?.sources ?? null,
   });
 
@@ -681,7 +688,7 @@ export async function addModelEndpoint(input: EndpointInput): Promise<EndpointRe
   return {
     endpointId,
     match: match.match,
-    contextWindow: filled?.details.contextWindow ?? match.row?.contextWindow ?? null,
+    contextWindow: columns.contextWindow,
     modelName: match.row?.name ?? null,
     modelId,
   };
@@ -699,8 +706,11 @@ export interface ProviderUpdate {
   apiKey?: string;
   /** Explicitly forget the stored key. */
   clearKey?: boolean;
-  /** A context window the user typed in this save; it stops being auto-filled. */
-  contextWindow?: number;
+  /**
+   * A context window the user typed in this save, or `null` to clear one they set
+   * earlier. Omitted leaves whatever is stored.
+   */
+  contextWindow?: number | null;
   /**
    * Details the user typed in this save. Those fields stop being badged as
    * catalogue-filled, because the number is now theirs.
@@ -709,7 +719,7 @@ export interface ProviderUpdate {
 }
 
 /** A context window worth storing: a positive, finite whole number, else null. */
-function userContextWindow(value: number | undefined): number | null {
+function userContextWindow(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : null;
 }
 
@@ -749,6 +759,8 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
   const modelId = retargeted ? await defaultModelFor(db, effective) : endpoint.modelId;
 
   const typedContext = userContextWindow(input.contextWindow);
+  // An explicit null is a deliberate clear, which must win over a stale value.
+  const clearingWindow = input.contextWindow === null;
   // A retargeted row is a fresh endpoint: it keeps nothing it learned about the
   // old one, so every detail is refilled from the new model's catalogue entry. A
   // window the user typed in this save is passed in as already set, so the
@@ -790,11 +802,13 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
       retargeted,
       filled,
       current: {
-        contextWindow: typedContext ?? endpoint.contextWindow,
+        contextWindow: endpoint.contextWindow,
         pricing: endpoint.pricing,
         toolSupport: endpoint.toolSupport,
         reasoningCapability: endpoint.reasoningCapability,
       },
+      typedContext,
+      clearingContextWindow: clearingWindow,
     }),
     autoFilledFields: sources,
   };

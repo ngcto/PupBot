@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_PROVIDERS,
   builtinForBaseUrl,
-  builtinNeedsKey,
   builtinProvider,
   builtinRequestHeaders,
   endpointUsableForBot,
@@ -73,20 +72,6 @@ describe("headers a built-in needs", () => {
       expect(builtinRequestHeaders(builtinProvider(id), { session: "s", userAgent: "ua" }), id).toEqual({});
     }
     expect(builtinRequestHeaders(undefined, { session: "s" })).toEqual({});
-  });
-});
-
-describe("a built-in without a key", () => {
-  it("is excluded from bot creation until it holds a key", () => {
-    expect(builtinNeedsKey({ builtinId: "openrouter", hasKey: false })).toBe(true);
-    expect(builtinNeedsKey({ builtinId: "openrouter", hasKey: true })).toBe(false);
-  });
-
-  it("does not block a keyless endpoint that is not a built-in", () => {
-    // The dev stub has no key by design and the AI Gateway is authenticated by
-    // the deployment's own credentials.
-    expect(builtinNeedsKey({ builtinId: null, hasKey: false })).toBe(false);
-    expect(builtinNeedsKey({ builtinId: undefined, hasKey: false })).toBe(false);
   });
 });
 

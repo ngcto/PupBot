@@ -47,7 +47,6 @@ export { providerHintForBaseUrl } from "./catalog-hint.ts";
 export {
   BUILTIN_PROVIDERS,
   builtinForBaseUrl,
-  builtinNeedsKey,
   builtinProvider,
   endpointUsableForBot,
   builtinRequestHeaders,

@@ -100,24 +100,35 @@ export function detailColumnsFor(input: {
   filled: DetailsFill | null;
   /** The row as stored, for the unchanged-and-unmatched case. */
   current: DetailColumns;
+  /** A window the user typed in this save; it beats every other answer. */
+  typedContext?: number | null;
+  /** An explicit clear: the user removed a window they had set. */
+  clearingContextWindow?: boolean;
 }): DetailColumns {
-  if (input.retargeted) {
-    return {
-      contextWindow: input.filled?.details.contextWindow ?? null,
-      pricing: input.filled?.details.pricing ?? null,
-      toolSupport: input.filled?.details.toolSupport ?? null,
-      reasoningCapability: input.filled?.details.reasoning ?? null,
-    };
+  const columns: DetailColumns = input.retargeted
+    ? {
+        contextWindow: input.filled?.details.contextWindow ?? null,
+        pricing: input.filled?.details.pricing ?? null,
+        toolSupport: input.filled?.details.toolSupport ?? null,
+        reasoningCapability: input.filled?.details.reasoning ?? null,
+      }
+    : input.filled
+      ? {
+          contextWindow: input.filled.details.contextWindow ?? null,
+          pricing: input.filled.details.pricing ?? null,
+          toolSupport: input.filled.details.toolSupport ?? null,
+          reasoningCapability: input.filled.details.reasoning ?? null,
+        }
+      : { ...input.current };
+
+  // The user's own answers come last, so they win over the catalogue and over the
+  // fallback: a typed window beats a fill with nothing to say on a retarget, and an
+  // explicit clear beats a value it was showing.
+  if (input.clearingContextWindow) columns.contextWindow = null;
+  else if (input.typedContext !== undefined) {
+    columns.contextWindow = input.typedContext ?? columns.contextWindow;
   }
-  if (input.filled) {
-    return {
-      contextWindow: input.filled.details.contextWindow ?? null,
-      pricing: input.filled.details.pricing ?? null,
-      toolSupport: input.filled.details.toolSupport ?? null,
-      reasoningCapability: input.filled.details.reasoning ?? null,
-    };
-  }
-  return input.current;
+  return columns;
 }
 
 /**
