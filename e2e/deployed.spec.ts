@@ -19,7 +19,7 @@ test("sign up, create a bot, stream a reply, and keep it after reload", async ({
 
   const blocked = page.getByTestId("composer-blocked");
   await expect(blocked).toBeVisible();
-  await page.getByRole("button", { name: "Give it a computer" }).click();
+  await page.getByRole("button", { name: "Connect a computer" }).click();
   await expect(blocked).toBeHidden({ timeout: 60_000 });
 
   const composer = page.getByLabel("Message Scout");
