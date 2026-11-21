@@ -2,7 +2,7 @@ import { loadEnv } from "@terabot/config/load-env";
 import { closeDatabase, database } from "@terabot/db";
 import type { Database } from "@terabot/db";
 import { computerAccount, user } from "@terabot/db";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { ensureManagedComputerAccounts, managedProviderSpecs } from "../src/accounts.ts";
 

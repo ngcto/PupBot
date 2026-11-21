@@ -24,7 +24,6 @@ import {
   TabsPanel,
   TabsRoot,
   TabsTab,
-  cn,
   toast,
 } from "@terabot/ui";
 import { useRouter } from "next/navigation";
@@ -292,12 +291,6 @@ function Row({
       </div>
       {children}
     </div>
-  );
-}
-
-function Status({ text, tone }: { text: string; tone?: "success" }) {
-  return (
-    <span className={cn("text-body", tone === "success" ? "text-success" : "text-ink-muted")}>{text}</span>
   );
 }
 

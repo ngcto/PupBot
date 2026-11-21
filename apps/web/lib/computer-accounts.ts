@@ -1,5 +1,5 @@
 import { computerAccount, computer, database, encryptSecret, newId } from "@terabot/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { ComputerAccountView, ProviderAvailability } from "./types.ts";
 
 /** Providers the product can put a bot on, named for a person. */

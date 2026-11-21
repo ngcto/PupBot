@@ -474,7 +474,7 @@ export class Agent37Provider implements ComputerProvider {
    * `hermes-vnc-desktop` template as a noVNC session, not as a PNG. See
    * AGENT37_UNSUPPORTED.
    */
-  async screenshot(_ref: ComputerRef): Promise<Screenshot> {
+  async screenshot(): Promise<Screenshot> {
     throw unsupported(
       "screenshot",
       "no screenshot endpoint; a visible screen exists only as a noVNC desktop on a custom template, not as a PNG",
@@ -511,7 +511,7 @@ export class Agent37Provider implements ComputerProvider {
   }
 
   /** Nothing to release: the lease is advisory and the box sleeps on its own. */
-  async releaseLease(_ref: ComputerRef, _leaseId: string): Promise<void> {
+  async releaseLease(): Promise<void> {
     return;
   }
 
