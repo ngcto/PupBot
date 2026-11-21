@@ -15,11 +15,7 @@ import { and, eq } from "drizzle-orm";
 export async function ensureComputerPool(): Promise<void> {
   const apiKey = serverEnv().INSTABOX_API_KEY;
   const provider = apiKey ? "instabox" : "fake";
-  // The fake provider keeps its boxes in one process' memory and cannot list
-  // another's, so on a hosted deployment its boxes are unreadable rows that still
-  // book capacity. It is a dev shape; a deployment without a real key gets no
-  // pool rather than a pool that lies about what it holds.
-  if (provider === "fake" && (!isStubProviderEnabled() || serverEnv().RUN_MODE === "inline")) return;
+  if (provider === "fake" && !isStubProviderEnabled()) return;
 
   const db = database();
   const existing = await db

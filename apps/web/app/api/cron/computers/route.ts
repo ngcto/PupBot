@@ -8,10 +8,13 @@ export const maxDuration = 300;
 /**
  * The hosted deployment has no `apps/worker`, so nothing ran the maintenance
  * tick: idle boxes were never slept, ownerless ones were never destroyed, and a
- * binding whose request died was never retried. Vercel calls this on the same
- * one-minute cadence the worker used.
+ * binding whose request died was never retried.
  *
- * Every step here is idempotent, so a missed tick costs nothing but delay.
+ * Once a day, not once a minute: a Hobby Vercel account refuses any cron that
+ * runs more than daily, and a rejected schedule fails the whole deployment. Every
+ * step here is idempotent, so the cadence only sets how long a leaked box keeps
+ * booking capacity — and the volume that needs reclaiming on this deployment is
+ * small and slow.
  */
 export async function GET(request: Request): Promise<Response> {
   // Vercel signs its own cron calls with CRON_SECRET; without that check this
