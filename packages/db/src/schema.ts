@@ -354,8 +354,11 @@ export const computerAccount = pgTable(
     /**
      * Which user connected a non-managed account. Managed rows leave it null.
      * A user's own account always outranks a managed one for their own bots.
+     *
+     * Set null rather than cascade: deleting a user must not discard the
+     * credential needed to reap the boxes still running for them.
      */
-    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "set null" }),
     /** Do not start a box on this account before this instant (rate limits). */
     parkedUntil: timestamp("parked_until", { withTimezone: true }),
     lastError: text("last_error"),
@@ -388,9 +391,49 @@ export const computer = pgTable(
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     lastError: text("last_error"),
     lastErrorCode: text("last_error_code"),
+    /** The workspace whose bot owns this box; null when its bot is already gone. */
+    workspaceId: uuid("workspace_id").references(() => workspace.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
-  (t) => [index("computer_account_idx").on(t.accountId)],
+  (t) => [
+    index("computer_account_idx").on(t.accountId),
+    index("computer_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/**
+ * A box the provider still exists but we could not delete.
+ *
+ * `deleteBot` destroys the box through the provider before it removes the row.
+ * When that call fails, the bot deletion still completes — a user must not be
+ * stuck with a bot they asked to remove — and the box is recorded here with
+ * everything needed to delete it later: which provider, which account, which
+ * external id. `reapOrphans` retries each one; a row that succeeds is deleted,
+ * a row that fails again keeps its attempt count and error so an operator can
+ * see what is billing them and why it will not go away.
+ */
+export const computerOrphan = pgTable(
+  "computer_orphan",
+  {
+    id: uuid("id").primaryKey(),
+    /** The account the box was created on; null when that row is already gone. */
+    accountId: uuid("account_id").references(() => computerAccount.id, { onDelete: "set null" }),
+    provider: text("provider").notNull(),
+    /** The provider's own box id: the only handle a later destroy needs. */
+    externalId: text("external_id").notNull(),
+    /** Why it is here: `bot-delete` or `workspace-delete`. */
+    reason: text("reason").notNull(),
+    /** The bot the box belonged to, kept for a human reading the row. */
+    botId: uuid("bot_id"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("computer_orphan_provider_idx").on(t.provider, t.externalId),
+    index("computer_orphan_attempt_idx").on(t.lastAttemptAt),
+  ],
 );
 
 export const computerLease = pgTable(

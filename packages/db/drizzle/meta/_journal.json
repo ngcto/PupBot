@@ -85,6 +85,13 @@
       "when": 1795262466518,
       "tag": "0011_perpetual_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795264347657,
+      "tag": "0012_lifecycle_computers",
+      "breakpoints": true
     }
   ]
 }
