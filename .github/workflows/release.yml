@@ -405,6 +405,35 @@ jobs:
 
       # Creating the release is idempotent: re-running a failed publish updates
       # the existing release and re-uploads (--clobber) instead of colliding.
+      # Diagnose, from the run's own token, what permissions it actually holds.
+      # "Resource not accessible by integration" says the API refused the token;
+      # it does not say why, and guessing produced two wrong theories already.
+      # This prints the identity, the granted scope headers and the effective
+      # repo permission, so the cause is visible in the log on every release.
+      - name: Probe the token's permissions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          {
+            echo "### Token probe"
+            echo ""
+            echo "**Who is the token?**"
+            echo '```'
+            gh api -i user 2>&1 | grep -iE '^HTTP/|^x-oauth-scopes:|^x-accepted-github-permissions:' || echo "(user endpoint not reachable)"
+            gh api user --jq '{login: .login, type: .type}' 2>&1 || true
+            echo '```'
+            echo "**What does it see on this repo?**"
+            echo '```'
+            gh api -i "repos/$GITHUB_REPOSITORY" 2>&1 | grep -iE '^HTTP/|^x-accepted-github-permissions:|^x-oauth-scopes:' || true
+            gh api "repos/$GITHUB_REPOSITORY" --jq '.permissions' 2>&1 || true
+            echo '```'
+            echo "**The exact call that fails:**"
+            echo '```'
+            gh api -i "repos/$GITHUB_REPOSITORY/releases" -X GET 2>&1 | grep -iE '^HTTP/|^x-accepted-github-permissions:|^x-oauth-scopes:|message' || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
