@@ -20,6 +20,13 @@ gh run list --branch <branch> --limit 2 --json databaseId,headSha,status,conclus
 Pushes to `main` and scheduled runs do not cancel, because a merge should not kill a weekly run
 that is halfway through.
 
+**The phantom name is a cancellation race, not a property of the `name:` template**, so renaming
+the job would not remove it. Measured over ten consecutive CI runs on 2026-11-21: one of four
+cancelled runs carried a `desktop (${{ matrix.os }})` entry and none of six completed runs did, so
+it appears on only some cancels. A matrix job's `name:` is also what distinguishes its legs on the
+board, and collapsing it to a static string would make two distinct results read as one — a real
+loss to buy nothing. Leave it as is.
+
 ## A green `ci` means every gate ran and passed
 
 The aggregate `ci` job fails when any gate failed **or was skipped** — `cancelled` and `skipped`
