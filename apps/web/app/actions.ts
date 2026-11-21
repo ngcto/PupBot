@@ -29,6 +29,7 @@ import { isGatewayAvailable, serverEnv } from "@terabot/config";
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { allocateComputerInline, inlineComputers, runAllocator, sweepComputersInline } from "../lib/computers-inline.ts";
+import { assertCanCreateBot, assertCanUseComputer, refusalOf, type RefusalResult } from "../lib/gate.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { detailColumnsFor, endpointConfigFor, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
 import type { EndpointDetailSource } from "../lib/endpoint-config.ts";
@@ -80,8 +81,17 @@ export interface BotInput {
   modelId?: string | null;
 }
 
-export async function createBot(input: BotInput): Promise<{ botId: string }> {
-  const { workspace, db } = await context();
+export async function createBot(input: BotInput): Promise<{ botId: string } | RefusalResult> {
+  const { user, workspace, db } = await context();
+  // Refused at the action, and returned rather than thrown so the reason survives
+  // a production build. The dialog is not a load-bearing gate.
+  try {
+    await assertCanCreateBot(user.id);
+  } catch (error) {
+    const refusal = refusalOf(error);
+    if (refusal) return refusal;
+    throw error;
+  }
   const botId = newId();
   const conversationId = newId();
 
@@ -319,9 +329,20 @@ export async function updateBotSettings(botId: string, input: BotSettingsInput):
  * whichever host does provisioning: this one when the deployment is inline, the
  * worker otherwise.
  */
-export async function giveComputer(botId: string): Promise<{ state: string; reason: string | null }> {
-  const { workspace, db } = await context();
+export async function giveComputer(
+  botId: string,
+): Promise<{ state: string; reason: string | null } | RefusalResult> {
+  const { user, workspace, db } = await context();
   await ownedBot(workspace.id, botId);
+  // Reaching a paid provider is its own refusal, separate from chatting, and it
+  // is returned for the same reason: the person has to see why.
+  try {
+    await assertCanUseComputer(user.id);
+  } catch (error) {
+    const refusal = refusalOf(error);
+    if (refusal) return refusal;
+    throw error;
+  }
 
   try {
     await ensureComputerPool();

@@ -17,6 +17,7 @@ export {
   applyWebhookEvent,
   BillingUnavailable,
   billingSummary,
+  customerPortalUrl,
   plansFor,
   PolarError,
   refreshFromPolar,

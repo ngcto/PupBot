@@ -201,6 +201,27 @@ export function SettingsDialog({
 
             <TabsPanel value="usage">
               <DialogTitle className="text-xl font-semibold">Usage &amp; Billing</DialogTitle>
+              <GroupLabel>Plan</GroupLabel>
+              <Card>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-body text-ink">
+                      {user.role === "owner" ? "This account owns the deployment." : "A plan pays for the cloud computer."}
+                    </p>
+                    <p className="mt-1 text-base text-ink-muted">
+                      {user.role === "owner"
+                        ? "It uses the product without a plan."
+                        : "Choose one on the billing page; nothing is charged until you do."}
+                    </p>
+                  </div>
+                  <a
+                    href="/settings/billing"
+                    className="flex h-8 shrink-0 items-center rounded-pill bg-raised-2 px-3 text-base text-ink"
+                  >
+                    {user.role === "owner" ? "View billing" : "Choose a plan"}
+                  </a>
+                </div>
+              </Card>
               <GroupLabel>All time</GroupLabel>
               <Card>
                 {bots.length === 0 ? (

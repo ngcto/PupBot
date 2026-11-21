@@ -17,6 +17,7 @@
     "@terabot/agent": "workspace:*",
     "@terabot/api": "workspace:*",
     "@terabot/avatars": "workspace:*",
+    "@terabot/billing": "workspace:*",
     "@terabot/composio": "workspace:*",
     "@terabot/computers": "workspace:*",
     "@terabot/config": "workspace:*",

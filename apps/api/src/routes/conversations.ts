@@ -12,6 +12,7 @@ import {
 } from "@terabot/db";
 import type { RunComputer } from "@terabot/agent";
 import type { MessagePart } from "@terabot/db";
+import { canSendMessages } from "@terabot/billing";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -40,6 +41,8 @@ class UnclaimableAttachment extends Error {}
 
 export interface EnqueueRequest {
   runId: string;
+  /** The account the run belongs to; the worker gates on it. */
+  userId?: string;
   /** Keeps the work alive after the response on a serverless runtime. */
   waitUntil?: (promise: Promise<unknown>) => void;
   /** Wakes and leases the bot's computer; without one a run never touches a machine. */
@@ -61,10 +64,10 @@ function keepAlive(c: Context<AppEnv>): EnqueueRequest["waitUntil"] {
 
 let bossPromise: ReturnType<typeof startBoss> | undefined;
 
-async function enqueueWithQueue({ runId }: EnqueueRequest): Promise<void> {
+async function enqueueWithQueue({ runId, userId }: EnqueueRequest): Promise<void> {
   bossPromise ??= startBoss();
   const queue = await bossPromise;
-  await queue.send(RUN_QUEUE, { runId }, { retryLimit: 2, expireInSeconds: 300 });
+  await queue.send(RUN_QUEUE, { runId, ...(userId ? { userId } : {}) }, { retryLimit: 2, expireInSeconds: 300 });
 }
 
 interface ConversationScope {
@@ -130,6 +133,14 @@ export function createConversationRoutes(options: { enqueue?: EnqueueRun } = {})
     const parsed = sendMessageSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: "invalid_body", issues: parsed.error.issues }, 400);
+    }
+
+    // Enforced here, before anything is written: a caller that ignores the UI
+    // still cannot put a message into a conversation without access. The 402 is
+    // the refusal itself; the notice is what the client shows as the bot's reply.
+    const access = await canSendMessages(c.get("user").id);
+    if (!access.allowed && access.notice) {
+      return c.json({ error: access.notice.code, gate: access.notice }, 402);
     }
 
     const db = database();
@@ -212,7 +223,7 @@ export function createConversationRoutes(options: { enqueue?: EnqueueRun } = {})
       throw error;
     }
 
-    await enqueue({ runId, waitUntil: keepAlive(c) });
+    await enqueue({ runId, userId: c.get("user").id, waitUntil: keepAlive(c) });
 
     return c.json({ messageId, runId, interruptedRunId: inFlight[0]?.id ?? null }, 201);
   });

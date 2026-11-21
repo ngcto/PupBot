@@ -38,7 +38,7 @@ function computerForRuns(): RunComputer {
  * `waitUntil` keeps the function alive after the POST has been answered.
  */
 export function createInlineEnqueue(): EnqueueRun {
-  return async ({ runId, waitUntil, computer }) => {
+  return async ({ runId, userId, waitUntil, computer }) => {
     gateway ??= createGateway();
     // `apps/web` passes its own seam so a run and the request path share one
     // allocator; without one, this process's runtime stands in.
@@ -67,6 +67,7 @@ export function createInlineEnqueue(): EnqueueRun {
         awaitSecretRequest: sharedSecretBridge().awaitSecretRequest,
         ...(fillSink ? { fillSink } : {}),
       }),
+      ...(userId ? { userId } : {}),
     })
       .then((outcome) => {
         console.log(`[run ${runId}] ${outcome.status} (${outcome.text.length} chars)`);

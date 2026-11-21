@@ -214,6 +214,9 @@ importers:
       '@terabot/avatars':
         specifier: workspace:*
         version: link:../../packages/avatars
+      '@terabot/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@terabot/computers':
         specifier: workspace:*
         version: link:../../packages/computers
@@ -425,6 +428,9 @@ importers:
       '@terabot/avatars':
         specifier: workspace:*
         version: link:../../packages/avatars
+      '@terabot/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@terabot/composio':
         specifier: workspace:*
         version: link:../../packages/composio
@@ -574,6 +580,9 @@ importers:
 
   packages/agent:
     dependencies:
+      '@terabot/billing':
+        specifier: workspace:*
+        version: link:../billing
       '@terabot/config':
         specifier: workspace:*
         version: link:../config

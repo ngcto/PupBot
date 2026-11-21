@@ -41,6 +41,7 @@ export function CreateBotDialog({
   const [endpointId, setEndpointId] = useState<string | null>(null);
   const [modelId, setModelId] = useState("");
   const [pending, setPending] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const accent = COLORS.find((entry) => entry.id === color)?.hex ?? "#1884fc";
   // A provider that cannot answer is not a choice: a built-in with no key is
@@ -59,21 +60,26 @@ export function CreateBotDialog({
   }, [usable, endpointId, open]);
 
   async function submit() {
+    setRefusal(null);
     if (!name.trim() || pending || !ready) return;
     setPending(true);
-    const result = await createBot({
-      name,
-      shape,
-      color,
-      accentColor: accent,
-      endpointId,
-      modelId,
-    });
-    setPending(false);
-    onOpenChange(false);
-    setName("");
-    router.push(`/b/${result.botId}`);
-    router.refresh();
+    // Any refusal — a missing plan today — has to release the button and say
+    // what happened, or the dialog sits disabled with no explanation.
+    try {
+      const result = await createBot({ name, shape, color, accentColor: accent, endpointId, modelId });
+      if (!("botId" in result)) {
+        setRefusal(`${result.notice.situation} ${result.notice.resolution}`);
+        return;
+      }
+      onOpenChange(false);
+      setName("");
+      router.push(`/b/${result.botId}`);
+      router.refresh();
+    } catch (error) {
+      setRefusal(error instanceof Error ? error.message : "That bot could not be created.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -153,6 +159,12 @@ export function CreateBotDialog({
                 />
               </div>
             </div>
+
+            {refusal ? (
+              <p className="px-4 pb-1 text-base text-danger" data-testid="create-bot-refusal">
+                {refusal}
+              </p>
+            ) : null}
 
             <div className="flex h-16 shrink-0 items-center justify-end gap-2 border-t border-hairline px-4">
               <DialogClose

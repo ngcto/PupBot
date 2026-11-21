@@ -14,6 +14,7 @@
     "bench": "tsx scripts/bench.ts"
   },
   "dependencies": {
+    "@terabot/billing": "workspace:*",
     "@terabot/config": "workspace:*",
     "@terabot/db": "workspace:*",
     "@terabot/providers": "workspace:*",

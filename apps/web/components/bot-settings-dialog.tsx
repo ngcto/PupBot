@@ -296,7 +296,12 @@ export function BotSettingsDialog({
                   variant="secondary"
                   className="mt-2"
                   onClick={async () => {
-                    await giveComputer(bot.id);
+                    const result = await giveComputer(bot.id);
+                    if (result && "ok" in result && result.ok === false) {
+                      toast(`${result.notice.situation} ${result.notice.resolution}`);
+                    } else {
+                      toast("Computer attached");
+                    }
                     router.refresh();
                     toast("Building a computer");
                   }}
