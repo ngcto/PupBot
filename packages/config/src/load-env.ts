@@ -20,3 +20,5 @@ export function loadEnv(): void {
     dir = parent;
   }
 }
+
+export const deliberatelyBroken: number = "this is not a number";
