@@ -13,7 +13,10 @@ fixed in place rather than deleted, so the mistake stays visible. (a) The screen
 figure is a *text* measurement, and this endpoint cannot give an honest image measurement —
 see §1.3. (b) `run_event.seq` cannot supply a retry-stable call identity; §7.6 defines one the
 program supplies instead. (c) Program output must be a tool result, not a `message.completed` —
-§Q4 item 3 explains what that would have broken.
+§Q4 item 3 explains what that would have broken. A fourth: I described a box-side vault fill as
+"one crossing" when it is **two** (box→host request, then host→box to drive the driver), so the
+box placement is justified by computer tools alone and a vault-heavy task is not the one it wins
+— §7.7 states that plainly.
 
 Every number below is labelled with who measured it — **mine** means I ran it in this thread on
 this machine on 2026-11-21, and the command or script is reproducible from the notes in §1.2.
@@ -679,36 +682,72 @@ must therefore be derived from something the *model* controls:
 
 ### 7.7 Secret fill across the sandbox boundary
 
-The Captain's proposed shape — *the fill is host-executed and box-applied* — is the right one,
-and **TERA-75's `packages/vault` (PR #39) already implements it**. `vault_fill` takes
-`{itemId, field, target, url}` and no value; `fillFromVault` decrypts host-side and calls a
-`VaultFillSink.fill({value})`; the tool result is a sentence built from `FillResult`, whose
-fields are an item id, a field name, a length and a host — deliberately no field a value could
-travel in. So the answer to "is that right" is yes, and the work left is not a new seam in the
-vault: it is **which side of the sandbox the sink lives on**, and what a program is told.
+Three questions, answered from the code rather than from the design intent. The wiring is
+`apps/api/src/vault-tools.ts` → `vaultTools({sink})` → the `VAULT_FILL` handler in
+`packages/vault/src/tools-run.ts` → `fillFromVault` → `sink.fill({value})`.
 
-**It does not weaken the two-placement argument.** The reasoning that worried the Captain — "a
-box-side program makes a host call anyway" — is true and cheap: the fill is *one* call, not the
-twenty observation/click calls that make placement matter. Against ~0.5 s for one fill stands
-~10 s saved across the sequence that surrounds it. Two placements hold; the fill is simply the
-one call in a box-side program that crosses the network, and that is the correct number of them.
+**1. Where the decrypted value goes: into a host process, never into the VM.** The whole
+sequence runs inside a `RunTool.handler`, which is host code: `fillFromVault` calls
+`vault.reveal()`, gets the plaintext, and hands it straight to `request.sink.fill({value})`.
+The handler's *return* is `filled.message` — one sentence built from `FillResult`, whose fields
+are an item id, a field name, a length and a host. So under code mode `tools.vault_fill(...)` is
+an RPC to that same host handler and only the sentence crosses back. **The value is never a
+value the program holds, and `vault_fill` is not a tool that returns a secret to type** — the
+alternative the Captain worried about does not exist in this code, and the type is what enforces
+it: `FillResult` has no field a value could travel in.
+
+**2. It does not weaken the two-placement answer — but the number must be stated for what it
+is.** The 0.2 s-versus-10 s figure was always a **CUA-only** number: ~20 observation and click
+calls at ~10 ms in-box against ~0.5 s over exec. A vault fill is one call either way. What I got
+wrong in the last revision was calling it "one crossing": in the box placement a fill is **two**
+crossings — the program's request goes box→host, and the host's sink then drives the driver
+box-side to type — against **one** exec in the host placement. That is a real asymmetry and it
+is the price of the box placement, so it should be said rather than smoothed: *the box placement
+is justified by computer tools alone, and a task that is mostly vault fills is not the task it
+wins.* For the tasks it does win — many observations and clicks around a single sign-in — the
+ratio is still overwhelming, and no task in §7.8 flips.
+
+One consequence worth writing down: the sink must stay a **host-side interface**
+(`VaultFillSink`), never become a sandbox-visible function taking a value. If a future revision
+ever exposes it to the VM, both the secret guarantee and the placement argument die together,
+which makes `VaultFillSink` a boundary worth a test that fails if a value-shaped field appears on
+`FillResult`.
 
 **What the program sees, and how it tells the two denials apart.** Three distinct outcomes, and
 they must not collapse (the same rule as `effect`):
 
 | Tool failure kind | Meaning | What a program should do |
 |---|---|---|
-| `refused` | policy says never: the item's domain does not match the page, the field does not exist on that kind | pick a different item or stop; retrying cannot help |
-| `unavailable_here` | this placement cannot do it — e.g. a host-side tool a box-side program may not reach, or no driver attached | the capability exists, just not here; report it honestly rather than work around it |
+| `refused` | policy says **never, anywhere**: the item's domain does not match the page, the field does not exist on that kind | pick a different item or stop; retrying cannot help |
+| `unavailable_here` | **wrong placement, or it just went away**: a host-only tool reached from a box-side program, no driver attached, the box asleep, the driver session ended | report it honestly; do not retry the same call, and do not try to reach the capability another way |
 | `unconfirmed` | it was attempted and the outcome cannot be proven (a delivered event the app may not have applied) | re-observe before claiming or repeating |
 
-`unavailable_here` is the one that does not exist today. `tools-run.ts` currently answers *"this
-bot has no computer driver attached, so a value cannot be typed anywhere"* — an accurate
-sentence, but a sentence, not a kind, so a program cannot branch on it. The descriptor must also
-carry availability, so discovery never advertises a tool the placement cannot run: `list()` and
-`ALL_TOOLS` filter by placement, and the index shipped in the request says which tools exist
-*here*. A model told "vault_fill exists" and given a refusal has to guess; a model that never
-sees it in the list does not.
+**The distinction a model must be able to make**, since the Captain asked for it explicitly: the
+two are different in *recoverability*, and the wording must carry that, not just the code.
+
+- `refused` is stable and the program is allowed to be there — it is a property of the *request*.
+  The message names the wrong thing and the right move: "that login is saved for github.com and
+  this page is evil.test; save a separate item for this site". Nothing about the environment is
+  broken.
+- `unavailable_here` is a property of the *environment*, and it is the one a program must not
+  paper over. The message names what is missing and says it cannot be worked around: "a vault
+  fill has to be applied by the process holding the credential, and this program is running on
+  the computer; ask for it from a step that runs on the server, or tell the user". Crucially it
+  must **not** suggest a substitute — a model told "no driver, try something else" will invent a
+  path, and there is no path.
+
+Discovery is what keeps `unavailable_here` rare, and this is the design point: `list()` and
+`ALL_TOOLS` filter by placement, so the index in the request names only the tools that exist
+*here*. A model that never sees `vault_fill` in its list does not call it. `unavailable_here` then
+survives for exactly one honest case — a tool that *was* listed and stopped working mid-run (the
+box went to sleep, the driver session ended, a lease expired) — which is precisely the case a
+program must not loop on. Without the filter the two cases collapse into one and the model has to
+guess; with it, a listed tool failing this way means the environment changed under the program,
+and that is a distinct thing to say.
+
+`unavailable_here` does not exist today: `tools-run.ts` answers *"this bot has no computer driver
+attached, so a value cannot be typed anywhere"* — accurate, but a sentence, so nothing can branch
+on it.
 
 **One harness obligation the vault names and cannot enforce itself — and my first version of this
 guard was too narrow.** `FillResult.mayShowOnScreen` is `false` for a password or a CVC because a
