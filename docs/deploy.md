@@ -4,7 +4,8 @@ The hosted shape is one Vercel project: Next.js serves the UI and mounts the Hon
 `/api/pupbot`, so there is one origin, one first-party session cookie, and no cross-site CORS.
 Postgres is Supabase. There is no separate worker, no queue, and no second service.
 
-- **App**: <https://terabot-six.vercel.app>
+- **App**: <https://terabot-six.vercel.app> — deployed from `b3a3f76` (`p3/deploy`),
+  deployment `dpl_9FBj2cHTnMadoqbZc67qA7ivhRsu`, 2026-11-21 05:09 UTC
 - **Database**: Supabase project `pupbot` (`glhuwrobszgnrguareic`, `ap-southeast-1`)
 - **Runs**: `RUN_MODE=inline` — a run executes inside the POST that started it and finishes in
   `waitUntil`, bounded by `maxDuration = 300` on the route
@@ -74,6 +75,55 @@ The local suite needs the Docker database: `pnpm db:up`, `DATABASE_URL=postgres:
 `DATABASE_URL=postgres://pupbot:pupbot@localhost:5432/pupbot pnpm test`. Pointing it at the hosted
 database works for reads but the integration tests time out on the round trip.
 
+## What that build does not contain
+
+The deployment above predates the open pull requests, so the live URL is behind `main` by
+design until it is redeployed:
+
+- no provider split in Settings and no real computers (#1, #2) — chat still works, but the
+  computer is the stub
+- no leaning avatars (#3)
+- no desktop shell (#5) — the URL is the web product the shell will load
+- no mobile client (#6), no marketing site (#7); marketing is a separate app by design
+
+Anything merged into `main` after `b3a3f76` is absent from the URL until a redeploy. Compare with
+`git log b3a3f76..origin/main -- . ':(exclude)docs'` to see whether a redeploy would change the app.
+
+## Redeploying
+
+There is no push-to-deploy: `ngcto/Terabot` is not visible to the team's Vercel GitHub integration
+(`repo_not_found`; the integration's own endpoints answer `403 github_response_error`). Until that is
+fixed, a redeploy is a manual step, so the URL is only ever as new as the last deployment.
+
+**What unblocks push-to-deploy** (a person, with access to the GitHub account that owns the repo and
+to the `roldzai` Vercel team):
+
+1. Install the Vercel GitHub App on the account that owns `ngcto/Terabot` and grant it that
+   repository.
+2. In the Vercel project `terabot` → Settings → Git, connect `ngcto/Terabot` with the production
+   branch `main`.
+
+**Redeploy by hand** (needs a Vercel token; no token lives on the build machine):
+
+```bash
+# once, from the repo root: links apps/web to the `terabot` project
+pnpm dlx vercel@latest link --repo --yes
+
+# every time: build remotely, then promote the build to production
+pnpm dlx vercel@latest build --prod
+pnpm dlx vercel@latest deploy --prebuilt --prod
+```
+
+`vercel deploy --prod` alone also works and builds on Vercel; the two-step form is what CI-style
+runs use and prints the URL on stdout. Project settings (root directory `apps/web`, the
+environment) already live on the project, so nothing else needs to be repeated.
+
+**After any redeploy**, re-run the hosted check, because green CI is not the same as a working URL:
+
+```bash
+BASE_URL=https://terabot-six.vercel.app pnpm e2e
+```
+
 ## Limits of this shape
 
 - A run is capped by the function's `maxDuration` (300s on Hobby). Longer work needs the queue
@@ -85,5 +135,6 @@ database works for reads but the integration tests time out on the round trip.
   `nvidia/nemotron-3.5-lightning-free` — free too, but it reasons for about a minute before
   answering). Users can
   still add their own endpoint in Settings › Models.
-- Deploys currently come from a file upload of the `p3/deploy` tree. Push-to-deploy needs the
-  Vercel GitHub App installed on `ngcto/Terabot`; the project has no Git connection yet.
+- Deploys currently come from an upload of the branch tree (the deployment API, the same files
+  `vercel deploy` sends). Push-to-deploy needs the Vercel GitHub App installed on `ngcto/Terabot`;
+  the project has no Git connection yet.
