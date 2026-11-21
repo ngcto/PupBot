@@ -2,9 +2,47 @@ import { describe, expect, it } from "vitest";
 import { validateAvatar } from "open-bot-avatar";
 import { SHAPES, DEFAULT_SHAPE, isShapeId, shapeById, shapeDefinition, renderAvatarSvg, resolveColor } from "../src/index.ts";
 
+/** Gallery ids alphabetical, then the package's own examples in package order. */
 const CONTRACT_ORDER = [
-  "circle",
+  "book",
+  "brain",
+  "bull",
+  "bunny",
+  "camera",
+  "cat",
   "cloud",
+  "egg",
+  "ghost",
+  "magnifier",
+  "paint-brush",
+  "palette",
+  "rocket",
+  "shield",
+  "star",
+  "witch-hat",
+  "controller",
+  "barbell",
+  "mug",
+  "lightbulb",
+  "chat",
+  "sprout",
+  "watering-can",
+] as const;
+
+/** Ids from the families this registry replaced; none of them may still resolve. */
+const RETIRED = [
+  "orb",
+  "squircle",
+  "bell",
+  "arch",
+  "hexa",
+  "gem",
+  "crest",
+  "horns",
+  "antennae",
+  "scallop",
+  "shoulder",
+  "circle",
   "square",
   "star4",
   "quatrefoil",
@@ -18,44 +56,29 @@ const CONTRACT_ORDER = [
   "hexagon",
 ] as const;
 
-/** Ids from the families this set replaced; none of them may still resolve. */
-const RETIRED = [
-  "orb",
-  "squircle",
-  "bell",
-  "arch",
-  "hexa",
-  "gem",
-  "crest",
-  "horns",
-  "antennae",
-  "scallop",
-  "shoulder",
-] as const;
-
-describe("traced shapes", () => {
-  it("lists every contract id exactly once, in contract order", () => {
+describe("open-bot-avatar's avatar set", () => {
+  it("lists all 23 ids exactly once, gallery then examples", () => {
     expect(SHAPES.map((shape) => shape.id)).toEqual([...CONTRACT_ORDER]);
     expect(new Set(SHAPES.map((shape) => shape.id)).size).toBe(CONTRACT_ORDER.length);
   });
 
   it("keeps the lookup helpers consistent with the list", () => {
-    expect(DEFAULT_SHAPE).toBe("circle");
+    expect(DEFAULT_SHAPE).toBe("book");
     for (const id of CONTRACT_ORDER) {
       expect(isShapeId(id)).toBe(true);
       expect(shapeById(id).definition).toBe(shapeDefinition(id));
       expect(shapeDefinition(id).id).toBe(id);
     }
     expect(isShapeId("bean")).toBe(false);
-    expect(shapeById("bean").id).toBe("circle");
+    expect(shapeById("bean").id).toBe("book");
   });
 
-  it.each(RETIRED)("falls back to circle for the retired id %s", (id) => {
+  it.each(RETIRED)("falls back to the first id for the retired id %s", (id) => {
     expect(isShapeId(id)).toBe(false);
-    expect(shapeById(id).id).toBe("circle");
-    expect(shapeDefinition(id)).toBe(shapeDefinition("circle"));
+    expect(shapeById(id).id).toBe(DEFAULT_SHAPE);
+    expect(shapeDefinition(id)).toBe(shapeDefinition(DEFAULT_SHAPE));
     expect(renderAvatarSvg({ shape: id, color: "sky", size: 64 })).toBe(
-      renderAvatarSvg({ shape: "circle", color: "sky", size: 64 }),
+      renderAvatarSvg({ shape: DEFAULT_SHAPE, color: "sky", size: 64 }),
     );
   });
 
@@ -64,19 +87,15 @@ describe("traced shapes", () => {
     expect(result.ok, result.ok ? "" : result.errors.join("; ")).toBe(true);
   });
 
-  it.each(CONTRACT_ORDER)("%s is one closed filled path with a level, centred eye pair", (id) => {
-    const { body, eyes } = shapeDefinition(id);
-    expect(body.path.startsWith("M")).toBe(true);
-    expect(body.path.trimEnd().endsWith("Z")).toBe(true);
-    expect(body.path).not.toMatch(/[Aa]/);
-    expect(eyes.x).toBe(50);
-    expect(eyes.spacing).toBeGreaterThan(12);
-    expect(eyes.spacing).toBeLessThan(22);
-    expect(eyes.scale).toBeLessThanOrEqual(1.8);
-    expect(eyes.x - eyes.spacing / 2).toBeGreaterThan(6);
-    expect(eyes.x + eyes.spacing / 2).toBeLessThan(94);
-    expect(eyes.y).toBeGreaterThan(6);
-    expect(eyes.y).toBeLessThan(94);
+  it.each(CONTRACT_ORDER)("%s keeps the definition's own eyes and a closed path", (id) => {
+    const definition = shapeDefinition(id);
+    expect(definition.body.path.startsWith("M")).toBe(true);
+    expect(definition.body.path.trimEnd().endsWith("Z")).toBe(true);
+    expect(definition.eyes.x).toBeGreaterThan(6);
+    expect(definition.eyes.x).toBeLessThan(94);
+    expect(definition.eyes.y).toBeGreaterThan(6);
+    expect(definition.eyes.y).toBeLessThan(94);
+    expect(definition.eyes.scale).toBeLessThanOrEqual(1.8);
   });
 
   it("renders deterministically and paints the silhouette in the requested colour", () => {
@@ -87,8 +106,9 @@ describe("traced shapes", () => {
     }
   });
 
-  it("gives the eyes the contract ink at 90% opacity", () => {
-    const svg = renderAvatarSvg({ shape: "circle", color: "sky", size: 96 });
-    expect(svg).toContain('fill="#121212" fill-opacity="0.9"');
+  it("leaves eye colour and depth to the package", () => {
+    const svg = renderAvatarSvg({ shape: "controller", color: "ember", size: 96 });
+    expect(svg).toContain('fill="#151515"');
+    expect(svg).not.toContain("fill-opacity");
   });
 });

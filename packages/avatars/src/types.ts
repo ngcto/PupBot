@@ -1,7 +1,7 @@
 /**
  * A shape id from `SHAPE_IDS`. Stored avatars carry whatever they were saved with
  * (older ids included), so this stays a plain string and an unknown one renders
- * as `circle`.
+ * the registry's first id.
  */
 export type AvatarShapeId = string;
 

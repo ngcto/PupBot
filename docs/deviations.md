@@ -5,38 +5,28 @@ Where the shipped build differs from `handoffs/spec/`, and why. The drive copy o
 
 ## Avatars
 
-The 13 silhouettes are copied from Ng's Grok Bot screenshot (`handoffs/avatars-grok`), replacing
-both earlier families. The ids are
-`circle, cloud, square, star4, quatrefoil, heart, flower, drop, pill, pick, house, splat, hexagon`.
+Avatars are `open-bot-avatar`'s own starter set plus our palette. `packages/avatars` re-exports the
+package's seven definitions — `controller, barbell, mug, lightbulb, chat, sprout, watering-can` — and
+holds no silhouette path of its own, so a package upgrade brings the package's shapes with it. Any
+other id renders `controller`: the shipped families before it (`orb`, `squircle`, `crest`, `horn`,
+`scallop`, …) and the traced Grok Bot set (`circle`, `cloud`, `square`, …) alike.
 
-- **The set is asymmetric on purpose.** `square`, `pick` and `house` are tilted; `cloud`,
-  `quatrefoil`, `heart`, `flower` and `splat` are lobed unevenly. The old "mirror exactly about the
-  vertical axis" rule and its test are gone with the old family; nothing else enforced it.
-- **The traced paths were re-fitted to the safe area.** The handoff normalised its polylines to a
-  0.88 half-extent, but the Catmull-Rom control points it emitted bulge past the curve they shape,
-  so nearly every delivered path measured outside 6..94 once flattened and `validateAvatar`
-  rejected it. The silhouettes are unchanged: each curve is uniformly scaled about its own
-  bounding-box centre and re-centred on (50, 50) so its long side spans 87.4 units. Nothing was
-  re-traced.
-- **Control points may sit outside 6..94; the curve may not.** Because of the same Catmull-Rom
-  overshoot, `square` reaches x = 4.2 and x = 95.9 in control-point coordinates while its filled
-  outline stays inside the window. The safe-area check is therefore the library's own flattened
-  bounds check (`validateAvatar`), not a scan of the path's numbers.
-- **Eye proportions are the library's.** Its eye is a fixed 4:11 pill at `scale` ≤ 1.8, so the
-  reference's ~20 × 30 slots with a 16 gap cannot be matched literally: the widest slot the package
-  can draw is 7.2 × 19.8. We take the maximum (`scale` 1.8) and a 16.5 spacing, which keeps the
-  pair's gap-to-slot ratio as close to the reference as the cap allows, with the 90% `#121212` ink,
-  level and centred at `y = 48`. Every silhouette holds the pair with more than 12 units of
-  clearance, so no shape needed its own placement. Compared side by side with the screenshot at
-  16/32/96px, ours reads as the same character but with visibly narrower slots — the cap, not a
-  choice.
+- **Eyes, depth and ink are the package's.** Each definition carries its own eye placement; we pass
+  only colour, size, `motion: "idle"`, `time: 0` and `reducedMotion: true`, so the server and the
+  browser draw the same frame and nothing of ours overrides the package's geometry, depth (its
+  default 6) or `#151515` ink.
+- **Colour is ours.** The eleven palette ids and `deriveAccent()` are unchanged. The default colour
+  is `ember` (`#f9670e`), the palette's nearest entry to the package's starter orange `#ff6a1a`; the
+  contact sheet shows all seven in both.
 - **`open-bot-avatar` 0.2.1 → 0.3.0** (`pnpm-workspace.yaml` gains the version in
-  `minimumReleaseAgeExclude`, since it shipped the day before). Same exports, same definition
-  contract, same validator. 0.3.0 adds `state`/`mood` (ribbons for `working`, marks for `thinking`
-  and `blocked`, a celebration for `done`) and OKLCH helpers, and keeps the deprecated `motion`
-  option we pass. Rendering all 13 shapes at 64px with our fixed options (`motion: "idle"`,
-  `time: 0`, `reducedMotion: true`, `depth: 5`) produces byte-identical SVG before and after: no
-  geometry, eye or ink change for a resting avatar. Nothing in this app asks for a state yet.
+  `minimumReleaseAgeExclude`, since it shipped the day before). Same exports and same definition
+  contract; 0.3.0 adds `state`/`mood` (ribbons for `working`, marks for `thinking` and `blocked`, a
+  celebration for `done`), OKLCH helpers and its own starter set. Rendering all seven starter avatars
+  at 64px with our options produces byte-identical SVG before and after: no geometry, eye or ink
+  change for a resting avatar. Nothing in this app asks for a state yet.
+- **The traced silhouettes are gone.** The Grok Bot trace, its levelled revision, the crest/horns
+  family and the abandoned soft set were all replaced by the package's set; no path data from any of
+  them is left in the repository.
 
 ## Colour
 

@@ -3,27 +3,22 @@ import { resolveColor } from "./colors.ts";
 import { shapeDefinition } from "./shapes.ts";
 import type { AvatarRenderInput, AvatarShapeId } from "./types.ts";
 
-const EYE_INK = "#121212";
 const MIN_SIZE = 16;
 
 /**
  * One frame, one string. The server and the browser call exactly this, so the
- * markup is identical; `time` is pinned and motion frozen.
+ * markup is identical; `time` is pinned and motion frozen. Colour, eyes, depth
+ * and ink are the package's own: the definition carries the eye placement and
+ * the renderer supplies the rest.
  */
 export function renderAvatarSvg({ shape, color, size = 96 }: AvatarRenderInput): string {
-  const definition = shapeDefinition(shape);
-  const rendered = Math.max(MIN_SIZE, size);
-  const svg = renderBase(definition, {
+  return renderBase(shapeDefinition(shape), {
     color: resolveColor(color),
-    eyeColor: EYE_INK,
-    size: rendered,
-    depth: 5,
+    size: Math.max(MIN_SIZE, size),
     motion: "idle",
     time: 0,
     reducedMotion: true,
   });
-
-  return svg.replaceAll(`fill="${EYE_INK}"`, `fill="${EYE_INK}" fill-opacity="0.9"`);
 }
 
 /** Fails loudly at import time if a shape ever drifts from the library contract. */
