@@ -98,19 +98,29 @@ export interface FillResult {
 /**
  * Type a value this code did not choose into a target someone else selected.
  *
- * Element route (desktop app): `setValue` first, then a foreground rung when it
- * did not land.
+ * ## The rule for a native widget
  *
- * MEASURED on a box with a GTK entry: `set_value` is a no-op there. The driver
- * answers `confirmed` for a plain entry and `suspected_noop` for a masked one,
- * and the dialog's own `get_text()` was empty both times — so the driver's own
- * verdict is not evidence that a native field took the value. A foreground click
- * on the element's frame plus real keystrokes does land it, and the toolkit then
- * reads the value back, which is what makes the write verifiable at all.
+ * **On a native widget, escalation is not a fallback — it is the only path that
+ * lands.**
  *
- * The escalation is still aimed at a field the caller **named**: the click uses
- * the same element token, so there is no pixel guess about which field to fill.
- * Pixel typing without an element is never used for a secret.
+ * MEASURED, twice on a real box, with a GTK entry and a dialog that wrote its own
+ * `get_text()` to a file as the oracle:
+ *
+ * - `set_value` is a **no-op**. The driver answers `confirmed` for a plain entry
+ *   and `suspected_noop` for a masked one, and the dialog was empty both times.
+ *   A `confirmed` from `set_value` on a native widget is therefore not evidence
+ *   that anything was written. Believe the read-back, never the verdict.
+ * - A masked GTK entry reports **no value at all** through AT-SPI — not a mask,
+ *   `undefined`. So even a successful fill cannot be read back out of a password
+ *   field; `landed` stays absent rather than claiming either way, and the only
+ *   evidence that exists is the application's own view of the field.
+ * - **A foreground click on the element's frame plus real keystrokes does land
+ *   it**, and a plain field then reads the value back.
+ *
+ * So this route writes, reads back, and escalates whenever the field does not
+ * show the value. The click is aimed with the element token the caller passed, so
+ * there is still no pixel guess about *which* field to fill; pixel typing with no
+ * element is never used for a secret.
  */
 export async function fillSecret(
   driver: CuaDriver,
