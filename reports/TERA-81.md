@@ -6,9 +6,17 @@ The brief asked for `reports/TERA-76.md`; this thread's code is TERA-81 and the 
 NGS-81, so the file is named after the thread. Say the word and I rename it.
 
 This is phase 1: reading, measuring our own surface, and a design with its trade-offs. No
-harness code is written yet. Every number below is labelled with who measured it — **mine**
-means I ran it in this thread on this machine on 2026-11-21, and the command or script is
-reproducible from the notes in §1.2.
+harness code is written yet.
+
+**Corrections after review (2026-11-21):** three claims in the first draft were wrong and are
+fixed in place rather than deleted, so the mistake stays visible. (a) The screenshot token
+figure is a *text* measurement, and this endpoint cannot give an honest image measurement —
+see §1.3. (b) `run_event.seq` cannot supply a retry-stable call identity; §7.6 defines one the
+program supplies instead. (c) Program output must be a tool result, not a `message.completed` —
+§Q4 item 3 explains what that would have broken.
+
+Every number below is labelled with who measured it — **mine** means I ran it in this thread on
+this machine on 2026-11-21, and the command or script is reproducible from the notes in §1.2.
 
 ---
 
@@ -19,7 +27,7 @@ reproducible from the notes in §1.2.
    tool with a one-line description **46**.
 2. The bigger number is not the schemas, it is results: a 10,000-row read is **294,592
    tokens** through the model and **149** filtered in code (mine). That ratio is the whole
-   argument for code mode and it is 2,000×, not 2×.
+   argument for code mode and it is about 2,000×, not 2×.
 3. The right sandbox for us is **QuickJS compiled to WebAssembly, in a worker thread**, with
    the tool calls RPC'd to the real implementations. It is MIT, free, has no service, boots
    in **5.7 ms + 7.4 ms** (mine), and its capability surface is closed at the wasm imports —
@@ -83,7 +91,7 @@ TERA-74 will ship.
 | The same tree, as `[token] role "label"` lines | **1,213** |
 | A 10,000-row table as JSON (1.18 MB of characters) | **294,592** |
 | That table filtered in code: "137 pending, here are 5" | **149** |
-| A 95 KB screenshot as base64 (TERA-74's measured capture size) | **31,921** |
+| A 95 KB screenshot as **base64 text** — not as an image block (see §1.3) | **31,921** |
 
 **Sandbox cost, `quickjs-wasi@3.7.0`:**
 
@@ -110,10 +118,17 @@ TERA-74 will ship.
 - **Tree-vs-JSON is a free 2.6× on the most frequent call we make.** The 75-row tree costs
   3,119 tokens as JSON and 1,213 as text lines. We already have the text form
   (`observeWindow`'s compact outline); the harness must not re-JSON it.
-- **Images are the single most expensive thing we can return.** One screenshot is 31,921
-  tokens — nine `codemode` tool definitions. This is why the CUA index marks `screenshot` as
-  `expensive`, and it is why the harness must cap them structurally, not by asking the model
-  to be careful.
+- **Images are the most expensive thing we can return, but not by the number in that table.**
+  The 31,921 is a 95 KB capture expressed as **base64 text** — what happens if a screenshot is
+  ever JSON-stringified into a result. It is not the cost of *sending an image*, and I could not
+  measure that cost honestly on this endpoint: a real `{type:"image"}` block for a 9.8 KB PNG
+  priced at 128–305 input tokens; a 1.4 MB PNG and a 6.2 MB PNG both priced at the same 128;
+  and asked to describe a flat two-tone UI mock I generated, the model answered "a green parrot
+  perched on a branch". The endpoint accepts image blocks without appearing to forward their
+  pixels, so **any pixel-level token number from this machine would be fabricated.** Treat the
+  image budget in §7.1 as a conservative cap from provider pricing, not a measurement, until it
+  is measured against a real vision path. What *is* measured and load-bearing: never let image
+  bytes travel in a text field, because that path is 31,921 tokens for one capture.
 
 ---
 
@@ -273,8 +288,11 @@ and clicks do nothing") rather than by verb.
   its items, `Map`/`RegExp` become `{}`, and a promise or function inside an argument fails
   the call). We want these *documented in the tool description* so the model does not have to
   discover them.
-- **The idempotency key** `<runId>:<callId>` passed to every tool. Ours is the run id plus a
-  monotonic call index, which our `run_event.seq` already provides.
+- **A stable identity per call**, passed to every tool. opencode use `<runId>:<callId>`.
+  **`run_event.seq` cannot supply ours**: `EventLog.primeFromDatabase()` continues from the last
+  saved event, so re-running the same program gives the same action a *new* seq, and matching
+  by position breaks as soon as the model rewrites the program. The identity must come from the
+  program, not the log — §7.6.
 
 **Do not copy:**
 - **The interpreter.** Implementation effort aside, the product risk is the subset. Our models
@@ -399,11 +417,16 @@ Changes, and what each costs:
    **no writes**. In our shape that is a `run.output` JSON column written only on a successful
    program, plus a `conversation.state` column that survives the turn. The reason not to put it
    on the box's filesystem is §3: the box is per-bot and reimageable.
-3. **A successful program's output is one `message.completed`, not N.** The message row is the
-   program's `text()` output plus its return value, which is exactly what the model sees, so a
-   replay shows the same thing the model saw. Individual tool calls are visible in the log for
-   the UI's activity row, but they are not message parts — otherwise a 20-call program becomes
-   a 20-bubble message.
+3. **A successful program's output is a tool result, never a `message.completed`.** This is a
+   correction to an earlier draft of this report, which had it wrong and would have broken two
+   things: `packages/api-client/src/reducers.ts` turns `message.completed` into a
+   `role: "assistant"` chat message, so it would render as the bot's answer; and
+   `buildChatContext` replays saved assistant messages back to the model as its own prior
+   turns. Program output is model-facing evidence, so it belongs exactly where a tool result
+   goes today: a `tool` message in the conversation and a `tool_call` event in the log. The
+   user-facing message stays the model's own answer, written after it has read the result. The
+   one-line call records stay in the log for the UI's activity row; they are never message
+   parts, or a 20-call program becomes a 20-bubble message.
 4. **Durable tools do not change the shape yet, because we have none.** `runSteps` is one fast
    call; the slow thing is a box that takes seconds to wake, which is a tool call that blocks,
    not a job that outlives the request. When a genuinely long tool appears (a CAPTCHA solver
@@ -570,7 +593,7 @@ export type ToolOutcome =
   | { ok: false; error: ToolFailure };
 
 export interface ToolFailure {
-  kind: "refused" | "failed" | "invalid_input" | "limit" | "timeout";
+  kind: "refused" | "unavailable_here" | "unconfirmed" | "failed" | "invalid_input" | "limit" | "timeout";
   message: string;
   /** Model-facing recovery advice: "observe again", "use delivery:'foreground'". */
   hint?: string;
@@ -619,42 +642,136 @@ Two decisions in that interface worth flagging:
   no policy and policy cannot be bypassed by a clever program.
 - **`storeWrites: null` on failure**, so a failed program cannot persist half a thought.
 
-### 7.5 What I will measure in phase 3
+### 7.6 Call identity, since the event log cannot supply it
+
+The promise "idempotency keys stop a double-click" is only worth making if the key is stable
+across a retry, and `run_event.seq` is not: `EventLog.primeFromDatabase()` seeds the counter
+from the last saved row, so a re-run mints new sequence numbers for the same actions. The key
+must therefore be derived from something the *model* controls:
+
+- **The program names its side effects.** Tools with observable effects on the world —
+  `click`, `typeText`, `setValue`, `runSteps`, `browserClick`, `browserType`, `vault_fill`,
+  `vault_totp` — take an explicit `idempotencyKey` string the program supplies, and the host
+  refuses a second call with a key it has already executed in this conversation, returning the
+  first call's saved result and `status: "duplicate"` instead of acting again.
+- **The prelude can supply one for the common case.** `withKey(name, fn)` derives
+  `sha256(conversationId + name + JSON(args))`, so `tools.click(args)` called twice with the
+  same arguments in the same conversation is refused the second time without the model having
+  to think about it, and a program that means to click twice in the same place passes
+  `{ again: 2 }` or its own key.
+- **An uncertain outcome is not a success.** This is the CUA ladder again: a call that ended
+  `unverifiable` may or may not have landed, so a retry with the same key returns the first
+  result *plus* `uncertainCarriedForward: true` and the harness tells the model to re-observe
+  rather than to re-click. A `confirmed` call replays its saved result verbatim; a `refused`
+  call is re-run because nothing happened.
+- **Keys are scoped to the conversation, not the run**, because the double-click we must
+  prevent is the one across a retried run — a fresh run id would otherwise hand out a fresh
+  key set and re-click the button.
+
+### 7.7 Secret fill across the sandbox boundary
+
+The Captain's proposed shape — *the fill is host-executed and box-applied* — is the right one,
+and **TERA-75's `packages/vault` (PR #39) already implements it**. `vault_fill` takes
+`{itemId, field, target, url}` and no value; `fillFromVault` decrypts host-side and calls a
+`VaultFillSink.fill({value})`; the tool result is a sentence built from `FillResult`, whose
+fields are an item id, a field name, a length and a host — deliberately no field a value could
+travel in. So the answer to "is that right" is yes, and the work left is not a new seam in the
+vault: it is **which side of the sandbox the sink lives on**, and what a program is told.
+
+**It does not weaken the two-placement argument.** The reasoning that worried the Captain — "a
+box-side program makes a host call anyway" — is true and cheap: the fill is *one* call, not the
+twenty observation/click calls that make placement matter. Against ~0.5 s for one fill stands
+~10 s saved across the sequence that surrounds it. Two placements hold; the fill is simply the
+one call in a box-side program that crosses the network, and that is the correct number of them.
+
+**What the program sees, and how it tells the two denials apart.** Three distinct outcomes, and
+they must not collapse (the same rule as `effect`):
+
+| Tool failure kind | Meaning | What a program should do |
+|---|---|---|
+| `refused` | policy says never: the item's domain does not match the page, the field does not exist on that kind | pick a different item or stop; retrying cannot help |
+| `unavailable_here` | this placement cannot do it — e.g. a host-side tool a box-side program may not reach, or no driver attached | the capability exists, just not here; report it honestly rather than work around it |
+| `unconfirmed` | it was attempted and the outcome cannot be proven (a delivered event the app may not have applied) | re-observe before claiming or repeating |
+
+`unavailable_here` is the one that does not exist today. `tools-run.ts` currently answers *"this
+bot has no computer driver attached, so a value cannot be typed anywhere"* — an accurate
+sentence, but a sentence, not a kind, so a program cannot branch on it. The descriptor must also
+carry availability, so discovery never advertises a tool the placement cannot run: `list()` and
+`ALL_TOOLS` filter by placement, and the index shipped in the request says which tools exist
+*here*. A model told "vault_fill exists" and given a refusal has to guess; a model that never
+sees it in the list does not.
+
+**One harness obligation the vault names and cannot enforce itself.** `FillResult.mayShowOnScreen`
+is `false` for a password or a CVC because a screenshot taken right after a fill can contain the
+value if the site fails to mask its own field. TERA-75 provide the flag; the loop must act on it.
+So: **the harness suppresses the next `screenshot`/`observeWindow({screenshot:true})` for the
+same window after a fill where `mayShowOnScreen` is false**, and refuses rather than quietly
+returns a stripped image, because a silently blank screenshot reads as a broken app. That is a
+cap, it belongs to this package, and it is written down here so it is not lost.
+
+**One seam risk in the shipped loop.** `run.ts` promotes a tool result into the user-visible
+message text when a tool ends the run (`if (!text.trim() && outcome.result.trim()) text =
+outcome.result`). For `vault_request` that is correct — its result is a sentence. It becomes a
+leak the moment any tool whose result could contain a value ends a run, so the rule should be
+that promotion applies only to results the tool marks as answer-shaped, not to every `endRun`.
+
+### 7.8 What I will measure in phase 3
+
+**Arm A is the code in the repo, not a simulation of it.** As of PR #39, `executeRun` already
+owns a real tool loop: `tools?: RunTool[]`, a registry, assistant `toolCalls` replayed with their
+`tool` results, `MAX_TOOL_STEPS = 8`, and a throwing handler becoming a tool result. So arm A is
+that loop with the 26 CUA schemas plus the vault's five registered — the wall-of-schemas shape
+the product would ship if the loop landed without this work. The tasks arm A cannot attempt at
+all (no tool exists for it in the shipped tree, e.g. a big-table read) are marked
+*not attemptable*, not scored as failures, and that is stated in the table rather than hidden.
 
 Ten fixed tasks, both harnesses, same model, same prompts:
 
-1. chat needing no tool (a greeting, a follow-up) — both should be one turn.
-2. one computer action (launch an app, confirm it opened).
-3. a browser page read (navigate, extract a value, report it).
-4. a vault fill (read a secret, type it into a field, confirm).
-5. a big-result task (a 10k-row read, filtered to a number) — the 294,592→149 case.
-6. a loop task (retry until a condition, e.g. a window title appears).
-7. a multi-action desktop task (the Thunar filter from TERA-74's live proof).
-8. a gated page (a CAPTCHA state must be reported as state, not success).
-9. an unresolvable task (the bot must say so, not flail).
-10. a long conversation (12 turns, to exercise compaction and cache).
+| # | Task | Shape it covers | Arm A can attempt? |
+|---|---|---|---|
+| 1 | "hello" and one follow-up | chat, no tools | yes |
+| 2 | launch an app and confirm its window opened | one computer action | yes |
+| 3 | read a page and report one value | one browser page | yes (readPage) |
+| 4 | sign in to a saved login | **vault fill** | yes (vault_fill) |
+| 5 | sum a 10,000-row table and report the top five | **a result too big for context** | no — not attemptable |
+| 6 | read a window and find one labelled button | **a tree that needs filtering** | yes (tree is returned whole) |
+| 7 | fill and submit a form with three fields | **many small calls in sequence** | yes (one call per turn, ≤8) |
+| 8 | look at the screen and describe it | **one screenshot** | yes |
+| 9 | a page behind a CAPTCHA | state, not success | yes (readPage reports gated) |
+| 10 | "where do I save a file with this app?" | **a tool it has to discover** | yes, if the index exists; no in arm A beyond the 31 schemas |
 
-Columns: input tokens (cached and uncached separately), output tokens, model turns, tool calls,
-wall-clock, and cost. **Two arms**: (A) the current harness, which has no tool loop at all, so
-it can only do tasks 1, 9 and 10 — and (B) a wall-of-schemas loop I build *as a measurement
-control*, 26 schemas and one call per turn, which is what the current code would become if
-TERA-74's loop landed without this work. Arm B is the honest "before" for tool tasks; arm A is
-the honest "before" for chat. Reporting only (A) would be a fake win.
+Fixed seed, the same model for both arms, both arms run three times per task, median reported.
+Gated pages and CAPTCHAs are a live-service dependency: if the challenge does not appear on the
+day, task 9 is reported as *not exercised* rather than passed.
+
+Columns: input tokens (cached and uncached reported separately), output tokens, model turns,
+tool calls, wall-clock, cost. Three arms, because two would hide something:
+
+- **A — the shipped tree.** PR #39's `executeRun` loop with the CUA and vault schemas
+  registered. This is the "before".
+- **B — code mode.** One `codemode` tool, the index inline, results filtered in code.
+- **C — a wall-of-schemas loop with no code mode *and no step cap*.** Arm A caps at 8 steps, so
+  on task 7 it fails for a reason that is not the harness's prompt cost. C removes the cap and
+  shows what the same wall costs when it is allowed to finish, which is the honest comparison
+  for turns and tokens rather than for failures.
+
+Every number is reported per arm. Where a column cannot be measured honestly it says so instead
+of being filled in — the image column is the known case (§1.3).
 
 A harness change with no before/after numbers is not done, per the brief — so the table ships
 with the implementation, not before it.
 
 ---
 
-## 8. Open questions for the Captain
+## 8. Questions for the Captain (1–2 decided 2026-11-21; 3 open)
 
-1. **Two placements or one?** I propose the VM in our process by default and on the box for
+1. **Two placements or one? — DECIDED: two, box second, not built until in-process is measured.** I propose the VM in our process by default and on the box for
    computer-heavy runs (§Q2). One placement is simpler; two is ~50× faster on tool latency for
    the case that matters most and safer on escape. The cost is a runner on the box and a
    transport abstraction. **I recommend two, with the box placement built second** so we can
    ship the loop with one placement and measure the difference.
-2. **The index inline or fetched?** I propose inline (1,221 tokens) because a discovery call
-   costs a whole turn. Cloudflare's codemode passes the whole API as TypeScript in the tool
+2. **The index inline or fetched? — DECIDED: inline.** I propose inline (**1,232** tokens) because a discovery
+   call costs a whole turn. Cloudflare's codemode passes the whole API as TypeScript in the tool
    description, which is the same bet at a larger size.
 3. **Native tool calling for simple tools, alongside code mode?** Anthropic and pi both keep
    the plain tool path usable. I propose **code mode only** for the model-facing surface and
