@@ -33,6 +33,14 @@ const serverSchema = z.object({
   /** How many boxes the Instabox account's plan allows (free: 1, grandfathered accounts: 5). */
   INSTABOX_CAPACITY: z.coerce.number().int().positive().default(1),
   BOAT_API_KEY: optionalSecret,
+  /**
+   * A commercial CAPTCHA solver, so a bot can get through a hard challenge on a
+   * service its owner already has an account on. Optional: with no key, a
+   * challenge is reported to the owner as needing a person instead.
+   */
+  CAPTCHA_SOLVER_PROVIDER: z.string().optional(),
+  CAPTCHA_SOLVER_API_KEY: optionalSecret,
+  CAPTCHA_SOLVER_BASE_URL: optionalUrl,
   /** Composio Platform project API key. Server-side only: it never reaches the client bundle. */
   COMPOSIO_PROJECT_API_KEY: optionalSecret,
   /** Overrides Composio's base URL. Only for tests, which point it at a local stub. */
