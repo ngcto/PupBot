@@ -37,3 +37,17 @@ That matters for the checks that can pass without doing anything. `turbo run lin
 packages that declare a `lint` script, so `scripts/check-lint-coverage.mjs` fails when a package
 ships source without one — and also when it cannot read a package at all. A coverage gate that
 quietly covers nothing is the hole it exists to close.
+
+### A 403 from a workflow is the client's report, not GitHub's
+
+The most expensive hour of this pipeline's construction came from reading a `403 Resource not
+accessible by integration` as GitHub refusing the call. It was not. **The request had never been
+made** — the step failed in front of it, and the real error was a JavaScript `SyntaxError` three
+lines above the one being read (`Identifier 'octokit' has already been declared`, a scope collision
+with `actions/github-script`). When that was fixed, `POST /releases` returned `201` on the first
+attempt.
+
+**Confirm the request was actually made before reasoning about why it was refused.** The check is
+one `grep` of the job log for the line above the error, not a theory about token grants. Four
+plausible permission theories were built on that status and all four were wrong, because none of
+them could have been true of a call that did not happen.
