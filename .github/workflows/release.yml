@@ -275,23 +275,34 @@ jobs:
           echo "sdk: $sdk" | tee -a "$GITHUB_STEP_SUMMARY"
           ls "$sdk/platforms" 2>/dev/null | tail -3 || true
 
+      # `env:` would define EXPO_PUBLIC_API_URL as an empty string when the
+      # repository variable is unset, and `process.env.X ?? default` does not treat
+      # "" as absent — so it is exported through $GITHUB_ENV only when it is real.
+      # That leaves the app's documented localhost default intact.
+      - name: Export the API origin when one is configured
+        env:
+          API_URL: ${{ needs.meta.outputs.api-url }}
+        run: |
+          set -euo pipefail
+          if [ -n "${API_URL:-}" ]; then
+            echo "EXPO_PUBLIC_API_URL=$API_URL" >> "$GITHUB_ENV"
+            echo "Inlining API origin $API_URL into the bundle" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No API origin configured; the APK keeps its localhost default." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Generate the native project
         working-directory: apps/mobile
-        env:
-          EXPO_PUBLIC_API_URL: ${{ needs.meta.outputs.api-url }}
         run: pnpm exec expo prebuild --platform android --no-install
 
       # `assembleRelease` with no signing config falls back to the debug key and
       # prints a warning; that is the intended, documented outcome here.
       # `local.properties` is how gradle finds the SDK; it is generated (and
       # gitignored), so it is written here rather than committed.
+      # `EXPO_PUBLIC_*` is inlined into the JS bundle at build time, which is why
+      # the export above has to precede both this step and the prebuild.
       - name: Assemble the APK
         working-directory: apps/mobile/android
-        env:
-          # `EXPO_PUBLIC_*` is inlined into the JS bundle at build time, which is
-          # why it has to be set here and not at runtime. Empty when the variable
-          # is unset, which leaves the app's documented localhost default intact.
-          EXPO_PUBLIC_API_URL: ${{ needs.meta.outputs.api-url }}
         run: |
           set -euo pipefail
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
