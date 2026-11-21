@@ -41,6 +41,15 @@ export async function allocateComputerInline(botId: string): Promise<AllocateRes
   return allocatorFor().allocateForBot(botId);
 }
 
+/**
+ * Reclaim ownerless boxes before a bot is told the pool is full. Cheap and
+ * idempotent, and the daily cron is too infrequent to keep capacity honest on
+ * its own.
+ */
+export async function sweepComputersInline(): Promise<void> {
+  await allocatorFor().sweepIdle();
+}
+
 export function inlineRunComputer(): RunComputer {
   const computers = allocatorFor();
   return {

@@ -21,7 +21,7 @@ import {
 import type { EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { allocateComputerInline, inlineComputers } from "../lib/computers-inline.ts";
+import { allocateComputerInline, inlineComputers, sweepComputersInline } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { endpointConfigFor } from "../lib/endpoint-config.ts";
 import {
@@ -273,7 +273,14 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
     // bot left on a job would sit in `binding` forever. A bound bot returns its
     // machine without provisioning, and a blocked one retries.
     if (inlineComputers()) {
-      const result = await allocateComputerInline(botId);
+      // Nothing sweeps the pool between the daily cron ticks, so a bot that
+      // finds the pool full reclaims the boxes whose bots are gone before it
+      // gives up: that is exactly the moment the stale rows cost someone.
+      let result = await allocateComputerInline(botId);
+      if (result.state === "blocked") {
+        await sweepComputersInline();
+        result = await allocateComputerInline(botId);
+      }
       revalidatePath("/", "layout");
       return { state: result.state, reason: result.reason ?? null };
     }

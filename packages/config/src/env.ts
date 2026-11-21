@@ -40,6 +40,8 @@ const serverSchema = z.object({
   OPENAI_API_KEY: optionalSecret,
   ANTHROPIC_API_KEY: optionalSecret,
   MODELS_DEV_URL: url.default("https://models.dev/api.json"),
+  /** Vercel's cron secret; present, the maintenance route refuses unsigned calls. */
+  CRON_SECRET: optionalSecret,
   // Vercel AI Gateway: OpenAI-compatible, keyless on a Vercel deployment
   // because the deployment's OIDC token authenticates each request.
   AI_GATEWAY_BASE_URL: url.default("https://ai-gateway.vercel.sh/v1"),
