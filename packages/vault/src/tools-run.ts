@@ -4,7 +4,7 @@ import { stringArg } from "@terabot/agent";
 import { and, eq } from "drizzle-orm";
 import { describeVaultError, VaultError } from "./errors.ts";
 import { fillFromVault } from "./fill.ts";
-import type { VaultFillSink } from "./fill.ts";
+import type { FillEffect, VaultFillSink } from "./fill.ts";
 import { isVaultKind } from "./kinds.ts";
 import type { VaultKind } from "./kinds.ts";
 import { hostOf, VaultService } from "./service.ts";
@@ -100,10 +100,14 @@ export function vaultTools(options: VaultToolsOptions): RunTool[] {
       const url = stringArg(input, "url");
       const itemId = stringArg(input, "itemId");
       const field = stringArg(input, "field");
-      const target = stringArg(input, "target");
+      const token = stringArg(input, "token");
+      const snapshotId = stringArg(input, "snapshotId");
 
-      if (!itemId || !field || !target || !url) {
-        return { result: "a fill needs the item id, the field, the element to type into, and the page URL" };
+      if (!itemId || !field || !token || !snapshotId || !url) {
+        return {
+          result:
+            "a fill needs the item id, the field, the element token and snapshotId from your last observation, and the page URL",
+        };
       }
       if (!sink) {
         // Honest rather than pretending: without a driver there is nothing to type
@@ -117,11 +121,20 @@ export function vaultTools(options: VaultToolsOptions): RunTool[] {
           url,
           itemId,
           field,
-          target,
+          target: { token, snapshotId },
           sink,
           ...(options.oneShot ? { oneShot: options.oneShot } : {}),
         });
-        await context.emit({ type: "step", payload: { label: `Filled ${field} on ${filled.host}` } });
+        // The step line says what actually happened, not what was attempted.
+        await context.emit({
+          type: "step",
+          payload: {
+            label:
+              filled.effect === "refused"
+                ? `Could not fill ${field} on ${filled.host}`
+                : `Filled ${field} on ${filled.host}`,
+          },
+        });
         return { result: filled.message };
       } catch (error) {
         return { result: describeVaultError(error) };
@@ -131,9 +144,10 @@ export function vaultTools(options: VaultToolsOptions): RunTool[] {
     [VAULT_TOTP]: async (input, context) => {
       const url = stringArg(input, "url");
       const itemId = stringArg(input, "itemId");
-      const target = stringArg(input, "target");
-      if (!itemId || !target || !url) {
-        return { result: "a code needs the item id, the element to type into, and the page URL" };
+      const token = stringArg(input, "token");
+      const snapshotId = stringArg(input, "snapshotId");
+      if (!itemId || !token || !snapshotId || !url) {
+        return { result: "a code needs the item id, the element token and snapshotId, and the page URL" };
       }
       if (!sink) {
         return { result: "this bot has no computer driver attached, so a code cannot be typed anywhere" };
@@ -158,14 +172,32 @@ export function vaultTools(options: VaultToolsOptions): RunTool[] {
         if (!secret) return { result: "that login has no 2FA secret saved" };
 
         const { code, secondsRemaining } = totpCode(secret);
-        await sink.fill({ url, target, field: "totp", value: code });
-        if (!oneshot) await vault.markUsed(context.workspaceId, itemId);
+        const outcome = await sink.fill({ url, target: { token, snapshotId }, field: "totp", value: code });
+        if (outcome.effect !== "refused" && !oneshot) await vault.markUsed(context.workspaceId, itemId);
 
         // The code is not returned: it is time-derived and single-use, and a model
         // holding it could paste it somewhere else or quote it into the transcript.
-        await context.emit({ type: "step", payload: { label: `Entered a 2FA code on ${host}` } });
+        await context.emit({
+          type: "step",
+          payload: {
+            label: outcome.effect === "refused" ? `Could not enter a 2FA code on ${host}` : `Entered a 2FA code on ${host}`,
+          },
+        });
+
+        // A refusal is reported as a refusal: telling the model a code was entered
+        // when nothing was typed is how a sign-in gets reported that never happened.
+        if (outcome.effect === "refused") {
+          return {
+            result: `The 2FA code was refused and nothing was typed${outcome.refusalCode ? ` (${outcome.refusalCode})` : ""}. Observe the page again and re-aim at the code field.`,
+          };
+        }
+        if (outcome.effect !== "confirmed") {
+          return {
+            result: `Typed the current 2FA code into ${host}, but the driver could not confirm it landed (${outcome.effect}). It expires in about ${secondsRemaining} seconds — look at the page before relying on it.`,
+          };
+        }
         return {
-          result: `Typed the current 2FA code into ${target} on ${host}. It expires in about ${secondsRemaining} seconds — if the site rejects it, generate another.`,
+          result: `Typed the current 2FA code into ${host} and the driver read it back. It expires in about ${secondsRemaining} seconds — if the site rejects it, generate another.`,
         };
       } catch (error) {
         return { result: describeVaultError(error) };
@@ -286,10 +318,13 @@ function safeDomain(url: string): string | null {
  * two properties that matter: the value is written to the target's stdin rather
  * than interpolated into a shell command, and it is never logged.
  */
-export function typingSink(type: (input: { target: string; value: string }) => Promise<void>): VaultFillSink {
+export function typingSink(
+  type: (input: { token: string; snapshotId: string; value: string }) => Promise<{ effect: FillEffect; verified: boolean; evidence?: string; refusalCode?: string }>,
+): VaultFillSink {
   return {
     fill: async ({ target, value }) => {
-      await type({ target, value });
+      const outcome = await type({ token: target.token, snapshotId: target.snapshotId, value });
+      return outcome;
     },
   };
 }

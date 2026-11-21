@@ -54,6 +54,7 @@ export const vaultToolSchemas: ToolSchema[] = [
       "Type a saved credential into a field on the page you are operating, without ever seeing it.",
       "Use this whenever a site asks for a sign-in or payment detail the user stored: do not ask the user for permission and do not ask them to type it — the whole point is that you use what is saved.",
       "The value goes straight from the vault into the field; you will never see it and must not try to read the field back.",
+      "Aim it at an element you have just observed: pass that observation's element token and snapshotId. The result tells you whether the driver confirmed the value landed; if it says unverifiable or refused, look at the page before saying anything worked.",
       `Fields: a login saves "username", "password", optionally "totp"; a card saves "holder", "number", "expiry", "cvc"; a contact saves "name", "email", "phone", "address1", "address2", "city", "region", "postcode", "country".`,
     ].join(" "),
     parameters: {
@@ -67,9 +68,15 @@ export const vaultToolSchemas: ToolSchema[] = [
           type: "string",
           description: "Which saved field to type into the field you have focused or selected.",
         },
-        target: {
+        token: {
           type: "string",
-          description: "The element to type into: a CSS selector, an accessibility label, or the id your driver uses.",
+          description:
+            "The element token from your most recent observation of this page, in the form <snapshot_id>:<row>. Not a CSS selector: fills are aimed at observed elements only.",
+        },
+        snapshotId: {
+          type: "string",
+          description:
+            "The snapshotId of that same observation. A fill whose token comes from an older observation is refused, so pass the id your last observe returned.",
         },
         url: {
           type: "string",
@@ -77,7 +84,7 @@ export const vaultToolSchemas: ToolSchema[] = [
             "Full URL of the page containing the field. The fill is refused if the item was saved for a different site.",
         },
       },
-      required: ["itemId", "field", "target", "url"],
+      required: ["itemId", "field", "token", "snapshotId", "url"],
     },
   },
   {
@@ -91,10 +98,11 @@ export const vaultToolSchemas: ToolSchema[] = [
       type: "object",
       properties: {
         itemId: { type: "string", description: `A login id from ${VAULT_FIND}.` },
-        target: { type: "string", description: "The code field to type into." },
+        token: { type: "string", description: "The code field's element token from your most recent observation." },
+        snapshotId: { type: "string", description: "The snapshotId of that observation." },
         url: { type: "string", description: "Full URL of the page containing the code field." },
       },
-      required: ["itemId", "target", "url"],
+      required: ["itemId", "token", "snapshotId", "url"],
     },
   },
   {

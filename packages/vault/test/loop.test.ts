@@ -139,6 +139,7 @@ describe("the tool loop", () => {
     const sink: VaultFillSink = {
       fill: async ({ field, value }) => {
         typed.push({ field, value });
+        return { effect: "confirmed", verified: true };
       },
     };
 
@@ -159,7 +160,8 @@ describe("the tool loop", () => {
               arguments: JSON.stringify({
                 itemId: item.id,
                 field: "password",
-                target: "#password",
+                token: "snap_1:4",
+                snapshotId: "snap_1",
                 url: "https://github.com/session",
               }),
             },
@@ -184,7 +186,7 @@ describe("the tool loop", () => {
     const assistantCall = replay.find((entry) => entry.role === "assistant" && entry.toolCalls?.length);
     expect(assistantCall?.toolCalls?.[0]?.name).toBe("vault_fill");
     const toolResult = replay.find((entry) => entry.role === "tool");
-    expect(toolResult?.content).toContain("Filled the password");
+    expect(toolResult?.content).toContain("read it back");
 
     // The whole request, serialised, holds no password — that is the guarantee.
     const everything = JSON.stringify(turns);
@@ -215,6 +217,7 @@ describe("the tool loop", () => {
     const sink: VaultFillSink = {
       fill: async ({ value }) => {
         typed.push(value);
+        return { effect: "confirmed" as const, verified: true };
       },
     };
 
@@ -230,7 +233,8 @@ describe("the tool loop", () => {
               arguments: JSON.stringify({
                 itemId: item.id,
                 field: "password",
-                target: "#password",
+                token: "snap_9:2",
+                snapshotId: "snap_9",
                 url: "https://github.com.evil.test/login",
               }),
             },

@@ -34,16 +34,66 @@ import { hostOf, type VaultService } from "./service.ts";
  *   suppress that screenshot rather than rely on the site.
  */
 
+/**
+ * How far a fill got, in the driver's own vocabulary.
+ *
+ * These are `CuaEffect`'s values deliberately: a fill is an action like any other,
+ * and a sink that could only answer "done" would flatten "the driver could not
+ * confirm the app applied it" into a lie the model then repeats to the user.
+ */
+export type FillEffect = "confirmed" | "unverifiable" | "suspected_noop" | "partial" | "refused";
+
+/** What a sink reports back. Note what cannot be in here: the value. */
+export interface VaultFillOutcome {
+  effect: FillEffect;
+  /** True only when the driver read the change back through accessibility. */
+  verified: boolean;
+  /**
+   * A masked, human-readable confirmation the model may repeat — for example
+   * "the password field now shows 12 characters". Never the value itself.
+   */
+  evidence?: string;
+  /** The driver's refusal code when nothing was sent (`stale_element_token`, …). */
+  refusalCode?: string;
+}
+
+/**
+ * The element a fill aims at.
+ *
+ * `token` is the driver's element token (`<snapshot_id>:<row>`), and `snapshotId`
+ * is the observation it came from. Both are required because the two failure modes
+ * here are silent: element tokens go stale when a newer read replaces the window's
+ * snapshot, and typing a password into the wrong input looks exactly like typing it
+ * into the right one. Naming the observation makes staleness a fact the vault can
+ * check rather than a probability it hopes about.
+ */
+export interface FillTarget {
+  /** The `snapshotId` of the observation the token came from. */
+  snapshotId: string;
+  /** The element token from that observation. */
+  token: string;
+}
+
 /** What a driver must be able to do to accept a secret. */
 export interface VaultFillSink {
   /**
-   * Type `value` into the field named by `target` on the page at `url`.
+   * Type `value` into `target` on the page at `url`.
    *
-   * Called only after the domain check has passed. An implementation must not log
-   * the value, must not include it in an error message, and must type rather than
-   * paste where the target supports it, so clipboard history never holds it.
+   * Called only after the domain check and the observation check have passed. An
+   * implementation must not log the value, must not include it in an error message,
+   * and must type rather than paste where the target supports it, so clipboard
+   * history never holds it.
+   *
+   * The implementation owns the last staleness check: if its driver's live snapshot
+   * is no longer `target.snapshotId`, it must return `refused` with
+   * `refusalCode: "stale_element_token"` instead of typing.
    */
-  fill(input: { url: string; target: string; field: string; value: string }): Promise<void>;
+  fill(input: {
+    url: string;
+    target: FillTarget;
+    field: string;
+    value: string;
+  }): Promise<VaultFillOutcome>;
 }
 
 /** A fill's result, shaped so no field can hold a secret. */
@@ -59,6 +109,11 @@ export interface FillResult {
   length: number;
   /** False when the target is a masked input: a screenshot now is safe. */
   mayShowOnScreen: boolean;
+  /** How far the driver got. A model must not report success on `refused`. */
+  effect: FillEffect;
+  verified: boolean;
+  /** A masked confirmation the model may repeat. Never a value. */
+  evidence?: string;
   /** A one-line result for the model, with no value in it. */
   message: string;
 }
@@ -77,8 +132,8 @@ export interface FillRequest {
   itemId: string;
   /** Which field to type: "password", "username", "number", "cvc", … */
   field: string;
-  /** How the driver addresses the field on the page (a selector, a node id, a label). */
-  target: string;
+  /** The element to type into, bound to the observation it was read from. */
+  target: FillTarget;
   sink: VaultFillSink;
 }
 
@@ -159,10 +214,18 @@ export async function fillFromVault(
     throw new VaultError("no_field", `that item has no ${request.field} saved`);
   }
 
-  await request.sink.fill({ url: request.url, target: request.target, field: request.field, value });
-  // A one-shot value has no stored row to timestamp, and marking one used would
-  // write the fact that it was used to a table it was never saved to.
-  if (!oneShot) await vault.markUsed(request.workspaceId, request.itemId);
+  const outcome = await request.sink.fill({
+    url: request.url,
+    target: request.target,
+    field: request.field,
+    value,
+  });
+
+  // A value that never left the process did not get used: marking it would put a
+  // last-used date on the strength of an action the driver says it did not perform.
+  if (outcome.effect !== "refused" && !oneShot) {
+    await vault.markUsed(request.workspaceId, request.itemId);
+  }
 
   return {
     itemId: item.id,
@@ -173,8 +236,42 @@ export async function fillFromVault(
     hint: item.hint,
     length: value.length,
     mayShowOnScreen: request.field !== "password" && request.field !== "cvc",
-    message: `Filled ${fieldLabel(request.field)} from "${item.label}" into ${host}.`,
+    effect: outcome.effect,
+    verified: outcome.verified,
+    ...(outcome.evidence ? { evidence: outcome.evidence } : {}),
+    message: fillMessage({ field: request.field, label: item.label, host, outcome }),
   };
+}
+
+/**
+ * What the model is told, which depends on how far the driver got.
+ *
+ * The one thing this must never do is dress a refusal up as a success: a model that
+ * reads "filled the password" when nothing was typed will report a sign-in that did
+ * not happen, and the user will believe it.
+ */
+function fillMessage(input: {
+  field: string;
+  label: string;
+  host: string;
+  outcome: VaultFillOutcome;
+}): string {
+  const { field, label, host, outcome } = input;
+  const what = fieldLabel(field);
+  const evidence = outcome.evidence ? ` ${outcome.evidence}` : "";
+
+  switch (outcome.effect) {
+    case "confirmed":
+      return `Filled ${what} from "${label}" into ${host}, and the driver read it back.${evidence}`;
+    case "unverifiable":
+      return `Typed ${what} from "${label}" into ${host}. The driver could not confirm the page accepted it — check the field yourself before assuming it worked.${evidence}`;
+    case "partial":
+      return `Partially filled ${what} from "${label}" into ${host}.${evidence} Some of the action did not apply; look before continuing.`;
+    case "suspected_noop":
+      return `Tried to fill ${what} from "${label}" into ${host}, but nothing changed on the page. Observe again and re-aim — the element may have moved.${evidence}`;
+    default:
+      return `The fill was refused and nothing was typed${outcome.refusalCode ? ` (${outcome.refusalCode})` : ""}. Observe the page again and re-aim at the field, then retry.`;
+  }
 }
 
 function fieldLabel(field: string): string {

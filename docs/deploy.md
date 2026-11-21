@@ -196,6 +196,17 @@ wakes that waiting run through an in-process promise, so:
   path, and the person's answer reaches the model as the next user message rather
   than as the tool result.
 
+### Named follow-up: a durable answer channel for `queue` mode
+
+Not built, and deliberately not. The failure it leaves: on a queue deployment a bot
+that asks for a credential cannot hear the answer mid-turn, so the run ends `expired`
+while the card stays answerable. The person's value is still saved correctly, but the
+bot has already been told nobody answered and will say so. Fixing it means a durable
+signal — a queue message or `LISTEN/NOTIFY` keyed by request id — delivered to whichever
+worker holds the run, plus resuming the tool step rather than replaying the turn, which
+is why it belongs with the run-control work rather than here. Inline mode, which this
+deployment uses, has none of this problem.
+
 A value provided with "Save to vault" unticked lives in the run process's memory for
 the duration of that run and is dropped when it ends. It is never written to Postgres
 — there is no column that could hold it — so a restarted or different process cannot

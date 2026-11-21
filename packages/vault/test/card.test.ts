@@ -13,7 +13,9 @@ import {
   modelEndpoint,
   newId,
   run,
+  runEvent,
   secretRequest,
+  toolCall,
   user,
   vaultItem,
 } from "@terabot/db";
@@ -210,8 +212,8 @@ describe("ask-the-user card", () => {
       url: "https://once.example.test/login",
       itemId,
       field: "password",
-      target: "#password",
-      sink: { fill: async ({ value }) => void typed.push(value) },
+      target: { token: "snap_2:3", snapshotId: "snap_2" },
+      sink: { fill: async ({ value }) => (void typed.push(value), { effect: "confirmed" as const, verified: true }) },
       oneShot: store,
     });
     expect(typed).toEqual([PROVIDED]);
@@ -237,8 +239,10 @@ describe("ask-the-user card", () => {
         url: "https://once.example.test.evil.test/login",
         itemId: ephemeralIdFor(requestId),
         field: "password",
-        target: "#password",
-        sink: { fill: async ({ value }) => void typed.push(value) },
+        target: { token: "snap_2:3", snapshotId: "snap_2" },
+        sink: {
+          fill: async ({ value }) => (void typed.push(value), { effect: "confirmed" as const, verified: true }),
+        },
         oneShot: store,
       }),
     ).rejects.toMatchObject({ code: "domain_mismatch" });
@@ -406,6 +410,106 @@ describe("ask-the-user card", () => {
 
     const [row] = await db.select().from(secretRequest).where(eq(secretRequest.runId, runId));
     expect(row!.kind).toBe("card");
+  }, 30_000);
+
+  /**
+   * The card path, held to the same standard as the fill path: a value a person
+   * types into the card must never reach the model's context — not on the turn that
+   * asked, not on the turn that continues afterwards. It goes to the vault or to the
+   * ephemeral store, and the model only hears that the request was answered.
+   *
+   * This drives the real `executeRun`, so it guards the whole path rather than the
+   * service in isolation: a later refactor that widened a tool result or echoed the
+   * submitted fields would fail here.
+   */
+  it("never puts a card-submitted value into the model's context", async () => {
+    const runId = await seedRun();
+    const turns: Array<{ messages: Array<{ role: string; content: string; toolCalls?: unknown }> }> = [];
+
+    let turn = 0;
+    const gateway: ModelGateway = {
+      async *stream(request) {
+        turns.push({ messages: structuredClone(request.messages) });
+        if (turn === 0) {
+          turn += 1;
+          yield { type: "tool_call_start", id: "c_req", name: "vault_request" } as ModelEvent;
+          yield {
+            type: "tool_call_end",
+            id: "c_req",
+            arguments: JSON.stringify({
+              kind: "login",
+              reason: "the shop needs your password",
+              url: "https://saved.example.test/login",
+            }),
+          } as ModelEvent;
+          return;
+        }
+        turn += 1;
+        yield { type: "text_delta", text: "Thanks — I have what I need and have signed in." } as ModelEvent;
+      },
+    };
+
+    const outcome = await executeRun({
+      db,
+      gateway,
+      runId,
+      abortPollMs: 20,
+      tools: vaultTools({
+        db,
+        vault,
+        oneShot: store,
+        // The person answers the card through the same service the HTTP route uses.
+        awaitSecretRequest: async ({ status }) => {
+          const [pending] = await db
+            .select()
+            .from(secretRequest)
+            .where(and(eq(secretRequest.runId, runId), eq(secretRequest.status, "pending")))
+            .limit(1);
+          if (pending) {
+            await requests.submit({
+              workspaceId,
+              requestId: pending.id,
+              userId: ownerId,
+              values: { username: "octocat-card", password: PROVIDED },
+              saveToVault: true,
+              domain: "saved.example.test",
+            });
+          }
+          expect(await status()).toBe("provided");
+          return "provided";
+        },
+      }),
+    });
+
+    expect(outcome.status).toBe("done");
+    expect(outcome.text).toContain("signed in");
+
+    // Two turns: the one that asked, and the one that continued after the answer.
+    expect(turns).toHaveLength(2);
+
+    // Neither request contains the value the person typed, nor a ciphertext.
+    const everything = JSON.stringify(turns);
+    expect(everything).not.toContain(PROVIDED);
+    expect(everything).not.toContain("octocat-card");
+    expect(everything).not.toContain("v1:");
+
+    // What the model *was* told is only that the request was answered.
+    const toolResult = turns[1]!.messages.find((entry) => entry.role === "tool");
+    expect(toolResult?.content).toContain("provided the login");
+    expect(toolResult?.content).not.toContain(PROVIDED);
+
+    // The run's own transcript and tool-call records are clean too.
+    const events = await db.select().from(runEvent).where(eq(runEvent.runId, runId));
+    expect(JSON.stringify(events)).not.toContain(PROVIDED);
+    const calls = await db.select().from(toolCall).where(eq(toolCall.runId, runId));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(JSON.stringify(calls)).not.toContain(PROVIDED);
+
+    // And the value did land in the vault, which is where it was meant to go.
+    const stored = await db.select().from(vaultItem).where(eq(vaultItem.workspaceId, workspaceId));
+    const saved = stored.find((row) => row.label.includes("saved.example.test"));
+    expect(saved).toBeDefined();
+    expect(JSON.stringify(stored)).not.toContain(PROVIDED);
   }, 30_000);
 
   it("keeps the one-shot store empty of a saved value", async () => {

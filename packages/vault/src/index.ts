@@ -21,7 +21,7 @@ export type { EphemeralEntry, EphemeralSecrets } from "./ephemeral.ts";
 export type { SecretRequestView, SubmitInput } from "./requests.ts";
 export { vaultTools } from "./tools-run.ts";
 export type { VaultToolsOptions } from "./tools-run.ts";
-export type { FillRequest, FillResult, VaultFillSink } from "./fill.ts";
+export type { FillEffect, FillRequest, FillResult, FillTarget, VaultFillOutcome, VaultFillSink } from "./fill.ts";
 export { normaliseTotpSecret, totpCode } from "./totp.ts";
 export type { TotpCode } from "./totp.ts";
 export { FILLABLE_FIELDS, VAULT_FILL, VAULT_FIND, VAULT_REQUEST, VAULT_TOTP, vaultToolSchemas } from "./tools.ts";
