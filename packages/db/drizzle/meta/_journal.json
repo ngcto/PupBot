@@ -71,6 +71,13 @@
       "when": 1795254505562,
       "tag": "0009_managed_computer_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795261333915,
+      "tag": "0010_aberrant_sauron",
+      "breakpoints": true
     }
   ]
 }

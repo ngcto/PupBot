@@ -47,13 +47,15 @@ export { providerHintForBaseUrl } from "./catalog-hint.ts";
 export {
   BUILTIN_PROVIDERS,
   builtinForBaseUrl,
-  builtinNeedsKey,
   builtinProvider,
+  endpointUsableForBot,
   builtinRequestHeaders,
   isBuiltinId,
 } from "./builtins.ts";
 export type { BuiltinHeader, BuiltinProvider, BuiltinRequestContext } from "./builtins.ts";
-export { DETAIL_FIELDS, detailSources, fillMissingDetails, isSet } from "./details.ts";
+export { DETAIL_FIELDS, fillMissingDetails, isSet, sourcesAfterUserEdit } from "./details.ts";
+export { endpointConfigForRow, PROBE_SESSION, TERABOT_USER_AGENT } from "./config.ts";
+export type { EndpointRowConfig } from "./config.ts";
 export type { DetailField, DetailFill, ModelDetails } from "./details.ts";
 export { listEndpointModels, ModelListingError } from "./models.ts";
 export type { ModelListing, ModelListingResult } from "./models.ts";

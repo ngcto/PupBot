@@ -304,9 +304,31 @@ export const modelEndpoint = pgTable(
     modelCatalogId: uuid("model_catalog_id").references(() => modelCatalog.id, { onDelete: "set null" }),
     catalogMatch: catalogMatch("catalog_match").notNull().default("unmatched"),
     contextWindow: integer("context_window"),
+    /**
+     * The built-in this row is, from `BUILTIN_PROVIDERS` in `@terabot/providers`;
+     * null for a custom endpoint. Its base URL comes from that table rather than
+     * from `baseUrl` below, so a moved provider is one code change and not a
+     * migration of every saved row.
+     */
+    builtinId: text("builtin_id"),
+    /** USD per 1M tokens the user set, or that the catalogue filled. */
+    pricing: jsonb("pricing").$type<{
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+    }>(),
+    /** Whether the model accepts tools; null until set or filled. */
+    toolSupport: boolean("tool_support"),
+    /** Whether the model reasons before answering; null until set or filled. */
+    reasoningCapability: boolean("reasoning_capability"),
+    /** Fields in this row that the catalogue filled rather than the user. */
+    autoFilledFields: jsonb("auto_filled_fields").$type<string[]>(),
     /** Last `GET /models` answer from the endpoint itself, cached for the picker. */
     modelList: jsonb("model_list").$type<Array<{ id: string; ownedBy?: string; created?: number }>>(),
     modelListFetchedAt: timestamp("model_list_fetched_at", { withTimezone: true }),
+    /** An `ETag` from the same call, so the next refresh can be a conditional GET. */
+    modelListEtag: text("model_list_etag"),
     createdAt: createdAt(),
   },
   (t) => [index("model_endpoint_workspace_idx").on(t.workspaceId)],

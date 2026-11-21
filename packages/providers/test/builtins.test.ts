@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_PROVIDERS,
   builtinForBaseUrl,
-  builtinNeedsKey,
   builtinProvider,
   builtinRequestHeaders,
+  endpointUsableForBot,
   isBuiltinId,
 } from "../src/builtins.ts";
 
@@ -75,16 +75,25 @@ describe("headers a built-in needs", () => {
   });
 });
 
-describe("a built-in without a key", () => {
-  it("is excluded from bot creation until it holds a key", () => {
-    expect(builtinNeedsKey({ builtinId: "openrouter", hasKey: false })).toBe(true);
-    expect(builtinNeedsKey({ builtinId: "openrouter", hasKey: true })).toBe(false);
+describe("whether a bot may use an endpoint", () => {
+  it("offers a built-in once it holds a key", () => {
+    expect(endpointUsableForBot({ builtinId: "openrouter", hasKey: true })).toBe(true);
   });
 
-  it("does not block a keyless endpoint that is not a built-in", () => {
-    // The dev stub has no key by design and the AI Gateway is authenticated by
-    // the deployment's own credentials.
-    expect(builtinNeedsKey({ builtinId: null, hasKey: false })).toBe(false);
-    expect(builtinNeedsKey({ builtinId: undefined, hasKey: false })).toBe(false);
+  it("hides a built-in that holds no key", () => {
+    expect(endpointUsableForBot({ builtinId: "openrouter", hasKey: false })).toBe(false);
+  });
+
+  it("keeps a built-in the deployment authenticates, which is keyless by design", () => {
+    // `ensureWorkspace` seeds the AI Gateway row with no encrypted key; the
+    // deployment's OIDC token (or AI_GATEWAY_API_KEY) authenticates it. Treating
+    // that as broken would hide a provider that works.
+    expect(
+      endpointUsableForBot({ builtinId: "vercel-ai-gateway", hasKey: false, deploymentAuthenticated: true }),
+    ).toBe(true);
+  });
+
+  it("keeps a keyless custom endpoint, such as a local gateway or the dev stub", () => {
+    expect(endpointUsableForBot({ builtinId: null, hasKey: false })).toBe(true);
   });
 });

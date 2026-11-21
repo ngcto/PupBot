@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detailSources, fillMissingDetails, isSet } from "../src/details.ts";
+import { fillMissingDetails, isSet, sourcesAfterUserEdit } from "../src/details.ts";
 
 const CATALOGUE = {
   contextWindow: 200_000,
@@ -108,19 +108,35 @@ describe("isSet", () => {
 });
 
 describe("where a value came from", () => {
-  it("marks only the fields the fill took, and only while they still hold a value", () => {
+  it("marks only the fields the fill took, not the ones the user set", () => {
     const fill = fillMissingDetails({ contextWindow: 32_000 }, CATALOGUE);
-    const sources = detailSources(fill.details, fill.autoFilled);
-    expect(sources).toEqual({
-      pricing: "catalogue",
-      toolSupport: "catalogue",
-      reasoning: "catalogue",
-    });
-    expect(sources.contextWindow).toBeUndefined();
+    expect(fill.sources).toEqual(["pricing", "toolSupport", "reasoning"]);
+    expect(fill.sources).not.toContain("contextWindow");
   });
 
-  it("drops a mark for a field that has since been cleared", () => {
-    expect(detailSources({ contextWindow: null }, ["contextWindow"])).toEqual({});
-    expect(detailSources({}, ["pricing"])).toEqual({});
+  it("keeps a filled value badged on a later visit, when nothing new is filled", () => {
+    // The second visit finds every field already set, so it fills nothing — but
+    // the price still came from the catalogue and must stay marked as such.
+    const second = fillMissingDetails(
+      { contextWindow: 200_000, pricing: CATALOGUE.pricing, toolSupport: true, reasoning: true },
+      CATALOGUE,
+      ["pricing", "toolSupport", "reasoning"],
+    );
+    expect(second.autoFilled).toEqual([]);
+    expect(second.sources).toEqual(["pricing", "toolSupport", "reasoning"]);
+  });
+
+  it("drops the mark once the user sets that field themselves", () => {
+    // `contextWindow` was catalogue-sourced, then the user typed 32k. The value
+    // looks identical to the fill's own, so only the write path can tell; it
+    // clears the mark for the fields the user touched.
+    expect(sourcesAfterUserEdit(["contextWindow", "pricing"], ["contextWindow"])).toEqual(["pricing"]);
+    expect(sourcesAfterUserEdit(["contextWindow"], [])).toEqual(["contextWindow"]);
+    expect(sourcesAfterUserEdit(null, ["pricing"])).toEqual([]);
+  });
+
+  it("drops the mark for a field that has since been cleared", () => {
+    const fill = fillMissingDetails({ contextWindow: null }, null, ["contextWindow"]);
+    expect(fill.sources).toEqual([]);
   });
 });

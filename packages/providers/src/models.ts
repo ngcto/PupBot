@@ -13,6 +13,17 @@ export interface ModelListingResult {
   models: ModelListing[];
   /** When the endpoint answered. */
   fetchedAt: string;
+  /**
+   * The validator the endpoint returned, to send back as `If-None-Match`. Most
+   * providers do not send one; those that do make a refresh nearly free.
+   */
+  etag?: string;
+  /**
+   * The endpoint answered `304 Not Modified`: `models` is empty and the caller's
+   * cached list is still current. Checked before `models` so a caller cannot
+   * mistake this for "the provider lists nothing".
+   */
+  notModified: boolean;
 }
 
 export class ModelListingError extends Error {
@@ -88,7 +99,13 @@ function normalise(payload: unknown): ModelListing[] {
  */
 export async function listEndpointModels(
   endpoint: ModelEndpointConfig,
-  options: { signal?: AbortSignal; timeoutMs?: number; fetch?: typeof globalThis.fetch } = {},
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    fetch?: typeof globalThis.fetch;
+    /** A stored validator; a `304` answer returns `notModified` with no models. */
+    etag?: string | null;
+  } = {},
 ): Promise<ModelListingResult> {
   const timeout = options.timeoutMs ?? LIST_TIMEOUT_MS;
   const controller = new AbortController();
@@ -101,9 +118,22 @@ export async function listEndpointModels(
     const call = options.fetch ?? fetch;
     const response = await call(joinUrl(endpoint.baseUrl, "models"), {
       method: "GET",
-      headers: headersFor(endpoint),
+      headers: {
+        ...headersFor(endpoint),
+        ...(options.etag ? { "if-none-match": options.etag } : {}),
+      },
       signal,
     });
+
+    if (response.status === 304 && options.etag) {
+      await response.body?.cancel().catch(() => undefined);
+      return {
+        models: [],
+        fetchedAt: new Date().toISOString(),
+        etag: options.etag,
+        notModified: true,
+      };
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -121,8 +151,14 @@ export async function listEndpointModels(
       });
     }
 
+    const etag = response.headers.get("etag") ?? undefined;
     const payload = (await response.json().catch(() => null)) as unknown;
-    return { models: normalise(payload), fetchedAt: new Date().toISOString() };
+    return {
+      models: normalise(payload),
+      fetchedAt: new Date().toISOString(),
+      ...(etag ? { etag } : {}),
+      notModified: false,
+    };
   } catch (error) {
     if (error instanceof ModelListingError) throw error;
     if (signal.aborted) {
