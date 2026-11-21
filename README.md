@@ -34,7 +34,6 @@ Generate the two secrets with `openssl rand -base64 32`.
 | `pnpm dev` | all three apps through Turborepo |
 | `pnpm typecheck` / `pnpm test` / `pnpm build` | the same checks CI runs |
 | `pnpm e2e` | Playwright: sign up → bot → computer → streamed reply → blocked composer |
-| `scripts/rename-product.sh` | one mechanical product-rename sweep across the tree; pass `--check` to list what it would rewrite |
 | `pnpm db:generate` / `db:migrate` / `db:seed` | Drizzle schema and data |
 | `pnpm catalog:sync` | fetch models.dev and upsert `model_catalog` |
 | `pnpm --filter @terabot/mobile start` | Expo dev server for the phone app |
