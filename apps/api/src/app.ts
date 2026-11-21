@@ -9,6 +9,7 @@ import { createConversationRoutes } from "./routes/conversations.ts";
 import type { EnqueueRun } from "./routes/conversations.ts";
 import { mobileRoutes } from "./routes/mobile.ts";
 import { runRoutes } from "./routes/runs.ts";
+import { vaultRoutes } from "./routes/vault.ts";
 import { createInlineEnqueue } from "./run-inline.ts";
 import type { AppEnv } from "./types.ts";
 
@@ -54,6 +55,25 @@ export function createApp(options: AppOptions = {}) {
     await next();
   });
 
+  app.use("/vault", async (c, next) => {
+    const session = await betterAuth().api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    c.set("user", session.user);
+    await next();
+  });
+  app.use("/vault/*", async (c, next) => {
+    const session = await betterAuth().api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    c.set("user", session.user);
+    await next();
+  });
+  app.use("/secret-requests/*", async (c, next) => {
+    const session = await betterAuth().api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    c.set("user", session.user);
+    await next();
+  });
+
   app.use("/runs/*", async (c, next) => {
     const session = await betterAuth().api.getSession({ headers: c.req.raw.headers });
     if (!session) return c.json({ error: "unauthorized" }, 401);
@@ -67,6 +87,7 @@ export function createApp(options: AppOptions = {}) {
   app.route("/", createConversationRoutes({ enqueue }));
   app.route("/", runRoutes);
   app.route("/", attachmentRoutes);
+  app.route("/", vaultRoutes);
   app.route("/", mobileRoutes);
 
   // Dev-only OpenAI-compatible endpoint: the whole chat path works with no key.

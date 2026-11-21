@@ -495,7 +495,105 @@ export const botApp = pgTable(
   ],
 );
 
+/* ──────────────────────────────── vault ────────────────────────────── */
+
+export const vaultItemKind = pgEnum("vault_item_kind", ["login", "card", "contact"]);
+
+/**
+ * One row per stored credential, whichever kind it is.
+ *
+ * A single table with a typed payload rather than one table per kind: the three
+ * kinds share everything that matters for safety — the workspace scope, the
+ * owner, the domain the value belongs to, the encryption and the last-used
+ * timestamp — and differ only in which fields exist. Those differences live in
+ * the kind definitions in `@terabot/vault`, so adding a kind is a new definition
+ * rather than a migration, and there is exactly one code path that encrypts.
+ *
+ * `secrets` holds ciphertext only: `{ password: "v1:iv:tag:ct", … }`, produced by
+ * `encryptSecret` (AES-256-GCM, `CREDENTIAL_ENCRYPTION_KEY`). `meta` holds the
+ * fields the list may show in the clear, and `hint` is a writer-computed masked
+ * tail ("•••• 4242") so rendering a list never decrypts anything.
+ */
+export const vaultItem = pgTable(
+  "vault_item",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    /** The person whose vault this is; every read is scoped to them. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: vaultItemKind("kind").notNull(),
+    label: text("label").notNull(),
+    /** Hostname the item is for ("github.com"); a fill to another host is refused. */
+    domain: text("domain"),
+    /** Masked tail for lists: never a secret, never decrypted at read time. */
+    hint: text("hint"),
+    meta: jsonb("meta").$type<Record<string, string>>().notNull().default({}),
+    secrets: jsonb("secrets").$type<Record<string, string>>().notNull().default({}),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("vault_item_workspace_idx").on(t.workspaceId, t.kind),
+    index("vault_item_owner_idx").on(t.userId),
+    index("vault_item_domain_idx").on(t.workspaceId, t.domain),
+  ],
+);
+
 /* ──────────────────────── skills and routines ──────────────────────── */
+
+/**
+ * An unanswered request from a bot for a credential it cannot obtain itself.
+ *
+ * The row holds no secret ever: `status` is the whole answer, and the value a
+ * person submits travels either into `vault_item` (saved) or into the submitting
+ * process's memory for one run (not saved). What lives here is the question and
+ * its lifecycle, so the card survives a page reload and can expire.
+ */
+export const secretRequestStatus = pgEnum("secret_request_status", [
+  "pending",
+  "provided",
+  "declined",
+  "expired",
+]);
+
+export const secretRequest = pgTable(
+  "secret_request",
+  {
+    id: uuid("id").primaryKey(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => run.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bot.id, { onDelete: "cascade" }),
+    kind: vaultItemKind("kind").notNull(),
+    /** The bot's own words for why it needs this, shown on the card. */
+    reason: text("reason").notNull(),
+    /** Which fields to collect: a closed set from the kind definition. */
+    fields: jsonb("fields").$type<string[]>().notNull().default([]),
+    status: secretRequestStatus("status").notNull().default("pending"),
+    /** The vault item created when the person kept the "Save to vault" default. */
+    vaultItemId: uuid("vault_item_id").references(() => vaultItem.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("secret_request_run_idx").on(t.runId),
+    index("secret_request_pending_idx").on(t.conversationId, t.status),
+  ],
+);
 
 export const skill = pgTable(
   "skill",
@@ -604,6 +702,8 @@ export const schema = {
   botComputer,
   appConnection,
   botApp,
+  vaultItem,
+  secretRequest,
   skill,
   routine,
   attachment,
