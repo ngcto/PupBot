@@ -90,6 +90,16 @@ export interface CallRecord {
   preview?: string;
   /** True when `preview` is a truncation of a larger result. */
   truncated?: boolean;
+  /**
+   * The refusal this call returned, when it returned one instead of acting.
+   *
+   * A refusal is not an error: the ladder in `@terabot/cua` answers `effect:
+   * "refused"` with a code, because a refusal is information the caller branches on.
+   * The sandbox therefore cannot treat it as a failed call, and it should not — but
+   * it must not lose it either. A program that ignores `effect` looks, from the
+   * outside, exactly like a program whose action worked, so the run says so.
+   */
+  refused?: { code?: string; message?: string };
 }
 
 export type SandboxResult =
@@ -119,6 +129,34 @@ export function previewOf(value: unknown): { text: string; truncated: boolean } 
   text = text.replace(/\s+/g, " ").trim();
   if (text.length <= PREVIEW_CHARS) return { text, truncated: false };
   return { text: `${text.slice(0, PREVIEW_CHARS)}…`, truncated: true };
+}
+
+/** Characters a refusal's own message may add, so a code is useful and never a dump. */
+export const REFUSAL_CHARS = 120;
+
+/**
+ * The refusal a tool returned, if it returned one.
+ *
+ * Recognised by shape — `effect: "refused"` — because that is the contract the CUA
+ * package publishes, and the sandbox must not import a driver to know it. A result
+ * that is not shaped that way simply has no refusal, which is the right answer for
+ * every tool that cannot refuse.
+ *
+ * Optional fields are `unknown` and coerced here: a refusal reaches this from a tool
+ * handler, and a handler that returned a non-string code should not turn a recorded
+ * refusal into a thrown one.
+ */
+export function refusalOf(value: unknown): { code?: string; message?: string } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as { effect?: unknown; refusal?: unknown };
+  if (record.effect !== "refused") return undefined;
+  const refusal = (typeof record.refusal === "object" && record.refusal !== null ? record.refusal : {}) as {
+    code?: unknown;
+    message?: unknown;
+  };
+  const code = typeof refusal.code === "string" ? refusal.code.slice(0, REFUSAL_CHARS) : undefined;
+  const message = typeof refusal.message === "string" ? refusal.message.slice(0, REFUSAL_CHARS) : undefined;
+  return { ...(code ? { code } : {}), ...(message ? { message } : {}) };
 }
 
 export const DEFAULT_TIMEOUT_MS = 30_000;

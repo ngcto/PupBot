@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineFromStack, preludeFor, programOf, toIdentifier } from "../src/sandbox.ts";
+import { lineFromStack, preludeFor, programOf, refusalOf, toIdentifier } from "../src/sandbox.ts";
 import { runProgram } from "../src/index.ts";
 import type { SandboxTool } from "../src/sandbox.ts";
 
@@ -139,6 +139,44 @@ describe("tool calls", () => {
       expect(result.error.kind).toBe("script");
       expect(result.error.message).toContain("no tool called");
     }
+  });
+});
+
+describe("the refusal a call returned", () => {
+  const ladder = () => ({
+    effect: "refused",
+    verified: false,
+    refusal: { code: "stale_token", message: "that token is from an older snapshot" },
+    escalation: { recommended: "observe", reason: "re-read the window before acting" },
+  });
+
+  it("records a refusal without failing the call", async () => {
+    // A refusal resolves, because it is information a program branches on. The
+    // record keeps it beside `ok` so the run can say the program walked past one.
+    const result = await runProgram(`const r = await tools.click({}); return r.effect;`, [tool("click", async () => ladder())]);
+    expect(result.ok).toBe(true);
+    expect(result.calls[0]).toMatchObject({ name: "click", ok: true, refused: { code: "stale_token" } });
+  });
+
+  it("records nothing for a result that is not a refusal", async () => {
+    const result = await runProgram(`return 1;`, [tool("click", async () => ({ effect: "confirmed", verified: true }))]);
+    expect(result.calls).toEqual([]);
+    const called = await runProgram(`await tools.click({});`, [tool("click", async () => ({ effect: "confirmed", verified: true }))]);
+    expect(called.calls[0]?.refused).toBeUndefined();
+  });
+
+  it("reads a refusal by shape, so a driver is not imported to recognise one", () => {
+    expect(refusalOf(ladder())).toEqual({ code: "stale_token", message: "that token is from an older snapshot" });
+    expect(refusalOf({ effect: "confirmed" })).toBeUndefined();
+    expect(refusalOf("a string")).toBeUndefined();
+    expect(refusalOf(null)).toBeUndefined();
+    // A refusal with no payload still counts as a refusal.
+    expect(refusalOf({ effect: "refused" })).toEqual({});
+  });
+
+  it("caps what a refusal may add, so it cannot become a dump", () => {
+    const huge = refusalOf({ effect: "refused", refusal: { code: "x".repeat(10_000) } });
+    expect(huge?.code?.length).toBeLessThanOrEqual(120);
   });
 });
 

@@ -165,3 +165,30 @@ export function codemodeApplies(tools: RunTool[]): boolean {
   return wrappable(registry).length > 0;
 }
 
+/** The name a run's own tool carries when it is already code mode. */
+export const CODEMODE_NAME = "codemode";
+
+/**
+ * Whether this run is already code mode, so wrapping it again would be a second shell.
+ *
+ * A caller that hands in its own `codemode` — a benchmark arm, or any surface that
+ * wants to choose its own disclosure — has already made the tools reachable from a
+ * program. Wrapping it again does not add a layer a model can use: the registry keys
+ * by name, so the two `codemode` entries collapse into one, and the schema that
+ * survives is whichever the registry was given last. The model then gets a `codemode`
+ * whose index lists exactly one tool, `codemode`, and every honest name it tries
+ * comes back `there is no tool called "listWindows"`.
+ *
+ * That is not a hypothetical. It is what the three code-mode arms were measured
+ * through in `reports/tera-81-bench`: `executeRun` wrapped an arm whose single tool was
+ * already a program surface, and the model spent its turns being told, correctly, that
+ * the capability index contained nothing but a shell. The arm looked like evidence that
+ * code mode cannot name a tool; it was evidence that a shell was wrapped in a shell.
+ *
+ * Detected by name rather than by identity because a caller's tool is built outside
+ * this package and shares no prototype with anything here.
+ */
+export function isCodeMode(tools: RunTool[]): boolean {
+  return tools.some((tool) => tool.schema.name === CODEMODE_NAME);
+}
+

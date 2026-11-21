@@ -20,7 +20,7 @@ import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
 import { STEP_ROTATE_MS, stepLabel } from "./steps.ts";
 import { createToolRegistry, schemasOf, summariseToolError } from "./tools.ts";
-import { codemodeTool } from "./codemode-tool.ts";
+import { codemodeTool, isCodeMode } from "./codemode-tool.ts";
 import { runCommandTool } from "./run-command.ts";
 import type { RunTool, ToolContext } from "./tools.ts";
 import { parseToolArguments } from "@terabot/providers";
@@ -323,7 +323,11 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
 
   // Added after the run's own tools so `run_command` is in the index code mode
   // builds from, rather than being the one tool a program cannot call.
-  const code = codemodeTool(runTools);
+  //
+  // A run that already has a `codemode` is not wrapped again: the registry keys by
+  // name, so two would collapse into one and the model would read a shell whose index
+  // lists only itself. See `isCodeMode`.
+  const code = isCodeMode(runTools) ? null : codemodeTool(runTools);
   const registry = createToolRegistry(code ? [...runTools, code] : runTools);
 
   const controller = new AbortController();
