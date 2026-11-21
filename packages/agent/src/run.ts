@@ -1,5 +1,4 @@
-import { eq } from "drizzle-orm";
-import { asc, desc } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
   bot as botTable,
   conversation as conversationTable,
@@ -193,15 +192,32 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     .limit(CONTEXT_LIMIT);
   history.reverse();
 
-  const assistantMessageId = newId();
-  await db.insert(messageTable).values({
-    id: assistantMessageId,
-    conversationId: row.conversation.id,
-    runId,
-    role: "assistant",
-    parts: textParts(""),
-    status: "streaming",
-  });
+  // A retried run reuses the assistant message the earlier attempt left behind,
+  // so a redelivered job never leaves a second streaming bubble in the thread.
+  const priorAssistant = (
+    await db
+      .select({ id: messageTable.id })
+      .from(messageTable)
+      .where(and(eq(messageTable.runId, runId), eq(messageTable.role, "assistant")))
+      .orderBy(desc(messageTable.createdAt))
+      .limit(1)
+  )[0];
+  const assistantMessageId = priorAssistant?.id ?? newId();
+  if (priorAssistant) {
+    await db
+      .update(messageTable)
+      .set({ parts: textParts(""), status: "streaming" })
+      .where(eq(messageTable.id, assistantMessageId));
+  } else {
+    await db.insert(messageTable).values({
+      id: assistantMessageId,
+      conversationId: row.conversation.id,
+      runId,
+      role: "assistant",
+      parts: textParts(""),
+      status: "streaming",
+    });
+  }
 
   await events.append({ type: "run.started", payload: { runId, messageId: assistantMessageId } });
 
@@ -345,7 +361,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
 
   await flush(true).catch(() => {});
 
-  const status: RunOutcome["status"] = canceled ? "canceled" : failure ? "error" : "done";
+  // An external abort (shutdown, job cancellation) is a cancellation, not a
+  // complete answer, so the run is not saved as done.
+  const status: RunOutcome["status"] =
+    canceled || options.signal?.aborted ? "canceled" : failure ? "error" : "done";
 
   if (status === "error") {
     await failRun(db, { runId, messageId: assistantMessageId, text, reason: failure ?? "unknown error", now });

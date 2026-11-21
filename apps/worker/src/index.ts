@@ -10,7 +10,7 @@ import { registerComputerJobs } from "./jobs/computers.ts";
 loadEnv();
 
 const gateway = createGateway();
-const boss = await startBoss();
+const boss = await startBoss({ maintain: true });
 const { allocator, runComputer } = createComputers();
 
 await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
@@ -27,6 +27,9 @@ await boss.work<RunJobData>(RUN_QUEUE, { batchSize: 1 }, async (jobs) => {
       console.log(`[run ${runId}] ${outcome.status} (${outcome.text.length} chars)`);
     } catch (error) {
       console.error(`[run ${runId}] failed`, error);
+      // A job canceled by shutdown is not a failure to retry: the run is already
+      // marked canceled, and a retry would only re-enter the same run.
+      if (job.signal.aborted) return;
       throw error;
     }
   }

@@ -1,3 +1,4 @@
+import { serverEnv } from "@pupbot/config";
 import { loadEnv } from "@pupbot/config/load-env";
 import { and, eq } from "drizzle-orm";
 import { auth } from "./auth.ts";
@@ -27,6 +28,14 @@ loadEnv();
 
 async function seed() {
   const db = database();
+
+  // The seed creates a known-password demo account, so it never touches a
+  // production database.
+  if (serverEnv().NODE_ENV === "production") {
+    console.log("refusing to seed: NODE_ENV is production");
+    await closeDatabase();
+    return;
+  }
 
   const existing = await db.select().from(user).where(eq(user.email, DEMO_EMAIL)).limit(1);
   let userId = existing[0]?.id;
@@ -63,58 +72,74 @@ async function seed() {
     })
     .returning();
 
-  const [endpoint] = await db
-    .insert(modelEndpoint)
-    .values({
-      id: newId(),
-      workspaceId: workspace.id,
-      kind: "openai-chat",
-      label: "Local stub endpoint",
-      baseUrl: STUB_BASE_URL(),
-      modelId: "pup-stub",
-      modelCatalogId: catalog?.id,
-      catalogMatch: "matched",
-      contextWindow: 100_000,
-    })
-    .onConflictDoNothing()
-    .returning();
-
+  // A new workspace already carries this endpoint from ensureWorkspace, and the
+  // seed is run again on existing databases, so look it up before inserting a
+  // second copy.
   const endpointId =
-    endpoint?.id ??
     (
       await db
-        .select()
+        .select({ id: modelEndpoint.id })
         .from(modelEndpoint)
         .where(and(eq(modelEndpoint.workspaceId, workspace.id), eq(modelEndpoint.modelId, "pup-stub")))
         .limit(1)
+    )[0]?.id ??
+    (
+      await db
+        .insert(modelEndpoint)
+        .values({
+          id: newId(),
+          workspaceId: workspace.id,
+          kind: "openai-chat",
+          label: "Local stub endpoint",
+          baseUrl: STUB_BASE_URL(),
+          modelId: "pup-stub",
+          modelCatalogId: catalog?.id,
+          catalogMatch: "matched",
+          contextWindow: 100_000,
+        })
+        .returning({ id: modelEndpoint.id })
     )[0]?.id;
 
   if (!endpointId) throw new Error("could not create the stub model endpoint");
 
-  const [account] = await db
-    .insert(computerAccount)
-    .values({
-      id: newId(),
-      provider: "fake",
-      label: "Stub pool",
-      encryptedCredential: encryptSecret("stub-account-credential"),
-      status: "active",
-      capacity: 5,
-    })
-    .returning();
+  const account =
+    (
+      await db
+        .select()
+        .from(computerAccount)
+        .where(and(eq(computerAccount.provider, "fake"), eq(computerAccount.label, "Stub pool")))
+        .limit(1)
+    )[0] ??
+    (
+      await db
+        .insert(computerAccount)
+        .values({
+          id: newId(),
+          provider: "fake",
+          label: "Stub pool",
+          encryptedCredential: encryptSecret("stub-account-credential"),
+          status: "active",
+          capacity: 5,
+        })
+        .returning()
+    )[0];
 
-  const [box] = await db
-    .insert(computer)
-    .values({
-      id: newId(),
-      accountId: account?.id,
-      provider: "fake",
-      externalId: "stub-seeded-box",
-      status: "awake",
-      specs: { vcpus: 4, memMiB: 8192 },
-      lastUsedAt: new Date(),
-    })
-    .returning();
+  const box =
+    (await db.select().from(computer).where(eq(computer.externalId, "stub-seeded-box")).limit(1))[0] ??
+    (
+      await db
+        .insert(computer)
+        .values({
+          id: newId(),
+          accountId: account?.id,
+          provider: "fake",
+          externalId: "stub-seeded-box",
+          status: "awake",
+          specs: { vcpus: 4, memMiB: 8192 },
+          lastUsedAt: new Date(),
+        })
+        .returning()
+    )[0];
 
   const seeds = [
     {

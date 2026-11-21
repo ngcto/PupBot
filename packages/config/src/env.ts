@@ -11,9 +11,11 @@ const serverSchema = z.object({
   BETTER_AUTH_URL: url.default("http://localhost:3000"),
   API_URL: url.default("http://localhost:8787"),
   API_PORT: z.coerce.number().int().positive().default(8787),
+  // Opt-in, and never in production: a deployment that forgets NODE_ENV must not
+  // mount the unauthenticated /dev/stub endpoint.
   STUB_PROVIDER: z
     .enum(["true", "false"])
-    .default("true")
+    .default("false")
     .transform((v) => v === "true"),
   CREDENTIAL_ENCRYPTION_KEY: optionalSecret,
   S3_ENDPOINT: optionalUrl,

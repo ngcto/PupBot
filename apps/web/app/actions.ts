@@ -192,6 +192,17 @@ export async function updateBotSettings(botId: string, input: BotSettingsInput):
   const name = clean(input.name, MAX_NAME);
   if (!name) throw new Error("a bot needs a name");
 
+  // The run decrypts this endpoint's key and calls its base URL, so a bot may
+  // only point at an endpoint of its own workspace.
+  if (input.endpointId !== null) {
+    const owned = await db
+      .select({ id: modelEndpoint.id })
+      .from(modelEndpoint)
+      .where(and(eq(modelEndpoint.id, input.endpointId), eq(modelEndpoint.workspaceId, workspace.id)))
+      .limit(1);
+    if (!owned[0]) throw new Error("that model endpoint does not belong to this workspace");
+  }
+
   await db
     .update(botTable)
     .set({

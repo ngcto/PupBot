@@ -58,7 +58,8 @@ export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pe
   const canSend = value.trim().length > 0;
 
   const submit = () => {
-    if (!canSend) return;
+    // A reply is in flight: keep the draft instead of clearing text that send drops.
+    if (!canSend || pending) return;
     onSend(value, reply ?? undefined);
     setValue("");
     onCancelReply();

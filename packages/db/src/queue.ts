@@ -15,22 +15,33 @@ export interface RunJobData {
   runId: string;
 }
 
+export interface BossOptions {
+  /**
+   * Run pg-boss maintenance and the cron scheduler in this process. Only the
+   * worker does: without it `boss.schedule` never enqueues the idle sweep, lease
+   * renewal, reconcile or catalog jobs, and a job orphaned in `active` by a
+   * crashed worker is never expired and retried.
+   */
+  maintain?: boolean;
+}
+
 /**
  * The queue is Postgres, so it needs no second service; the API enqueues and
  * the worker consumes. Concurrency is 1 per queue, which is what makes
  * "interrupt then start the next run" deterministic.
  */
-export function createBoss(): PgBoss {
+export function createBoss(options: BossOptions = {}): PgBoss {
+  const maintain = options.maintain ?? false;
   return new PgBoss({
     connectionString: serverEnv().DATABASE_URL,
     schema: "pgboss",
-    supervise: false,
-    schedule: false,
+    supervise: maintain,
+    schedule: maintain,
   });
 }
 
-export async function startBoss(): Promise<PgBoss> {
-  const boss = createBoss();
+export async function startBoss(options: BossOptions = {}): Promise<PgBoss> {
+  const boss = createBoss(options);
   boss.on("error", (error: Error) => console.error("[pg-boss]", error));
   await boss.start();
   await boss.createQueue(RUN_QUEUE);
