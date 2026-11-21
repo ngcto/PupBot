@@ -197,6 +197,13 @@ function guardedLookup(
   );
 }
 
+/**
+ * undici 7 is not a preference: on Node 26 the global `fetch` hands the request to
+ * its own bundled dispatcher, and an `Agent` from undici 6 fails that handover with
+ * `InvalidArgumentError: invalid onError method` before a socket is opened — every
+ * guarded call failed, including a plain GET. Version 7 speaks the interface the
+ * built-in fetch expects. `apps/web/package.json` carries the range.
+ */
 const publicDispatcher = new Agent({ connect: { lookup: guardedLookup as never } });
 
 /**
