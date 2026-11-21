@@ -107,10 +107,11 @@ export function Composer({
     const sentFiles = files;
     const accepted = await onSend(sent, reply ?? undefined, sentFiles);
     if (!accepted) return;
-    // The textarea stays editable while the POST is in flight, so a draft typed
-    // during it is the next message, not the one that just went out.
+    // The composer stays editable while the POST is in flight, so a draft typed
+    // during it, and files attached or removed during it, belong to the next
+    // message. Only what actually went out is dropped.
     setValue((current) => (current === sent ? "" : current));
-    setFiles((current) => (current === sentFiles ? [] : current));
+    setFiles((current) => current.filter((file) => !sentFiles.some((sent) => sent.id === file.id)));
     onCancelReply();
     area.current?.focus();
   };
