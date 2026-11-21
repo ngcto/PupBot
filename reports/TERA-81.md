@@ -62,13 +62,22 @@ this machine on 2026-11-21, and the command or script is reproducible from the n
 
 ### 1.2 What I measured on our own surface
 
-Scripts: `~/.capy/work/research/{schemas.ts,measure2.mts,measure3.mts,bench.mjs}` on this
-machine. Token counts come from `POST /v1/messages/count_tokens` on `claude-sonnet-5-5`
-through our configured Anthropic-compatible endpoint. They measure *the text*, so the number
+Scripts: **[`reports/tera-81-measurements/`](tera-81-measurements/)** in this repo, with a
+README giving the exact commands, the committed inputs (`schemas.ts`, `tool-index.ts`,
+`index.json`) and the node/tsx versions used. They read `ANTHROPIC_API_KEY` and
+`ANTHROPIC_BASE_URL` from the environment; no key is in the tree. Re-run them rather than
+trusting the tables: `tsx measure2.mts` reproduces the 3,546, `node bench.mjs` reproduces the sandbox numbers after
+one `npm i quickjs-wasi@3.7.0`, and `node image-probe.mjs` reproduces the image measurement's
+*failure*.
+
+Token counts come from `POST /v1/messages/count_tokens` on `claude-sonnet-5-5` through our
+configured Anthropic-compatible endpoint. They measure *the text*, so the number
 for a tools block includes the wire-format JSON overhead of the schemas themselves. The 26
 schemas are **my** rendering of the typed signatures in `handoffs/ngs-79-cua-interface.md`
 (that package is not on `main` yet), so they are representative, not byte-identical to what
-TERA-74 will ship.
+TERA-74 will ship. When `packages/cua` merges, `schemas.ts` should be replaced by a generator
+that reads the real exports, and the numbers re-run — the delta is the check on how
+representative they are.
 
 **Fixed cost per request, by representation:**
 
@@ -701,13 +710,29 @@ carry availability, so discovery never advertises a tool the placement cannot ru
 *here*. A model told "vault_fill exists" and given a refusal has to guess; a model that never
 sees it in the list does not.
 
-**One harness obligation the vault names and cannot enforce itself.** `FillResult.mayShowOnScreen`
-is `false` for a password or a CVC because a screenshot taken right after a fill can contain the
-value if the site fails to mask its own field. TERA-75 provide the flag; the loop must act on it.
-So: **the harness suppresses the next `screenshot`/`observeWindow({screenshot:true})` for the
-same window after a fill where `mayShowOnScreen` is false**, and refuses rather than quietly
-returns a stripped image, because a silently blank screenshot reads as a broken app. That is a
-cap, it belongs to this package, and it is written down here so it is not lost.
+**One harness obligation the vault names and cannot enforce itself — and my first version of this
+guard was too narrow.** `FillResult.mayShowOnScreen` is `false` for a password or a CVC because a
+capture taken after a fill can contain the value when the site fails to mask its own field.
+Blocking *the next* capture is not enough: if the page leaves the field visible, one refusal
+removes nothing, and a later turn is free to capture the same window and put the secret in
+context. The guard must be a state, not a counter:
+
+- A fill where `mayShowOnScreen` is false puts **that window** into a `sensitive` state on the
+  run. While it is sensitive, `screenshot`, `observeDesktop`, and `observeWindow({screenshot:true})`
+  for that window are refused with `unconfirmed`-style honesty — a refusal naming the reason and
+  the way out, never a blank image, because a silently stripped screenshot reads as a broken app.
+- The state clears on evidence, not on a call count: a successful `setValue`/`typeText` into that
+  field with `replace: true` (cleared), a navigation away from the host, a window close, or the
+  end of the run. Re-observing the **element tree** is always allowed — it is text, and a tree
+  read of a masked field returns a value of `••••`, not the secret.
+- A capture that is allowed anyway (a different window, or after the state cleared) is logged as
+  `screenshot.allowed` with the reason, so "why did the bot not see my screen" is answerable.
+- The same state also blocks `vault_fill` into a *different* field of the same window while one
+  is already sensitive, since a second fill on an unmasked page compounds the exposure.
+
+Two things this deliberately does not do: it does not try to detect masking in the image (that is
+a vision problem we have no honest measurement for, §1.3), and it does not rely on the site
+setting `type="password"` — the failure case is precisely a site that does not.
 
 **One seam risk in the shipped loop.** `run.ts` promotes a tool result into the user-visible
 message text when a tool ends the run (`if (!text.trim() && outcome.result.trim()) text =
@@ -717,38 +742,55 @@ that promotion applies only to results the tool marks as answer-shaped, not to e
 
 ### 7.8 What I will measure in phase 3
 
-**Arm A is the code in the repo, not a simulation of it.** As of PR #39, `executeRun` already
-owns a real tool loop: `tools?: RunTool[]`, a registry, assistant `toolCalls` replayed with their
-`tool` results, `MAX_TOOL_STEPS = 8`, and a throwing handler becoming a tool result. So arm A is
-that loop with the 26 CUA schemas plus the vault's five registered — the wall-of-schemas shape
-the product would ship if the loop landed without this work. The tasks arm A cannot attempt at
-all (no tool exists for it in the shipped tree, e.g. a big-table read) are marked
-*not attemptable*, not scored as failures, and that is stated in the table rather than hidden.
+**Arm A is PR #39 pinned at `c2c280c`, not the code on `main`.** Be precise about this, because a
+first draft of this section said "shipped" and that was wrong: `main`'s `executeRun` streams one
+model response and has no tool registry, no tool loop and no `tools` parameter at all — so no
+task that needs a tool can run from `main` today, and arm A is a *future baseline* rather than
+the current one. Concretely, the three arms are:
 
-Ten fixed tasks, both harnesses, same model, same prompts:
+| Arm | What it is | Run from |
+|---|---|---|
+| **A** | PR #39 at `c2c280c`: `executeRun` with `tools?: RunTool[]`, a registry, replayed `tool` results, `MAX_TOOL_STEPS = 8`; fed the 26 CUA schemas + the vault's 5 | branch `capy/encrypted-logins-cards-and` at that commit |
+| **B** | code mode: one `codemode` tool, index inline, results filtered in code | the phase-2 work |
+| **C** | arm A with the step cap removed | same branch, cap patched |
 
-| # | Task | Shape it covers | Arm A can attempt? |
+For anyone re-running this: arm A needs PR #39 merged or checked out, and needs the CUA tool
+wrappers registered into its registry — that adapter does not exist yet and is part of phase 2,
+so **arm A is not runnable from a clean `main` checkout** and the table below says which tasks
+each arm can attempt rather than implying all three are equally available. Tasks no arm can
+attempt (no tool exists for them in any tree, e.g. a big-table read) are marked
+*not attemptable*, not scored as failures.
+
+Ten fixed tasks, all arms, same model, same prompts, three repetitions, median:
+
+| # | Task | Shape it covers | Needs the CUA adapter? |
 |---|---|---|---|
-| 1 | "hello" and one follow-up | chat, no tools | yes |
-| 2 | launch an app and confirm its window opened | one computer action | yes |
-| 3 | read a page and report one value | one browser page | yes (readPage) |
-| 4 | sign in to a saved login | **vault fill** | yes (vault_fill) |
-| 5 | sum a 10,000-row table and report the top five | **a result too big for context** | no — not attemptable |
-| 6 | read a window and find one labelled button | **a tree that needs filtering** | yes (tree is returned whole) |
-| 7 | fill and submit a form with three fields | **many small calls in sequence** | yes (one call per turn, ≤8) |
-| 8 | look at the screen and describe it | **one screenshot** | yes |
-| 9 | a page behind a CAPTCHA | state, not success | yes (readPage reports gated) |
-| 10 | "where do I save a file with this app?" | **a tool it has to discover** | yes, if the index exists; no in arm A beyond the 31 schemas |
+| 1 | "hello" and one follow-up | chat, no tools | no — runs on `main` too |
+| 2 | launch an app and confirm its window opened | one computer action | yes (`launchApp`) |
+| 3 | read a page and report one value | one browser page | yes (`readPage`) |
+| 4 | sign in to a saved login | **vault fill** | yes (`vault_fill`, no CUA needed) |
+| 5 | sum a 10,000-row table and report the top five | **a result too big for context** | no — no tool exists in any arm; B can only do it once a table tool lands |
+| 6 | read a window and find one labelled button | **a tree that needs filtering** | yes (`observeWindow`) |
+| 7 | fill and submit a form with three fields | **many small calls in sequence** | yes (`runSteps` for B, one call per turn for A/C) |
+| 8 | look at the screen and describe it | **one screenshot** | yes (`screenshot`) |
+| 9 | a page behind a CAPTCHA | state, not success | yes (`readPage` reports gated) |
+| 10 | "where do I save a file with this app?" | **a tool it has to discover** | index-dependent: A/C pick from 31 schemas, B searches the index |
 
-Fixed seed, the same model for both arms, both arms run three times per task, median reported.
+Task 5 is the headline case and is the one no arm can currently run, because we have no table or
+spreadsheet tool — the 294,592-token figure in §1.2 is a measurement of the *shape* using
+synthetic rows, not a task either harness can attempt today. I would rather say that than
+quietly swap in a task that flatters the result; when a table tool lands, task 5 becomes the
+first thing measured against it.
+
+Fixed seed, the same model for all arms, three repetitions per task, median reported.
 Gated pages and CAPTCHAs are a live-service dependency: if the challenge does not appear on the
 day, task 9 is reported as *not exercised* rather than passed.
 
 Columns: input tokens (cached and uncached reported separately), output tokens, model turns,
 tool calls, wall-clock, cost. Three arms, because two would hide something:
 
-- **A — the shipped tree.** PR #39's `executeRun` loop with the CUA and vault schemas
-  registered. This is the "before".
+- **A — PR #39 at `c2c280c`.** Its `executeRun` loop with the CUA and vault schemas registered
+  (the adapter is phase-2 work). This is the "before".
 - **B — code mode.** One `codemode` tool, the index inline, results filtered in code.
 - **C — a wall-of-schemas loop with no code mode *and no step cap*.** Arm A caps at 8 steps, so
   on task 7 it fails for a reason that is not the harness's prompt cost. C removes the cap and
