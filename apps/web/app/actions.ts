@@ -26,7 +26,7 @@ import {
 } from "@terabot/providers";
 import type { DetailField, EndpointKind, ModelEndpointConfig, ModelEvent } from "@terabot/providers";
 import { isGatewayAvailable, serverEnv } from "@terabot/config";
-import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   connectComputerAccount as connectComputerAccountFor,
