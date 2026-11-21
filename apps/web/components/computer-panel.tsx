@@ -201,9 +201,11 @@ function ConnectForm({
   const [saving, setSaving] = useState(false);
 
   const hint =
-    provider === "boat"
-      ? "Paste a Boat key from boat.dev → Dashboard → API keys."
-      : "Paste an Instabox key from instabox.dev → Dashboard → API keys.";
+    provider === "agent37"
+      ? "Paste an Agent37 key from agent37.com → Dashboard → API keys. Its workspace needs a funded wallet."
+      : provider === "boat"
+        ? "Paste a Boat key from boat.dev → Dashboard → API keys."
+        : "Paste an Instabox key from instabox.dev → Dashboard → API keys.";
 
   async function save() {
     setSaving(true);

@@ -22,7 +22,9 @@ export async function ensureComputerPool(): Promise<void> {
   const env = serverEnv();
   await ensureManagedComputerAccounts({
     INSTABOX_API_KEY: env.INSTABOX_API_KEY,
+    AGENT37_API_KEY: env.AGENT37_API_KEY,
     INSTABOX_CAPACITY: env.INSTABOX_CAPACITY,
+    AGENT37_CAPACITY: env.AGENT37_CAPACITY,
   });
 
   if (isStubProviderEnabled()) await ensureFakeAccount();

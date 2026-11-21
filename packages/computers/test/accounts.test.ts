@@ -22,8 +22,12 @@ describe("managed providers an environment turns on", () => {
     expect(managedProviderSpecs({})).toEqual([]);
   });
 
-  it("reads the key independently, so a provider the deployment did not configure stays absent", () => {
+  it("reads each key independently, so one provider does not imply the other", () => {
     expect(managedProviderSpecs({ INSTABOX_API_KEY: "k" }).map((spec) => spec.provider)).toEqual(["instabox"]);
+    expect(managedProviderSpecs({ AGENT37_API_KEY: "k" }).map((spec) => spec.provider)).toEqual(["agent37"]);
+    expect(
+      managedProviderSpecs({ INSTABOX_API_KEY: "a", AGENT37_API_KEY: "b" }).map((spec) => spec.provider),
+    ).toEqual(["instabox", "agent37"]);
   });
 
   it("uses the documented capacity default and honours an override", () => {
@@ -37,7 +41,7 @@ describe("managed providers an environment turns on", () => {
   });
 
   it("names every provider it considered, so a caller can say what is absent", () => {
-    expect(MANAGED_PROVIDERS).toEqual(["instabox"]);
+    expect(MANAGED_PROVIDERS).toEqual(["instabox", "agent37"]);
   });
 });
 

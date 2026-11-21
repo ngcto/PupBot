@@ -164,6 +164,8 @@ export interface ComputerAccountView {
   used: number;
   /** True when the deployment provided it: no key to edit, no delete. */
   managed: boolean;
+  /** Who connected it; null on a managed row or one that predates the column. */
+  ownerUserId: string | null;
   hasKey: boolean;
   lastError: string | null;
   parkedUntil: string | null;

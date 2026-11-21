@@ -5,9 +5,21 @@ import type { ComputerAccountView, ProviderAvailability } from "./types.ts";
 /** Providers the product can put a bot on, named for a person. */
 export const PROVIDER_LABELS: Record<string, string> = {
   instabox: "Instabox",
+  agent37: "Agent37",
   boat: "Boat",
   fake: "Stub (development only)",
 };
+
+/**
+ * Providers a user may connect a key for.
+ *
+ * This is a capability list, not a catalogue: a provider appears once
+ * `createProviderFactory` can build it. Boat's key is documented and its row
+ * would be accepted, but its provider still throws "not implemented", so
+ * offering it would take a credential and then fail every allocation. Adding a
+ * provider here is the last step of implementing it.
+ */
+export const CONNECTABLE_PROVIDERS = ["instabox", "agent37"] as const;
 
 /**
  * The accounts this user may see: the deployment's managed rows, plus the ones
@@ -24,6 +36,7 @@ export async function listComputerAccounts(userId: string): Promise<ComputerAcco
       status: computerAccount.status,
       capacity: computerAccount.capacity,
       managed: computerAccount.managed,
+      ownerUserId: computerAccount.ownerUserId,
       lastError: computerAccount.lastError,
       parkedUntil: computerAccount.parkedUntil,
       hasKey: sql<boolean>`length(${computerAccount.encryptedCredential}) > 0`,
@@ -52,6 +65,7 @@ export async function listComputerAccounts(userId: string): Promise<ComputerAcco
     capacity: row.capacity,
     used: Number(row.used),
     managed: row.managed,
+    ownerUserId: row.ownerUserId,
     hasKey: row.hasKey,
     lastError: row.lastError,
     parkedUntil: row.parkedUntil ? row.parkedUntil.toISOString() : null,
@@ -62,15 +76,25 @@ export async function listComputerAccounts(userId: string): Promise<ComputerAcco
  * One entry per provider the product supports, with the two facts the UI needs
  * to avoid offering a control that cannot work.
  */
+/**
+ * One entry per provider a user may connect.
+ *
+ * A provider is offered only if the product can actually run a bot on it: Boat
+ * has no provider implementation yet, so offering its key would accept a
+ * credential and then fail every allocation. `canConnect` counts only accounts
+ * the *user* owns — a shared or legacy account visible to them must not consume
+ * their one slot.
+ */
 export async function providerAvailability(userId: string): Promise<ProviderAvailability[]> {
   const accounts = await listComputerAccounts(userId);
-  return ["instabox", "boat"].map((provider) => ({
+  const mine = accounts.filter((account) => account.ownerUserId === userId);
+  return CONNECTABLE_PROVIDERS.map((provider) => ({
     provider,
     label: PROVIDER_LABELS[provider] ?? provider,
     managed: accounts.some((account) => account.provider === provider && account.managed),
     // One account per provider per user. A user with their own row cannot add
     // another; they can still connect a different provider.
-    canConnect: !accounts.some((account) => account.provider === provider && !account.managed),
+    canConnect: !mine.some((entry) => entry.provider === provider),
   }));
 }
 
@@ -87,8 +111,8 @@ export interface ConnectAccountInput {
  */
 export async function connectComputerAccount(userId: string, input: ConnectAccountInput): Promise<{ id: string }> {
   const provider = input.provider.trim();
-  if (!Object.hasOwn(PROVIDER_LABELS, provider) || provider === "fake") {
-    throw new Error("that is not a computer provider");
+  if (!(CONNECTABLE_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new Error("that computer provider is not available yet");
   }
   const apiKey = input.apiKey.trim();
   if (!apiKey) throw new Error("a provider key is required");
@@ -147,5 +171,15 @@ export async function disconnectComputerAccount(userId: string, accountId: strin
     );
   }
 
-  await db.delete(computerAccount).where(and(eq(computerAccount.id, accountId), isNull(computerAccount.managed)));
+  await db
+    .delete(computerAccount)
+    .where(
+      and(
+        eq(computerAccount.id, accountId),
+        eq(computerAccount.ownerUserId, userId),
+        // `managed` is NOT NULL with a false default, so this must compare to
+        // false rather than test for null.
+        eq(computerAccount.managed, false),
+      ),
+    );
 }

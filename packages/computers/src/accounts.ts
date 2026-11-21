@@ -17,20 +17,22 @@ import { computerAccount, database, encryptSecret, newId } from "@terabot/db";
 export interface ManagedProviderSpec {
   provider: ManagedProvider;
   /** Environment variable that carries the deployment's key. */
-  keyEnv: "INSTABOX_API_KEY";
+  keyEnv: "INSTABOX_API_KEY" | "AGENT37_API_KEY";
   /** Human label, shown behind Advanced only. */
   label: string;
   /** How many boxes one account's plan allows at once. */
   capacity: number;
 }
 
-export type ManagedProvider = "instabox";
+export type ManagedProvider = "instabox" | "agent37";
 
-export const MANAGED_PROVIDERS: ManagedProvider[] = ["instabox"];
+export const MANAGED_PROVIDERS: ManagedProvider[] = ["instabox", "agent37"];
 
 export interface ManagedAccountEnv {
   INSTABOX_API_KEY?: string | undefined;
+  AGENT37_API_KEY?: string | undefined;
   INSTABOX_CAPACITY?: number | string | undefined;
+  AGENT37_CAPACITY?: number | string | undefined;
 }
 
 export interface EnsureManagedAccountsResult {
@@ -59,6 +61,14 @@ export function managedProviderSpecs(env: ManagedAccountEnv): ManagedProviderSpe
       keyEnv: "INSTABOX_API_KEY",
       label: "Terabot's Instabox",
       capacity: capacityOf(env.INSTABOX_CAPACITY, 1),
+    });
+  }
+  if (env.AGENT37_API_KEY) {
+    specs.push({
+      provider: "agent37",
+      keyEnv: "AGENT37_API_KEY",
+      label: "Terabot's Agent37",
+      capacity: capacityOf(env.AGENT37_CAPACITY, 1),
     });
   }
   return specs;

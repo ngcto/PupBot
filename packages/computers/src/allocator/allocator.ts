@@ -187,7 +187,7 @@ export class ComputerAllocator {
         provider: provider.name,
         externalId: attempt.ref.id,
         status: "awake",
-        metadata: { botId },
+        metadata: { [OWNER_TAG]: "1", botId },
         lastUsedAt: this.#now().toISOString(),
       });
       await this.store.bindComputer(botId, computer);
@@ -425,6 +425,11 @@ export class ComputerAllocator {
    * Reconcile on boot: adopt orphans whose bot still exists, destroy strays
    * whose bot is gone, and rebuild boxes the database thinks are alive but the
    * provider does not have.
+   *
+   * Cleanup is limited to machines this deployment can prove it created. A user
+   * may connect their own provider account, and that account's inventory is the
+   * user's: their other machines must never be adopted or deleted just because
+   * the account joined the pool. The marker is set on every box we provision.
    */
   async reconcile(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
     const summary: ReconcileSummary = { accounts: 0, adopted: 0, destroyed: 0, reprovisioned: 0, failed: 0 };
@@ -462,6 +467,8 @@ export class ComputerAllocator {
       const seen = new Set<string>();
 
       for (const box of boxes) {
+        // Somebody else's machine on a shared account: not ours to touch.
+        if (!isOurs(box)) continue;
         seen.add(box.id);
         const row = rows.find((computer) => computer.externalId === box.id);
         if (row) {
@@ -574,7 +581,7 @@ export class ComputerAllocator {
 
     while (true) {
       try {
-        const ref = await provider.provision({ metadata: { botId }, ttlSeconds: this.config.ttlSeconds });
+        const ref = await provider.provision({ metadata: { [OWNER_TAG]: "1", botId }, ttlSeconds: this.config.ttlSeconds });
         return { ok: true, ref };
       } catch (error) {
         const providerError = asProviderError(error);
@@ -868,6 +875,25 @@ export class ComputerAllocator {
 }
 
 type WakeOutcome = { ok: true } | { ok: false; code: ProviderErrorCode; message: string };
+
+/**
+ * The metadata key every box we create carries. Reconcile uses it to tell our
+ * machines from the ones already sitting on a provider account a user connected:
+ * that account's inventory is theirs, and deleting a machine we did not create
+ * would be destroying someone's work.
+ *
+ * It is a metadata label rather than a naming convention so both providers carry
+ * it unchanged — Instabox takes `metadata`, Agent37 echoes `metadata` back.
+ */
+export const OWNER_TAG = "terabot";
+
+/**
+ * True when a provider-reported machine was created by this deployment. A box
+ * with a `botId` counts too: that id only exists because we minted it.
+ */
+export function isOurs(box: { metadata?: Record<string, string> | undefined }): boolean {
+  return box.metadata?.[OWNER_TAG] === "1" || Boolean(box.metadata?.botId);
+}
 
 type InventoryEntry = ComputerRef & {
   name: string;
