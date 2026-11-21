@@ -5,7 +5,9 @@ import { createDatabase } from "./client.ts";
 
 loadEnv();
 
-const connectionString = process.env.DATABASE_URL;
+// Migrations take session-level advisory locks, so they run on a direct or
+// session-mode connection; the app itself uses the pooled one in DATABASE_URL.
+const connectionString = process.env.MIGRATE_DATABASE_URL || process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is not set");
 
 const handle = createDatabase(connectionString);

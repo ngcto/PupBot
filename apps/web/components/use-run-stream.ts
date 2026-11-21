@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MessageView } from "../lib/types.ts";
 
+export interface UploadedFile {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
 export interface StreamingMessage {
   runId: string;
   messageId: string | null;
@@ -123,10 +130,30 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
     };
   }, [initialActiveRunId, subscribe]);
 
+  const upload = useCallback(
+    async (file: File): Promise<UploadedFile> => {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch(`${apiUrl}/attachments`, {
+        method: "POST",
+        credentials: "include",
+        body,
+      });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(
+          detail?.error === "too_large" ? "That file is over the 4 MB limit." : "That file did not upload.",
+        );
+      }
+      return (await response.json()) as UploadedFile;
+    },
+    [apiUrl],
+  );
+
   const send = useCallback(
-    async (text: string, quote?: { messageId: string; text: string }) => {
+    async (text: string, quote?: { messageId: string; text: string }, files: UploadedFile[] = []) => {
       const trimmed = text.trim();
-      if (!trimmed || sending) return;
+      if ((!trimmed && files.length === 0) || sending) return;
       setSending(true);
       setError(null);
 
@@ -135,7 +162,11 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: trimmed, ...(quote ? { quote } : {}) }),
+          body: JSON.stringify({
+            text: trimmed,
+            ...(quote ? { quote } : {}),
+            ...(files.length > 0 ? { attachments: files } : {}),
+          }),
         });
 
         if (!response.ok) {
@@ -150,7 +181,14 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
           role: "user",
           parts: [
             ...(quote ? [{ type: "quote" as const, messageId: quote.messageId, text: quote.text }] : []),
-            { type: "text", text: trimmed },
+            ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
+            ...files.map((file) => ({
+              type: "file" as const,
+              attachmentId: file.id,
+              name: file.name,
+              size: file.size,
+              mime: file.mime,
+            })),
           ],
           status: "complete",
           createdAt: new Date().toISOString(),
@@ -166,5 +204,5 @@ export function useConversationStream({ conversationId, apiUrl, initialMessages,
     [apiUrl, appendMessage, conversationId, sending, subscribe],
   );
 
-  return { messages, streaming, error, send, sending, dismissError: () => setError(null) };
+  return { messages, streaming, error, send, upload, sending, dismissError: () => setError(null) };
 }

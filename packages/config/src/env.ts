@@ -11,6 +11,13 @@ const serverSchema = z.object({
   BETTER_AUTH_URL: url.default("http://localhost:3000"),
   API_URL: url.default("http://localhost:8787"),
   API_PORT: z.coerce.number().int().positive().default(8787),
+  /**
+   * Where a run executes. `queue` hands the run to the pg-boss worker;
+   * `inline` runs it inside the API request on a long-lived function.
+   */
+  RUN_MODE: z.enum(["queue", "inline"]).default("queue"),
+  /** Postgres pool ceiling per process. Serverless needs this to stay small. */
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   STUB_PROVIDER: z
     .enum(["true", "false"])
     .default("true")
@@ -26,6 +33,15 @@ const serverSchema = z.object({
   OPENAI_API_KEY: optionalSecret,
   ANTHROPIC_API_KEY: optionalSecret,
   MODELS_DEV_URL: url.default("https://models.dev/api.json"),
+  // Vercel AI Gateway: OpenAI-compatible, keyless on a Vercel deployment
+  // because the deployment's OIDC token authenticates each request.
+  AI_GATEWAY_BASE_URL: url.default("https://ai-gateway.vercel.sh/v1"),
+  AI_GATEWAY_MODEL: z.string().min(1).default("openai/gpt-5.4-mini"),
+  AI_GATEWAY_API_KEY: optionalSecret,
+  /** Injected by Vercel at runtime; auto-refreshed, never committed. */
+  VERCEL_OIDC_TOKEN: optionalSecret,
+  /** Marks a Vercel deployment, so OIDC is known to be available. */
+  VERCEL: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
@@ -47,6 +63,20 @@ export function serverEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {
 
 export function resetEnvCache(): void {
   cached = undefined;
+}
+
+/**
+ * AI Gateway needs a credential: the deployment's OIDC token on Vercel, or an
+ * explicit key elsewhere. Without one we never hand out a gateway endpoint,
+ * because a keyless request would fail at the first message instead of at
+ * setup time.
+ */
+export function gatewayCredential(env: ServerEnv = serverEnv()): string | undefined {
+  return env.AI_GATEWAY_API_KEY ?? env.VERCEL_OIDC_TOKEN;
+}
+
+export function isGatewayAvailable(env: ServerEnv = serverEnv()): boolean {
+  return Boolean(gatewayCredential(env)) || Boolean(env.VERCEL);
 }
 
 export function isStubProviderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

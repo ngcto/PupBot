@@ -12,6 +12,7 @@ import {
   usageEvent,
 } from "@pupbot/db";
 import type { Database, MessagePart } from "@pupbot/db";
+import { gatewayCredential, serverEnv } from "@pupbot/config";
 import type { ModelEndpointConfig, ModelGateway } from "@pupbot/providers";
 import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
@@ -85,6 +86,13 @@ class EventLog {
   }
 }
 
+function gatewayKeyFor(baseUrl: string): string | undefined {
+  const env = serverEnv();
+  const normalise = (value: string) => value.replace(/\/+$/, "");
+  if (normalise(baseUrl) !== normalise(env.AI_GATEWAY_BASE_URL)) return undefined;
+  return gatewayCredential(env);
+}
+
 function textParts(text: string): MessagePart[] {
   return [{ type: "text", text }];
 }
@@ -107,6 +115,9 @@ async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<Res
       apiKey = undefined;
     }
   }
+  // The AI Gateway endpoint ships with no stored key: the deployment's own
+  // OIDC token (or an explicit AI_GATEWAY_API_KEY) authenticates the request.
+  apiKey ??= gatewayKeyFor(endpoint.baseUrl);
 
   return {
     label: endpoint.label,

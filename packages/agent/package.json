@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@pupbot/config": "workspace:*",
     "@pupbot/db": "workspace:*",
     "@pupbot/providers": "workspace:*",
     "drizzle-orm": "^0.45.4"

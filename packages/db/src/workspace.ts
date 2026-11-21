@@ -1,4 +1,4 @@
-import { serverEnv } from "@pupbot/config";
+import { isGatewayAvailable, serverEnv } from "@pupbot/config";
 import { and, eq } from "drizzle-orm";
 import { database } from "./client.ts";
 import { newId } from "./ids.ts";
@@ -6,8 +6,7 @@ import { botSection, modelCatalog, modelEndpoint, workspace } from "./schema.ts"
 
 /**
  * In development a fresh workspace gets the local stub endpoint, so a new user
- * can chat immediately with no key. Production workspaces start empty and the
- * user adds an endpoint in Settings › Models.
+ * can chat immediately with no key.
  */
 async function seedStubEndpoint(workspaceId: string): Promise<void> {
   const env = serverEnv();
@@ -50,6 +49,34 @@ async function seedStubEndpoint(workspaceId: string): Promise<void> {
 }
 
 /**
+ * No stored key: the AI Gateway endpoint is authenticated by the deployment's
+ * OIDC token, so a new account can chat as soon as it makes a bot.
+ */
+async function seedGatewayEndpoint(workspaceId: string): Promise<void> {
+  const env = serverEnv();
+  await database()
+    .insert(modelEndpoint)
+    .values({
+      id: newId(),
+      workspaceId,
+      kind: "openai-chat",
+      label: "Vercel AI Gateway",
+      baseUrl: env.AI_GATEWAY_BASE_URL,
+      modelId: env.AI_GATEWAY_MODEL,
+      catalogMatch: "unmatched",
+    });
+}
+
+async function seedDefaultEndpoint(workspaceId: string): Promise<void> {
+  const env = serverEnv();
+  if (env.STUB_PROVIDER && env.NODE_ENV !== "production") {
+    await seedStubEndpoint(workspaceId);
+    return;
+  }
+  if (isGatewayAvailable(env)) await seedGatewayEndpoint(workspaceId);
+}
+
+/**
  * Every user gets exactly one default workspace. Called after sign-up and on
  * every session resolve, so an interrupted signup still ends up with one.
  */
@@ -65,8 +92,8 @@ export async function ensureWorkspace(userId: string, userName = "You") {
     .returning();
 
   if (created) {
-    await seedStubEndpoint(created.id).catch((error) => {
-      console.warn("[workspace] could not seed the stub endpoint:", error);
+    await seedDefaultEndpoint(created.id).catch((error) => {
+      console.warn("[workspace] could not seed a default endpoint:", error);
     });
     return created;
   }

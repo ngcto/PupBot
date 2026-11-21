@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/app.ts"
+  },
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "build": "tsup src/index.ts --format esm --clean --sourcemap",
@@ -17,6 +20,7 @@
     "@pupbot/config": "workspace:*",
     "@pupbot/db": "workspace:*",
     "@pupbot/providers": "workspace:*",
+    "@pupbot/storage": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.19",
     "pg-boss": "^12.38.2",

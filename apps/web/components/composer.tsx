@@ -9,13 +9,24 @@ import {
   VoiceIcon,
 } from "@hugeicons/core-free-icons";
 import { Avatar } from "@pupbot/avatars/react";
-import { Button, MenuItem, MenuPopup, MenuRoot, MenuTrigger, Tooltip, cn, toast } from "@pupbot/ui";
+import {
+  Button,
+  MenuItem,
+  MenuPopup,
+  MenuRoot,
+  MenuTrigger,
+  Tooltip,
+  cn,
+  toast,
+} from "@pupbot/ui";
 import { useEffect, useRef, useState } from "react";
+import type { UploadedFile } from "./use-run-stream.ts";
 import type { BotView } from "../lib/types.ts";
 
 interface ComposerProps {
   bot: BotView;
-  onSend: (text: string, quote?: { messageId: string; text: string }) => void;
+  onSend: (text: string, quote?: { messageId: string; text: string }, files?: UploadedFile[]) => void;
+  onAttach: (file: File) => Promise<UploadedFile>;
   reply: { messageId: string; text: string } | null;
   onCancelReply: () => void;
   onGiveComputer: () => void;
@@ -24,9 +35,39 @@ interface ComposerProps {
 
 const DRAFT_PREFIX = "pupbot:draft:";
 
-export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pending }: ComposerProps) {
+export function Composer({
+  bot,
+  onSend,
+  onAttach,
+  reply,
+  onCancelReply,
+  onGiveComputer,
+  pending,
+}: ComposerProps) {
   const [value, setValue] = useState("");
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+
+  const attach = async (picked: FileList | null) => {
+    const chosen = Array.from(picked ?? []);
+    if (chosen.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of chosen) {
+        try {
+          const uploaded = await onAttach(file);
+          setFiles((existing) => [...existing, uploaded]);
+        } catch (error) {
+          toast(error instanceof Error ? error.message : "That file did not upload.");
+        }
+      }
+    } finally {
+      setUploading(false);
+      if (picker.current) picker.current.value = "";
+    }
+  };
 
   useEffect(() => {
     setValue(window.localStorage.getItem(`${DRAFT_PREFIX}${bot.id}`) ?? "");
@@ -68,12 +109,13 @@ export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pe
     );
   }
 
-  const canSend = value.trim().length > 0;
+  const canSend = value.trim().length > 0 || files.length > 0;
 
   const submit = () => {
-    if (!canSend) return;
-    onSend(value, reply ?? undefined);
+    if (!canSend || uploading) return;
+    onSend(value, reply ?? undefined, files);
     setValue("");
+    setFiles([]);
     onCancelReply();
     area.current?.focus();
   };
@@ -101,8 +143,38 @@ export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pe
           </div>
         ) : null}
 
+        {files.length > 0 || uploading ? (
+          <div className="flex flex-wrap gap-1.5 border-b border-menu px-3 py-2" data-testid="attachment-chips">
+            {files.map((file) => (
+              <span
+                key={file.id}
+                className="flex items-center gap-1.5 rounded-pill bg-raised-2 py-1 pl-2.5 pr-1.5 text-sm text-ink-secondary"
+              >
+                <span className="max-w-[220px] truncate">{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  className="text-ink-faint hover:text-ink"
+                  onClick={() => setFiles((existing) => existing.filter((entry) => entry.id !== file.id))}
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} size={13} />
+                </button>
+              </span>
+            ))}
+            {uploading ? <span className="text-sm text-ink-faint">Uploading…</span> : null}
+          </div>
+        ) : null}
+
         <div className="flex items-end gap-2.5 px-2 py-2">
-          <RowTools bot={bot} />
+          <RowTools bot={bot} onAttach={() => picker.current?.click()} />
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            data-testid="file-input"
+            className="hidden"
+            onChange={(event) => void attach(event.target.files)}
+          />
           <textarea
             ref={area}
             rows={1}
@@ -149,7 +221,7 @@ export function Composer({ bot, onSend, reply, onCancelReply, onGiveComputer, pe
   );
 }
 
-function RowTools({ bot }: { bot: BotView }) {
+function RowTools({ bot, onAttach }: { bot: BotView; onAttach: () => void }) {
   return (
     <div className="flex items-center gap-1.5">
       <MenuRoot>
@@ -163,10 +235,7 @@ function RowTools({ bot }: { bot: BotView }) {
           </button>
         </MenuTrigger>
         <MenuPopup align="start" side="top">
-          <MenuItem onClick={() => toast("File uploads arrive with storage in P2.")}>
-            Attach files
-            <span className="ml-auto text-sm text-ink-faint">P2</span>
-          </MenuItem>
+          <MenuItem onClick={onAttach}>Attach files</MenuItem>
           <MenuItem onClick={() => toast("Teach a task arrives with screen recording in P2.")}>
             Teach a task
             <span className="ml-auto text-sm text-ink-faint">P2</span>

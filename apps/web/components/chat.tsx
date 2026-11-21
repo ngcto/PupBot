@@ -38,7 +38,7 @@ export function Chat({
   onGiveComputer: () => void;
 }) {
   const router = useRouter();
-  const { messages, streaming, error, send, sending, dismissError } = useConversationStream({
+  const { messages, streaming, error, send, upload, sending, dismissError } = useConversationStream({
     conversationId: bot.conversationId,
     apiUrl,
     initialMessages,
@@ -130,7 +130,8 @@ export function Chat({
 
       <Composer
         bot={bot}
-        onSend={(text, quote) => send(text, quote)}
+        onSend={(text, quote, files) => send(text, quote, files)}
+        onAttach={upload}
         reply={reply}
         onCancelReply={() => setReply(null)}
         onGiveComputer={onGiveComputer}

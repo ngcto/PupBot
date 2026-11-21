@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -12,6 +13,10 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
 
 /* ─────────────────────────────── enums ─────────────────────────────── */
 
@@ -429,6 +434,18 @@ export const attachment = pgTable(
   (t) => [index("attachment_message_idx").on(t.messageId)],
 );
 
+/**
+ * Attachment bytes when no S3-compatible bucket is configured. The key is the
+ * attachment id, so the bytes cascade with the row that names them.
+ */
+export const attachmentBlob = pgTable("attachment_blob", {
+  attachmentId: uuid("attachment_id")
+    .primaryKey()
+    .references(() => attachment.id, { onDelete: "cascade" }),
+  bytes: bytea("bytes").notNull(),
+  createdAt: createdAt(),
+});
+
 export const usageEvent = pgTable(
   "usage_event",
   {
@@ -469,5 +486,6 @@ export const schema = {
   skill,
   routine,
   attachment,
+  attachmentBlob,
   usageEvent,
 };

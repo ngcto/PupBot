@@ -1,0 +1,31 @@
+import { createApp } from "@pupbot/api";
+import { Hono } from "hono";
+import { after } from "next/server";
+
+// One origin for the app and its API: the session cookie is then first-party,
+// there is no cross-site CORS, and a run executes in this same long-lived
+// function (Fluid compute, up to 300s on Hobby). `apps/api` still runs on its
+// own as a Node server for the queue-worker deployment.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const app = new Hono().route("/api/pupbot", createApp());
+
+type WaitUntil = (promise: Promise<unknown>) => void;
+
+function executionContext(): { waitUntil: WaitUntil; passThroughOnException: () => void } {
+  return {
+    // Hono reads this through `c.executionCtx`, and the inline run hands its
+    // promise to `waitUntil` so the run survives past the POST response.
+    waitUntil: (promise) => after(() => promise),
+    passThroughOnException: () => {},
+  };
+}
+
+async function handle(request: Request): Promise<Response> {
+  const context = executionContext();
+  return app.fetch(request, {}, context as never);
+}
+
+export { handle as GET, handle as POST, handle as PATCH, handle as DELETE, handle as PUT, handle as OPTIONS };
