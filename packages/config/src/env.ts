@@ -74,11 +74,23 @@ const serverSchema = z.object({
   VERCEL_OIDC_TOKEN: optionalSecret,
   /** Marks a Vercel deployment, so OIDC is known to be available. */
   VERCEL: z.string().optional(),
+  /* ────────────────────────────── billing ────────────────────────────── */
   /**
    * Comma-separated emails that are the Owner: never gated, always able to
    * configure the deployment. The only way `user.role` becomes `owner`.
    */
   OWNER_EMAILS: optionalSecret,
+  /** Polar organization access token: Dashboard → Settings → Developers. */
+  POLAR_ACCESS_TOKEN: optionalSecret,
+  /** Polar webhook signing secret (`whsec_…`), for the endpoint on this app. */
+  POLAR_WEBHOOK_SECRET: optionalSecret,
+  /** `production` (default) or `sandbox`; the sandbox takes test payments. */
+  POLAR_SERVER: z.enum(["production", "sandbox"]).default("production"),
+  /**
+   * Plans as JSON: `[{"id":"pro","label":"Pro","productId":"<polar product id>"}]`.
+   * Prices live on the Polar product, never here.
+   */
+  POLAR_PLANS: optionalSecret,
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
