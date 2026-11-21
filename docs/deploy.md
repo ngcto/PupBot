@@ -57,8 +57,10 @@ pnpm db:migrate     # uses MIGRATE_DATABASE_URL when set (session/direct connect
 pnpm db:seed        # demo user, bots, conversation
 ```
 
-`pnpm db:migrate` takes a session-level advisory lock, so point `MIGRATE_DATABASE_URL` at the
-session pooler (port 5432) or the direct connection when the transaction pooler refuses it.
+Point `MIGRATE_DATABASE_URL` at the session pooler (port 5432) or the direct connection: the DDL
+here swaps an enum type, and a transaction-mode pooler is the wrong place to discover otherwise.
+Drizzle's migrator takes no advisory lock, so it does not serialize concurrent runs — run one
+migration at a time.
 
 ## Verification
 
@@ -85,10 +87,12 @@ rename (#4). Marketing (#7) is a separate app by design and does not belong in t
 either way.
 
 The hosted database needs its migrations run before or with that redeploy, and one entry there is a
-repair rather than a feature: `0007_model_gateway_backfill` completes the three migrations whose
-timestamps put them behind rows the database had already recorded, so a plain `pnpm db:migrate`
-against it leaves the schema complete. Run it with the session-mode connection string, since
-migrations take advisory locks:
+repair rather than a feature: `0007_model_gateway_backfill` restates every object that this
+database's recorded history skips, so a plain `pnpm db:migrate` against it leaves the schema
+complete. It covers both skips — main's `0003`-`0005`, whose timestamps sit behind the recorded
+rows, and `0002_huge_captain_flint`, which the hosting history never carried, leaving
+`computer_lease`, the `waking` status and the `bot.computer_*` columns absent while the app reads
+them on every page load. Run it against the session or direct connection:
 
 ```bash
 MIGRATE_DATABASE_URL='<session-mode connection string>' pnpm db:migrate
