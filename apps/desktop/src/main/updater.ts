@@ -1,6 +1,9 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { app, dialog, type BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
 import { APP_NAME, ENV, type DesktopConfig } from "../shared/config";
+import { resolveUpdateSource } from "../shared/updates";
 import { log } from "./log";
 
 const { autoUpdater } = electronUpdater;
@@ -27,10 +30,16 @@ export function startUpdater(options: { config: DesktopConfig; parentWindow: () 
   let interval: NodeJS.Timeout | undefined;
   let manualCheck = false;
 
-  const feedConfigured = config.updateFeedUrl !== undefined;
-  if (feedConfigured) {
-    autoUpdater.setFeedURL({ provider: "generic", url: config.updateFeedUrl as string });
-  }
+  // A packaged build reads the feed electron-builder embedded at build time; a
+  // runtime TERABOT_UPDATE_FEED_URL overrides it.
+  const source = resolveUpdateSource({
+    runtimeFeedUrl: config.updateFeedUrl,
+    isPackaged: app.isPackaged,
+    bundledFeedPath: process.resourcesPath ? join(process.resourcesPath, "app-update.yml") : undefined,
+    fileExists: existsSync,
+  });
+  const feedConfigured = source.kind !== "none";
+  if (source.kind === "runtime") autoUpdater.setFeedURL({ provider: "generic", url: source.feedUrl });
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
@@ -82,7 +91,10 @@ export function startUpdater(options: { config: DesktopConfig; parentWindow: () 
     }
     if (!feedConfigured) {
       if (manual) {
-        showMessage("No update feed configured", `Set ${ENV.updateFeedUrl} to the folder that holds the release metadata.`);
+        showMessage(
+          "No update feed configured",
+          `Build with ${ENV.updateFeedUrl} so the app carries a feed, or set it at launch to point this copy somewhere else.`,
+        );
       }
       return;
     }

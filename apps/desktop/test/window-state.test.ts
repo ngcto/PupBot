@@ -84,3 +84,26 @@ describe("sanitizeWindowState", () => {
     });
   });
 });
+
+describe("sanitizeWindowState, title bar reachability", () => {
+  it("drops a position whose title bar sits above the display", () => {
+    // A monitor above the primary was removed: the body still clips the screen
+    // but the title bar is 700px above it and cannot be grabbed.
+    const state = sanitizeWindowState({ x: 100, y: -700, width: 1200, height: 800 }, [DISPLAY]);
+    expect(state.x).toBeUndefined();
+    expect(state.y).toBeUndefined();
+  });
+
+  it("drops a position with only a sliver of title bar showing", () => {
+    expect(sanitizeWindowState({ x: 100, y: -20, width: 1200, height: 800 }, [DISPLAY]).y).toBeUndefined();
+  });
+
+  it("keeps a window slid slightly above the top edge", () => {
+    expect(sanitizeWindowState({ x: 100, y: -10, width: 1200, height: 800 }, [DISPLAY]).y).toBe(-10);
+  });
+
+  it("keeps a window whose bottom half runs off the display", () => {
+    // The title bar is reachable, so the window can be dragged back up.
+    expect(sanitizeWindowState({ x: 100, y: 900, width: 1200, height: 800 }, [DISPLAY])).toMatchObject({ y: 900 });
+  });
+});

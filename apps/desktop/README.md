@@ -40,7 +40,7 @@ dialog and quits rather than opening a half-configured window.
 | `TERABOT_ALLOWED_ORIGINS` | — | Extra origins the window may navigate to, comma separated. Only for a product that genuinely serves itself from a second origin |
 | `TERABOT_PERMISSIONS` | — | Electron permissions granted **to the product origin**, comma separated (`notifications`, `media`, …). Empty denies all |
 | `TERABOT_AUTO_UPDATE` | off | `1`/`true` makes a packaged build check the feed on launch and every 6 h |
-| `TERABOT_UPDATE_FEED_URL` | — | `electron-updater` generic feed, e.g. `https://updates.terabot.ai/desktop` |
+| `TERABOT_UPDATE_FEED_URL` | — | `electron-updater` generic feed, e.g. `https://updates.terabot.ai/desktop`. At launch it overrides the feed a release build embedded |
 | `TERABOT_REGISTER_PROTOCOL` | off in dev | Register `terabot://` with the OS while developing. Always on in a packaged build |
 
 Examples:
@@ -160,9 +160,11 @@ pnpm --filter @terabot/desktop package:linux   # AppImage + deb, x64 and arm64
 ```
 
 Artifacts land in `apps/desktop/release/` (git-ignored). Set `TERABOT_UPDATE_FEED_URL` on the build
-to also emit the update metadata (`latest*.yml`); with no feed the build produces plain installers
-and no release metadata. `TERABOT_AUTO_UPDATE` turns automatic checks on at runtime; the Help menu
-can always check manually. Nothing downloads or installs without a packaged build.
+to also emit the update metadata (`latest*.yml`) and embed the feed in the bundle
+(`app-update.yml`); with no feed the build produces plain installers and no release metadata. An
+installed build uses the feed it was built with, and a runtime `TERABOT_UPDATE_FEED_URL` overrides it
+for a copy pointed at staging. `TERABOT_AUTO_UPDATE` turns automatic checks on at runtime; the Help
+menu can always check manually. Nothing downloads or installs without a packaged build.
 
 Signing, notarisation and what Ng must supply are in [docs/release.md](docs/release.md).
 

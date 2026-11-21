@@ -31,8 +31,11 @@ plain static HTTPS host is enough (GitHub Releases works too if we switch `provi
 The feed must be reachable over HTTPS; `electron-updater` verifies the sha512 in the metadata but
 the generic provider has no separate signature, so the host itself must be trusted.
 
-`TERABOT_AUTO_UPDATE=1` at runtime makes a packaged build check on launch and every six hours; the
-default is off, and *Help → Check for Updates…* always works manually. macOS updates require a
+With the variable set, the feed URL is also embedded in the bundle, so an installed build reads it
+without anyone exporting the variable again; a runtime `TERABOT_UPDATE_FEED_URL` overrides the
+embedded one (useful for a staging copy). `TERABOT_AUTO_UPDATE=1` at runtime makes a packaged build
+check on launch and every six hours; the default is off, and *Help → Check for Updates…* always works
+manually. macOS updates require a
 signed app; Linux auto-update works for AppImage only (`.deb` users reinstall through their package
 manager).
 
