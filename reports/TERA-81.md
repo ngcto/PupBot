@@ -27,7 +27,7 @@ this machine on 2026-11-21, and the command or script is reproducible from the n
 
 1. Our tool surface is 26 functions today and grows. As schemas it costs **3,546 tokens per
    request** (mine). As an index it costs **1,759** in full and **1,255** without result notes,
-   as names only **87**, and a code-mode tool with a one-line description **46**.
+   as names only **81**, and a code-mode tool with a one-line description **46**.
 2. The bigger number is not the schemas, it is results: a 10,000-row read is **294,592
    tokens** through the model and **149** filtered in code (mine). That ratio is the whole
    argument for code mode and it is about 2,000×, not 2×.
@@ -91,7 +91,7 @@ representative they are.
 | 26 schemas, OpenAI Responses `tools` block | 3,650 |
 | pi-style `declare const tools` TypeScript declarations | 3,984 |
 | Tool index: name + description + `when[]` + cost, no result notes | **1,200** |
-| Tool index: names only | **87** |
+| Tool index: names only | **81** |
 | One `codemode` tool, one-line description (in a real `tools` block) | **46** |
 | One `codemode` tool + the index, no per-tool result notes | **1,255** |
 | One `codemode` tool + the index, 10 load-bearing result notes | **1,584** |

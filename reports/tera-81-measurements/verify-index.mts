@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
-import { renderIndex, availableIndex } from "/workspace/terabot/packages/tools/src/index.ts";
+
+// Renders the CUA index through the product renderer and prices it through a real
+// `tools` block. Run from this directory; needs ANTHROPIC_API_KEY and
+// ANTHROPIC_BASE_URL.
+import { renderIndex } from "../../packages/tools/src/index.ts";
 
 const KEY = process.env.ANTHROPIC_API_KEY!, BASE = process.env.ANTHROPIC_BASE_URL!;
 async function tokens(body: any): Promise<number> {
@@ -14,9 +18,12 @@ async function tokens(body: any): Promise<number> {
 }
 
 // Map the CUA tool-index data (TERA-74's) into our entry shape, without copying it into our package.
-const raw = JSON.parse(readFileSync("/workspace/terabot/reports/tera-81-measurements/index.json", "utf8"));
+const raw = JSON.parse(readFileSync(new URL("./index.json", import.meta.url), "utf8"));
 const entries = raw.map((e: any) => ({
-  name: e.name.replace(/[A-Z]/g, (c: string) => "_" + c.toLowerCase()),
+  // Exactly what the product does: `toIdentifier` leaves camelCase alone, so the
+  // rendered name is `observeWindow`, not `observe_window`. Rendering a different
+  // name here would price something the model never sees.
+  name: e.name,
   description: e.description, when: e.when, category: e.category, cost: e.cost,
   ...(e.resultNote ? { resultNote: e.resultNote } : {}),
 }));

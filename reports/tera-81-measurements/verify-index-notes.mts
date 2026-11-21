@@ -8,7 +8,7 @@ async function tokens(body: any): Promise<number> {
   if (j.input_tokens === undefined) throw new Error(JSON.stringify(j).slice(0,300));
   return j.input_tokens;
 }
-const raw = JSON.parse(readFileSync("/workspace/terabot/reports/tera-81-measurements/index.json", "utf8"));
+const raw = JSON.parse(readFileSync(new URL("./index.json", import.meta.url), "utf8"));
 const withNotes = raw.map((e: any) => `- ${e.name} (${e.cost}) — ${e.description} Use when: ${e.when.join("; ")}.${e.resultNote ? " " + e.resultNote : ""}`).join("\n");
 const withoutNotes = raw.map((e: any) => `- ${e.name} (${e.cost}) — ${e.description} Use when: ${e.when.join("; ")}.`).join("\n");
 // a middle option: notes only where the note prevents a wrong action
