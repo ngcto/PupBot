@@ -277,7 +277,10 @@ function fillMessage(input: {
     case "suspected_noop":
       return `Tried to fill ${what} from "${label}" into ${host}, but nothing changed on the page. Observe again and re-aim — the element may have moved.${evidence}`;
     default:
-      return `The fill was refused and nothing was typed${outcome.refusalCode ? ` (${outcome.refusalCode})` : ""}. Observe the page again and re-aim at the field, then retry.`;
+      // A refusal carries a sink's own instruction when it has one. Dropping it is how a
+      // refusal that says "observe the field first" reaches a model as "re-aim and retry",
+      // which is a different and worse instruction.
+      return `The fill was refused and nothing was typed${outcome.refusalCode ? ` (${outcome.refusalCode})` : ""}.${evidence || " Observe the page again and re-aim at the field, then retry."}`;
   }
 }
 
