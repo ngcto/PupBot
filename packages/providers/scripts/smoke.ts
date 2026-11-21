@@ -7,6 +7,7 @@
  * skipped, never faked. Nothing is committed and no key is ever printed.
  */
 import { loadEnv } from "@terabot/config/load-env";
+import { BUILTIN_PROVIDERS, builtinProvider, endpointConfigForRow } from "../src/index.ts";
 import { createGateway } from "../src/index.ts";
 import type { EndpointKind, ModelEndpointConfig, ModelEvent, StreamRequest } from "../src/types.ts";
 
@@ -24,9 +25,49 @@ function env(name: string): string | undefined {
   return value ? value : undefined;
 }
 
+/**
+ * The key each built-in reads from the environment, and the model to call. A
+ * built-in with no key is skipped and named, never faked — that is how this
+ * script reports which providers are fixture-only in a given environment.
+ */
+const BUILTIN_ENV: Record<string, { key: string; model: string }> = {
+  openrouter: { key: "OPENROUTER_API_KEY", model: "OPENROUTER_MODEL" },
+  "opencode-go": { key: "OPENCODE_GO_API_KEY", model: "OPENCODE_GO_MODEL" },
+  "vercel-ai-gateway": { key: "AI_GATEWAY_API_KEY", model: "AI_GATEWAY_MODEL" },
+  "ollama-cloud": { key: "OLLAMA_API_KEY", model: "OLLAMA_MODEL" },
+};
+
 function cases(): { configured: Case[]; skipped: string[] } {
   const configured: Case[] = [];
   const skipped: string[] = [];
+
+  for (const provider of BUILTIN_PROVIDERS) {
+    const names = BUILTIN_ENV[provider.id];
+    if (!names) continue;
+    const apiKey = env(names.key);
+    const model = env(names.model);
+    if (!apiKey) {
+      skipped.push(`${provider.id} (set ${names.key} and ${names.model})`);
+      continue;
+    }
+    if (!model) {
+      skipped.push(`${provider.id} (set ${names.model})`);
+      continue;
+    }
+    // Built through the same resolver the app uses, so the smoke test also
+    // proves the table's URL and the provider's required headers.
+    configured.push({
+      kind: provider.kind,
+      endpoint: endpointConfigForRow({
+        kind: builtinProvider(provider.id)!.kind,
+        baseUrl: builtinProvider(provider.id)!.baseUrl,
+        builtinId: provider.id,
+        model,
+        apiKey,
+        session: "terabot-smoke",
+      }),
+    });
+  }
 
   const openaiKey = env("OPENAI_API_KEY");
   const openaiBase = env("OPENAI_BASE_URL") ?? "https://api.openai.com/v1";
