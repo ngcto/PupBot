@@ -67,3 +67,27 @@ Symmetric silhouettes only (`avatars.json`, home-44): no dog heads, no lopsided 
 - **One run at a time per worker process** (`batchSize: 1`). Correctness of interrupt-then-next comes
   from that; horizontal scaling needs a per-conversation lock, which lands with the full harness.
 - **`bot.unread` is an extra column** not in the spec's table — the sidebar's unread dot needs it.
+
+## Mobile (apps/mobile, v1)
+
+The phone is a client of the same API, and v1 only claims what a phone is good for.
+
+- **Replies render as plain text.** The web app's markdown pipeline (`react-markdown` + GFM +
+  syntax highlighting) has no mobile counterpart in this phase, so a table or code fence arrives as
+  its source. Every other part of the message model (quote, file, image parts) is carried by the
+  shared client and rendered by the quote block only.
+- **No bot creation, instructions editing or endpoint form.** Those are web actions; the phone
+  shows what is configured and edits the avatar (shape from the registry, colour from the 11-swatch
+  palette). The accent is recomputed from the colour on the server, so the bubble tint still follows
+  the product rule.
+- **No computer provisioning.** A bot without a computer opens with the reason and a link to its
+  details; binding one stays on the web app. The "one-click fix" from the web composer is not
+  duplicated here yet.
+- **Liveness is polling on the list, streaming in the chat.** The bots list re-reads `/m/bots` every
+  5 s while it is focused (a phone list has no SSE fan-out), while a chat reply is read off
+  `GET /runs/:id/events` through `expo/fetch` and the shared SSE reader — no `EventSource`, which
+  React Native does not have.
+- **Untested on a device.** No iOS or Android simulator is available on the build machine
+  (no KVM), so the app is verified by typecheck, unit tests, a live Node run of the shared client
+  against the real API + worker, and `expo export` bundles for both platforms. Touch behaviour and
+  layout on a real screen remain unverified.

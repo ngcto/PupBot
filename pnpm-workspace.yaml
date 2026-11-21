@@ -2,6 +2,9 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  '@pupbot/avatars>react': 19.3.0
+
 minimumReleaseAgeExclude:
   - "@better-auth/core@1.7.27"
   - "@better-auth/drizzle-adapter@1.7.27"
