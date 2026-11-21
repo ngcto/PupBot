@@ -56,11 +56,10 @@ export type AppState = "available" | "pending" | "connected" | "failed";
 /**
  * One app row as the browser sees it. Declared here, beside the other view types,
  * so a client component never imports the server module that holds the API key.
- */
-/**
- * A toolkit the project already holds an auth config for. `authConfigId` and
- * `authConfigManaged` describe that config; the card reads "Needs setup" only when
- * there is neither one nor a flow this beta can drive.
+ *
+ * `authConfigId` is the project's config for this toolkit, if it has one: a toolkit
+ * Composio has no managed app for still connects when that is set, because it is the
+ * config a connection would be created against.
  */
 export interface AppCard {
   slug: string;
@@ -72,7 +71,6 @@ export interface AppCard {
   toolsCount: number;
   support: AppSupport;
   authConfigId: string | null;
-  authConfigManaged: boolean | null;
   state: AppState;
   connectionId: string | null;
   statusDetail: string | null;

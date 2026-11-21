@@ -62,16 +62,24 @@ export function AppsDialog({
     if (loadingMore.current) return;
     loadingMore.current = true;
     const ticket = inFlight.current;
-    const result = await loadApps({
-      search: state.query.trim() || undefined,
-      category: state.category ?? undefined,
-      cursor,
-    });
-    loadingMore.current = false;
-    // A search or category change while this was in flight makes it stale.
-    if (ticket !== inFlight.current) return;
-    dispatch({ type: "more", page: result });
-    if (result.error) toast(result.error);
+    try {
+      // A rejected server action (a 500, a dropped connection) must not leave the
+      // guard set: the ref outlives the dialog's open state, so one throw would make
+      // Show more inert for the rest of the session.
+      const result = await loadApps({
+        search: state.query.trim() || undefined,
+        category: state.category ?? undefined,
+        cursor,
+      });
+      // A search or category change while this was in flight makes it stale.
+      if (ticket !== inFlight.current) return;
+      dispatch({ type: "more", page: result });
+      if (result.error) toast(result.error);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not load more apps.");
+    } finally {
+      loadingMore.current = false;
+    }
   }, [state.query, state.category]);
 
   // Opening reloads the catalogue, so a connection made on another device shows up.
@@ -436,17 +444,16 @@ function connectCopy(app: AppCard, kind: string): string {
     return `${app.name} is linked. Disconnecting revokes the access at ${app.name} itself, not just here.`;
   }
   if (kind === "pending") return "Approve the request in the window that opened, and this becomes connected.";
-  // An auth config the project already holds decides the flow, whatever the toolkit
-  // itself advertises: that is the config `ensureAuthConfig` reuses.
-  if (app.support === "managed" || app.authConfigManaged === true) {
+  if (app.support === "managed") {
     return `${app.name} opens its own sign-in page. Approve access and this app shows connected here; disconnect any time. Your password never passes through PupBot.`;
   }
-  if (app.support === "user-key" || app.authConfigManaged === false) {
+  if (app.support === "user-key") {
     return `${app.name} signs in with an API key. Composio's page asks you to paste one; it is stored there, not here.`;
   }
-  // Reached only with an auth config this project registered itself.
+  // A toolkit the shared sign-in cannot drive, but the project already registered an
+  // app for: the consent page belongs to that registration, not to an API key.
   if (app.authConfigId) {
-    return `${app.name} uses the app registration this workspace already has, so it can connect now.`;
+    return `${app.name} connects through the app registration this workspace already holds. Approve access on ${app.name}'s own page and it shows connected here.`;
   }
   return `${app.name} can't be connected with the shared sign-in. It needs its own app registration first.`;
 }

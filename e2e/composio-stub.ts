@@ -166,6 +166,7 @@ export function createComposioStubServer() {
             toolkit: connection.toolkit,
             status: connection.status,
           })),
+          toolkits,
         }),
       );
     }
@@ -199,7 +200,7 @@ export function createComposioStubServer() {
     if (path === "/toolkits" && request.method === "GET") {
       const search = (url.searchParams.get("search") ?? "").toLowerCase();
       const category = url.searchParams.get("category");
-      const items = toolkits.filter((toolkit) => {
+      const matches = toolkits.filter((toolkit) => {
         const matchesSearch =
           !search ||
           toolkit.name.toLowerCase().includes(search) ||
@@ -207,13 +208,19 @@ export function createComposioStubServer() {
           toolkit.description.toLowerCase().includes(search);
         return matchesSearch && (!category || toolkit.categories.includes(category));
       });
+      // Real paging: the catalogue is longer than one page and the cursor is opaque,
+      // so a second page can only be reached by following what came back.
+      const limit = Number(url.searchParams.get("limit") ?? 60) || 60;
+      const offset = Number(url.searchParams.get("cursor") ?? 0) || 0;
+      const window = matches.slice(offset, offset + limit);
+      const next = offset + limit < matches.length ? String(offset + limit) : null;
       return send(
         json({
-          items: items.map(toolkitWire),
-          next_cursor: null,
-          total_pages: 1,
-          current_page: 1,
-          total_items: items.length,
+          items: window.map(toolkitWire),
+          next_cursor: next,
+          total_pages: Math.ceil(matches.length / limit),
+          current_page: Math.floor(offset / limit) + 1,
+          total_items: matches.length,
         }),
       );
     }

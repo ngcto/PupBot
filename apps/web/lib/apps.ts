@@ -189,7 +189,6 @@ export async function listApps(input: {
         toolsCount: toolkit.toolsCount,
         support: toolkit.support,
         authConfigId: config?.id ?? null,
-        authConfigManaged: config ? config.managed && !config.userSupplied : null,
         state: connection ? stateFromStatus(connection.status) : "available",
         connectionId: connection?.id ?? null,
         statusDetail: connection?.statusDetail ?? null,

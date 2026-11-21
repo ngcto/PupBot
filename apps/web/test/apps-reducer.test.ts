@@ -20,7 +20,6 @@ const app = (overrides: Partial<AppCard> = {}): AppCard => ({
   toolsCount: 3,
   support: "managed",
   authConfigId: null,
-  authConfigManaged: null,
   state: "available",
   connectionId: null,
   statusDetail: null,
@@ -160,6 +159,18 @@ describe("browsing the catalogue", () => {
     expect(second.page?.nextCursor).toBe("c2");
   });
 
+  it("keeps the cursor when a page fails, so the person can retry", () => {
+    // listApps answers a failure with an empty page and no cursor; taking that
+    // cursor would hide the only way to reach the rest of the catalogue.
+    const first = appsReducer(initialAppsState(), { type: "loaded", page: page([app({ slug: "gmail" })], { nextCursor: "c1" }) });
+    const failed = appsReducer(first, {
+      type: "more",
+      page: page([], { nextCursor: null, error: "Composio is down" }),
+    });
+    expect(failed.page?.items.map((item) => item.slug)).toEqual(["gmail"]);
+    expect(failed.page?.nextCursor).toBe("c1");
+  });
+
   it("does not repeat an app the next page overlaps on", () => {
     const first = appsReducer(initialAppsState(), { type: "loaded", page: page([app({ slug: "gmail" })]) });
     const second = appsReducer(first, {
@@ -185,7 +196,7 @@ describe("what an app offers", () => {
   it("connects a toolkit that needs setup once the project holds an auth config for it", () => {
     // An administrator registered an OAuth client, so the one thing that blocked the
     // app is gone; ensureAuthConfig would reuse that config.
-    const registered = app({ slug: "twitter", support: "needs-setup", authConfigId: "ac_1", authConfigManaged: false });
+    const registered = app({ slug: "twitter", support: "needs-setup", authConfigId: "ac_1" });
     expect(actionFor(registered, null)).toBe("connect");
     expect(tileStateFor(registered, null)).toBe("Available");
   });

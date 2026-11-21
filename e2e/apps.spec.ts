@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { StubToolkit } from "./composio-stub.ts";
 
 /**
  * The marketplace against the Composio stub at the network edge: browse, search,
@@ -24,6 +25,7 @@ async function stubState() {
   return response.json() as Promise<{
     authConfigs: number;
     connections: Array<{ id: string; toolkit: string; status: string }>;
+    toolkits: StubToolkit[];
   }>;
 }
 
@@ -139,4 +141,34 @@ test("a connection waiting on approval says so until it lands", async ({ page })
   await expect(page.getByTestId("app-pending")).toContainText("Waiting for approval");
   const pending = (await stubState()).connections[0];
   expect(pending?.status).toBe("INITIALIZING");
+});
+
+test("the catalogue continues past the first page", async ({ page }) => {
+  await signUp(page);
+  // A second page only exists if the app follows Composio's cursor, which the default
+  // fixtures never produce.
+  // The app asks Composio for 60 per page, so a second page needs a longer catalogue.
+  const extra: StubToolkit[] = Array.from({ length: 61 }, (_, index) => ({
+    slug: `extra-${index}`,
+    name: `Extra ${index}`,
+    description: "One of the apps past the first page.",
+    authSchemes: ["API_KEY"],
+    managedAuthSchemes: [],
+    categories: ["productivity"],
+  }));
+  await fetch(`${STUB}/_control`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ toolkits: [...(await stubState()).toolkits, ...extra] }),
+  });
+
+  await page.getByTestId("connect-apps").click();
+  await expect(page.getByTestId("apps-more")).toBeVisible();
+  await expect(page.getByTestId("app-tile-extra-60")).toHaveCount(0);
+
+  await page.getByTestId("apps-more").click();
+  await expect(page.getByTestId("app-tile-extra-60")).toBeVisible();
+  // The first page is still there, and the control goes away at the end of the list.
+  await expect(page.getByTestId("app-tile-gmail")).toBeVisible();
+  await expect(page.getByTestId("apps-more")).toHaveCount(0);
 });

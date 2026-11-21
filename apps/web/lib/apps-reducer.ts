@@ -66,7 +66,9 @@ export function appsReducer(state: AppsState, action: AppsAction): AppsState {
         page: {
           ...state.page,
           items: [...state.page.items, ...action.page.items.filter((item) => !seen.has(item.slug))],
-          nextCursor: action.page.nextCursor,
+          // A failed page carries no cursor; keeping the old one leaves the button in
+          // place so the person can retry instead of losing the rest of the catalogue.
+          nextCursor: action.page.error ? state.page.nextCursor : action.page.nextCursor,
         },
         loading: false,
       };
