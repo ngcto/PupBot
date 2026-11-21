@@ -12,7 +12,7 @@ real key or password.
 | --- | --- | --- |
 | macOS | `package:mac` | `Terabot-<version>-arm64.dmg`, `Terabot-<version>-x64.dmg`, matching `.zip` |
 | Windows | `package:win` | `Terabot Setup <version>.exe` (NSIS, per-user, choose install dir) |
-| Linux | `package:linux` | `Terabot-<version>-x86_64.AppImage`, `terabot_<version>_amd64.deb`, arm64 equivalents |
+| Linux | `package:linux` | `Terabot-<version>.AppImage`, `terabot_<version>_amd64.deb`, arm64 equivalents |
 
 The version comes from `apps/desktop/package.json`. Bump it before a release; `electron-updater`
 compares that string.
