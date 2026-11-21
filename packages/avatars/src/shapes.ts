@@ -1,365 +1,149 @@
 import type { AvatarDefinition, AvatarShape } from "./types.ts";
 
 /**
- * Symmetric silhouettes only: every outline mirrors exactly about x = 50.
- * Vertical asymmetry is used on purpose (crests, horns, antennae, scallops,
- * flat bases, wide shoulders); horizontal asymmetry is never allowed. Eyes may
- * sit off-centre vertically; the outline may not sit off-centre horizontally.
+ * The 13 silhouettes Ng asked us to copy from the Grok Bot reference, traced from
+ * the screenshot itself (drive: handoffs/avatars-grok). Ids and their order are
+ * API: a stored avatar names one of them, and an unknown id falls back to
+ * `circle` at render time.
  *
- * The ids and their proportions come from `handoffs/spec/avatars.json`. Adding
- * or renaming a shape is one entry in DRAFTS.
+ * In order: circle, cloud, square, star4, quatrefoil, heart, flower, drop, pill,
+ * pick, house, splat, hexagon.
+ *
+ * Each `path` is one closed cubic-Bezier outline in the renderer's 0..100 box,
+ * fitted so the drawn curve spans 87.4 units on its long side (6.3..93.7) with
+ * its bounding-box centre on (50, 50). The fitting is measured on the curve, not
+ * on its control points, because a Catmull-Rom control point pokes outside the
+ * curve it shapes while the library measures the flattened path.
+ *
+ * The silhouettes are deliberately asymmetric: `square`, `pick` and `house`
+ * are tilted, `cloud`, `quatrefoil`, `heart`, `flower` and `splat` are lobed
+ * unevenly. There is no mirror rule here; that was the old family's rule.
+ *
+ * Eyes are the base renderer's own slots, not traced ones: one level, centred
+ * pair at `y = 48`, the largest scale the package allows (1.8), spaced 16.5 so
+ * the pair keeps the reference photo's proportions as closely as a 4:11 library
+ * eye can. No shape needed its own placement: every silhouette holds the pair
+ * with more than 12 units of clearance.
  */
-const CENTRE = 50;
-/** The renderer refuses geometry outside 6..94, so a silhouette fills 0.88. */
-const SAFE_MIN = 6;
-const SAFE_MAX = 94;
-const SPAN = SAFE_MAX - SAFE_MIN;
-const STEPS = 96;
+const EYES = { x: 50, y: 48, spacing: 16.5, scale: 1.8 } as const;
 
-type Pt = [number, number];
-
-/** x = 50 ± rx·|cos|^(2/n), y = cy ± ry·|sin|^(2/n): symmetric by construction. */
-function superellipse(cy: number, rx: number, ry: number, top = 2, bottom = 2): string {
-  const points: string[] = [];
-  for (let index = 0; index < STEPS; index += 1) {
-    const angle = (index / STEPS) * Math.PI * 2 - Math.PI / 2;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const exponent = sin < 0 ? top : bottom;
-    const x = CENTRE + rx * Math.sign(cos) * Math.abs(cos) ** (2 / exponent);
-    const y = cy + ry * Math.sign(sin) * Math.abs(sin) ** (2 / exponent);
-    points.push(fmt([x, y]));
-  }
-  return `M ${points.join(" L ")} Z`;
-}
-
-function circle(cx: number, cy: number, radius: number): string {
-  const points: string[] = [];
-  for (let index = 0; index < STEPS; index += 1) {
-    const angle = (index / STEPS) * Math.PI * 2;
-    points.push(fmt([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]));
-  }
-  return `M ${points.join(" L ")} Z`;
-}
-
-/** A vertical capsule: two half circles joined by straight sides. */
-function capsule(cy: number, width: number, height: number): string {
-  const rx = width / 2;
-  const ry = height / 2;
-  const top = cy - ry;
-  const bottom = cy + ry;
-  const left = CENTRE - rx;
-  const right = CENTRE + rx;
-  return [
-    `M ${left} ${top + rx}`,
-    `Q ${left} ${top} ${left + rx} ${top}`,
-    `L ${right - rx} ${top}`,
-    `Q ${right} ${top} ${right} ${top + rx}`,
-    `L ${right} ${bottom - rx}`,
-    `Q ${right} ${bottom} ${right - rx} ${bottom}`,
-    `L ${left + rx} ${bottom}`,
-    `Q ${left} ${bottom} ${left} ${bottom - rx}`,
-    "Z",
-  ].join(" ");
-}
-
-/** A polygon with uniformly rounded corners; pass the full outline clockwise. */
-function roundedPolygon(points: Pt[], radius: number): string {
-  const commands: string[] = [];
-  const count = points.length;
-
-  for (let index = 0; index < count; index += 1) {
-    const previous = points[(index - 1 + count) % count]!;
-    const current = points[index]!;
-    const next = points[(index + 1) % count]!;
-    commands.push(
-      index === 0 ? `M ${fmt(along(current, previous, radius))}` : `L ${fmt(along(current, previous, radius))}`,
-      `Q ${fmt(current)} ${fmt(along(current, next, radius))}`,
-    );
-  }
-
-  return `${commands.join(" ")} Z`;
-}
-
-function along(from: Pt, toward: Pt, distance: number): Pt {
-  const dx = toward[0] - from[0];
-  const dy = toward[1] - from[1];
-  const length = Math.hypot(dx, dy) || 1;
-  const step = Math.min(distance, length / 2);
-  return [from[0] + (dx / length) * step, from[1] + (dy / length) * step];
-}
-
-/** A tapered feature: wide at the base, rounded at the tip. Mirror its pair. */
-function taper(base: Pt, tip: Pt, halfWidth: number): string {
-  const dx = tip[0] - base[0];
-  const dy = tip[1] - base[1];
-  const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length;
-  const uy = dy / length;
-  const px = -uy;
-  const py = ux;
-  const at = (t: number, side: number, width: number): Pt => [
-    base[0] + dx * t + px * side * width,
-    base[1] + dy * t + py * side * width,
-  ];
-  return [
-    `M ${fmt(at(0, 1, halfWidth))}`,
-    `L ${fmt(at(0.9, 1, halfWidth * 0.34))}`,
-    `Q ${fmt(at(1, 0, halfWidth * 0.3))} ${fmt(at(0.9, -1, halfWidth * 0.34))}`,
-    `L ${fmt(at(0, -1, halfWidth))}`,
-    "Z",
-  ].join(" ");
-}
-
-/** A doorway: semicircular top on straight sides, flat base. */
-function arch(width: number, top: number, base: number): string {
-  const radius = width / 2;
-  const arcCentre = top + radius;
-  const points: Pt[] = [[CENTRE - radius, base], [CENTRE - radius, arcCentre]];
-
-  for (let index = 0; index <= 48; index += 1) {
-    const angle = Math.PI - (index / 48) * Math.PI;
-    points.push([CENTRE + radius * Math.cos(angle), arcCentre - radius * Math.sin(angle)]);
-  }
-
-  points.push([CENTRE + radius, base]);
-  return `M ${points.map(fmt).join(" L ")} Z`;
-}
-
-function fmt(point: Pt): string {
-  return `${point[0].toFixed(2)} ${point[1].toFixed(2)}`;
-}
-
-interface Draft {
+interface Traced {
   id: string;
   name: string;
   note: string;
-  parts: string[];
-  eyes: { x: number; y: number; spacing: number; scale: number };
+  path: string;
 }
 
-const eyes = (y: number, spacing = 20, scale = 1.36): Draft["eyes"] => ({
-  x: CENTRE,
-  y,
-  spacing,
-  scale,
-});
-
-function orb(cy = 50, radius = SPAN / 2): string {
-  return circle(CENTRE, cy, radius);
-}
-
-const DRAFTS: Draft[] = [
+const TRACED: readonly Traced[] = [
   {
-    id: "orb",
-    name: "Orb",
-    note: "A perfect circle",
-    parts: [orb()],
-    eyes: eyes(46),
+    id: "circle",
+    name: "Circle",
+    note: "A soft circle, a touch hand-drawn",
+    path:
+      "M93.21 51.07C92.41 54.38 90.92 64.50 88.33 69.83C85.75 75.14 82.11 79.41 77.74 82.98C73.36 86.56 67.41 89.60 62.08 91.32C56.73 93.03 51.54 93.95 45.68 93.26C39.81 92.56 32.44 90.66 26.88 87.14C21.33 83.64 15.60 76.96 12.34 72.22C9.09 67.50 8.31 63.61 7.38 58.77C6.45 53.94 5.83 48.42 6.76 43.23C7.69 38.05 9.61 32.75 12.97 27.67C16.32 22.59 22.42 16.07 26.89 12.76C31.36 9.46 34.95 8.81 39.80 7.81C44.66 6.81 50.92 6.12 56.01 6.76C61.11 7.40 66.01 9.27 70.40 11.64C74.79 14.02 79.01 17.13 82.33 21.05C85.63 24.98 88.47 30.40 90.28 35.22C92.09 40.02 92.71 47.27 93.19 49.91C93.69 52.54 94.02 47.74 93.21 51.07Z",
   },
   {
-    id: "squircle",
-    name: "Squircle",
-    note: "Rounded square, 0.28 corners",
-    parts: [
-      roundedPolygon(
-        [
-          [SAFE_MIN, SAFE_MIN],
-          [SAFE_MAX, SAFE_MIN],
-          [SAFE_MAX, SAFE_MAX],
-          [SAFE_MIN, SAFE_MAX],
-        ],
-        SPAN * 0.28,
-      ),
-    ],
-    eyes: eyes(50),
+    id: "cloud",
+    name: "Cloud",
+    note: "Cloud with unevenly lobed rim",
+    path:
+      "M93.15 50.94C92.58 53.09 91.51 59.32 89.74 62.61C87.96 65.89 88.68 66.75 82.50 70.66C76.33 74.56 60.11 83.64 52.69 86.03C45.28 88.42 41.80 84.78 38.00 85.03C34.20 85.29 32.69 87.49 29.89 87.54C27.08 87.60 24.24 87.04 21.16 85.39C18.08 83.73 13.87 80.82 11.41 77.62C8.96 74.42 6.99 72.71 6.44 66.20C5.88 59.69 7.13 45.00 8.08 38.56C9.02 32.11 10.39 30.59 12.13 27.54C13.87 24.48 15.21 22.46 18.54 20.22C21.85 17.99 25.54 15.40 32.05 14.11C38.56 12.82 51.82 12.25 57.57 12.52C63.32 12.78 61.52 11.94 66.53 15.69C71.56 19.44 83.26 29.34 87.69 35.01C92.12 40.68 92.22 47.05 93.13 49.71C94.04 52.37 93.72 48.79 93.15 50.94Z",
+  },
+  {
+    id: "square",
+    name: "Square",
+    note: "Square, tilted with eased corners",
+    path:
+      "M86.15 49.63C87.35 52.36 93.18 60.77 93.30 65.01C93.43 69.25 95.89 71.05 86.89 75.07C77.89 79.09 48.92 87.71 39.30 89.13C29.66 90.53 34.47 92.40 29.11 83.51C23.76 74.61 10.08 45.31 7.16 35.75C4.23 26.20 9.54 28.67 11.57 26.17C13.62 23.65 10.87 23.36 19.39 20.70C27.90 18.03 54.10 11.10 62.69 10.20C71.28 9.30 67.03 8.85 70.93 15.26C74.85 21.67 83.60 42.96 86.14 48.68C88.68 54.41 84.96 46.91 86.15 49.63Z",
+  },
+  {
+    id: "star4",
+    name: "Star",
+    note: "Four-pointed star with soft valleys",
+    path:
+      "M92.26 50.08C91.82 51.16 93.60 51.93 90.17 55.41C86.75 58.88 75.84 65.97 71.71 70.94C67.58 75.90 67.72 81.62 65.37 85.21C63.03 88.80 60.01 91.15 57.59 92.47C55.17 93.80 53.48 94.07 50.86 93.18C48.24 92.29 45.21 91.15 41.86 87.12C38.52 83.10 35.89 73.31 30.78 69.04C25.67 64.76 15.12 64.48 11.19 61.50C7.26 58.53 7.53 53.99 7.21 51.20C6.90 48.40 8.03 46.83 9.30 44.76C10.57 42.68 11.66 41.43 14.82 38.74C17.99 36.06 24.62 33.33 28.31 28.66C32.00 23.99 33.57 14.45 36.95 10.74C40.33 7.03 44.83 5.94 48.59 6.40C52.35 6.86 56.75 10.22 59.53 13.50C62.32 16.79 63.55 23.41 65.29 26.14C67.01 28.88 66.14 27.98 69.92 29.89C73.70 31.82 84.27 35.60 87.97 37.66C91.67 39.71 91.32 40.34 92.13 42.23C92.94 44.11 92.81 47.64 92.84 48.96C92.86 50.26 92.71 49.01 92.26 50.08Z",
+  },
+  {
+    id: "quatrefoil",
+    name: "Quatrefoil",
+    note: "Four lobes of uneven size",
+    path:
+      "M90.55 50.31C91.21 51.45 92.90 53.74 93.24 56.08C93.59 58.41 94.33 60.52 92.62 64.35C90.92 68.17 85.94 75.75 83.03 79.01C80.12 82.27 78.83 83.10 75.21 83.91C71.59 84.72 65.61 82.71 61.31 83.87C57.01 85.01 52.48 89.64 49.43 90.82C46.37 91.99 45.94 91.49 42.99 90.93C40.04 90.36 35.21 89.64 31.72 87.42C28.24 85.21 24.48 82.10 22.08 77.65C19.68 73.20 19.71 65.66 17.32 60.74C14.92 55.82 9.55 51.98 7.74 48.12C5.93 44.26 6.26 40.66 6.46 37.58C6.66 34.51 6.65 32.96 8.95 29.68C11.25 26.41 16.74 20.42 20.26 17.92C23.79 15.42 27.40 14.94 30.09 14.70C32.79 14.46 33.22 17.42 36.45 16.50C39.67 15.58 46.17 10.42 49.43 9.18C52.68 7.95 53.12 8.58 55.95 9.09C58.78 9.58 62.91 10.13 66.40 12.17C69.89 14.23 74.17 16.81 76.89 21.36C79.60 25.92 80.63 34.85 82.70 39.49C84.77 44.14 88.00 47.46 89.31 49.27C90.62 51.06 89.89 49.18 90.55 50.31Z",
+  },
+  {
+    id: "heart",
+    name: "Heart",
+    note: "Heart, tilted a little",
+    path:
+      "M92.51 48.32C89.79 54.26 81.43 75.96 76.19 82.88C70.95 89.81 65.57 89.15 61.05 89.86C56.52 90.56 56.13 90.30 49.04 87.10C41.96 83.90 24.97 74.95 18.53 70.68C12.10 66.42 12.45 65.05 10.44 61.51C8.42 57.99 6.79 53.79 6.42 49.48C6.05 45.17 6.48 39.94 8.24 35.62C10.02 31.31 13.25 26.63 17.03 23.58C20.82 20.53 26.00 18.48 30.98 17.36C35.97 16.24 43.10 17.84 46.93 16.86C50.77 15.89 51.38 12.70 53.97 11.53C56.56 10.35 59.02 9.77 62.48 9.82C65.93 9.89 70.73 10.28 74.69 11.94C78.67 13.60 83.18 16.44 86.30 19.79C89.41 23.15 92.35 27.50 93.38 32.08C94.41 36.64 92.64 44.52 92.49 47.23C92.35 49.94 95.22 42.37 92.51 48.32Z",
+  },
+  {
+    id: "flower",
+    name: "Flower",
+    note: "Flower with a ruffled rim",
+    path:
+      "M93.07 50.22C92.97 52.48 95.19 56.71 91.86 62.68C88.51 68.64 77.44 81.26 73.05 86.00C68.65 90.75 68.28 90.10 65.53 91.15C62.76 92.21 59.89 93.21 56.49 92.36C53.08 91.51 49.71 87.36 45.10 86.06C40.47 84.76 32.60 85.67 28.76 84.57C24.92 83.47 23.84 81.35 22.07 79.45C20.31 77.55 19.18 76.25 18.17 73.21C17.16 70.16 17.83 65.04 15.99 61.20C14.16 57.38 8.66 52.99 7.15 50.22C5.64 47.45 6.52 46.95 6.93 44.57C7.33 42.20 6.51 40.64 9.59 35.98C12.68 31.33 21.70 20.97 25.43 16.67C29.16 12.36 29.43 11.72 31.98 10.17C34.52 8.61 37.72 7.47 40.69 7.33C43.67 7.20 47.35 8.14 49.81 9.34C52.27 10.53 52.61 13.68 55.46 14.52C58.32 15.36 63.56 13.74 66.90 14.39C70.25 15.04 72.95 16.42 75.54 18.45C78.12 20.47 80.97 23.10 82.40 26.54C83.85 29.98 82.51 35.29 84.18 39.05C85.87 42.81 90.98 47.25 92.46 49.11C93.94 50.96 93.16 47.96 93.07 50.22Z",
   },
   {
     id: "drop",
     name: "Drop",
-    note: "Teardrop, point up, widest at 0.42",
-    parts: [superellipse(50, SPAN * 0.46, SPAN / 2, 1.22, 2.3)],
-    eyes: eyes(50),
-  },
-  {
-    id: "bell",
-    name: "Bell",
-    note: "Narrow rounded top flaring to a wide base",
-    parts: [
-      superellipse(38, 30, 34, 2.5, 2.5),
-      roundedPolygon(
-        [
-          [12, 52],
-          [88, 52],
-          [94, SAFE_MAX],
-          [SAFE_MIN, SAFE_MAX],
-        ],
-        12,
-      ),
-    ],
-    eyes: eyes(38, 19, 1.3),
-  },
-  {
-    id: "arch",
-    name: "Arch",
-    note: "Semicircular top on straight sides, flat base",
-    parts: [arch(SPAN, 6, SAFE_MAX)],
-    eyes: eyes(50),
-  },
-  {
-    id: "hexa",
-    name: "Hexa",
-    note: "Soft hexagon, flat top and bottom",
-    parts: [
-      roundedPolygon(
-        [
-          [26, SAFE_MIN],
-          [74, SAFE_MIN],
-          [SAFE_MAX, 50],
-          [74, SAFE_MAX],
-          [26, SAFE_MAX],
-          [SAFE_MIN, 50],
-        ],
-        SPAN * 0.18,
-      ),
-    ],
-    eyes: eyes(52),
+    note: "Teardrop, point up",
+    path:
+      "M88.84 53.37C88.66 55.50 89.06 60.90 87.74 65.08C86.42 69.27 83.76 74.67 80.91 78.49C78.07 82.30 74.33 85.51 70.65 87.97C66.98 90.42 63.66 92.39 58.87 93.22C54.08 94.05 46.69 93.71 41.92 92.93C37.16 92.15 34.08 90.98 30.28 88.53C26.47 86.07 22.15 82.79 19.09 78.22C16.04 73.65 13.14 65.69 11.93 61.08C10.72 56.46 10.07 58.39 11.83 50.51C13.58 42.62 18.47 20.98 22.46 13.76C26.46 6.54 27.02 5.08 35.81 7.17C44.61 9.26 67.24 21.44 75.25 26.31C83.24 31.18 81.53 32.05 83.80 36.38C86.07 40.72 87.99 49.47 88.83 52.31C89.66 55.14 89.02 51.24 88.84 53.37Z",
   },
   {
     id: "pill",
     name: "Pill",
-    note: "Vertical capsule, 0.78:1",
-    parts: [capsule(50, SPAN * 0.78, SPAN)],
-    eyes: eyes(45),
+    note: "Wide capsule, slightly skewed",
+    path:
+      "M93.32 51.16C92.70 53.17 91.64 58.57 89.56 62.00C87.48 65.43 84.26 69.25 80.82 71.75C77.39 74.24 76.35 74.90 68.95 76.99C61.55 79.08 45.07 84.25 36.42 84.27C27.77 84.30 21.86 80.80 17.05 77.14C12.24 73.48 9.29 66.44 7.57 62.30C5.84 58.16 6.23 56.22 6.70 52.28C7.17 48.32 8.09 42.61 10.42 38.59C12.75 34.56 12.32 31.83 20.67 28.12C29.00 24.40 51.92 18.00 60.45 16.33C68.98 14.66 68.09 16.87 71.85 18.11C75.62 19.33 79.84 20.89 83.01 23.72C86.20 26.56 89.21 30.74 90.92 35.12C92.64 39.50 92.91 47.33 93.30 50.01C93.70 52.68 93.94 49.16 93.32 51.16Z",
   },
   {
-    id: "gem",
-    name: "Gem",
-    note: "Faceted: flat table, chamfered crown, flat base",
-    parts: [
-      roundedPolygon(
-        [
-          [32, 22],
-          [68, 22],
-          [SAFE_MAX, 44],
-          [70, 82],
-          [30, 82],
-          [SAFE_MIN, 44],
-        ],
-        5,
-      ),
-    ],
-    eyes: eyes(44, 18, 1.28),
+    id: "pick",
+    name: "Pick",
+    note: "Rounded wedge, flat along the base",
+    path:
+      "M91.92 52.81C91.72 54.28 92.12 57.58 90.62 60.32C89.12 63.06 88.17 65.30 82.93 69.26C77.69 73.21 66.29 80.40 59.17 84.08C52.05 87.76 46.33 89.77 40.21 91.36C34.08 92.96 26.89 93.95 22.44 93.64C17.98 93.35 15.97 91.54 13.50 89.54C11.03 87.55 7.78 92.62 7.63 81.66C7.47 70.69 11.08 35.35 12.60 23.73C14.12 12.12 14.76 14.75 16.72 11.98C18.68 9.22 21.13 8.03 24.34 7.18C27.54 6.31 32.11 5.89 35.96 6.85C39.81 7.81 39.01 7.42 47.43 12.94C55.85 18.47 79.08 33.58 86.49 40.00C93.90 46.44 91.01 49.41 91.91 51.54C92.82 53.68 92.14 51.35 91.92 52.81Z",
   },
   {
-    id: "crest",
-    name: "Crest",
-    note: "Orb with one centred crest ridge",
-    parts: [orb(56, 37), roundedPolygon([[35, 26], [65, 26], [61, 12], [39, 12]], 5)],
-    eyes: eyes(58, 19, 1.3),
+    id: "house",
+    name: "House",
+    note: "House, tilted with a soft peak",
+    path:
+      "M88.49 51.90C89.56 54.33 94.41 60.86 93.61 65.43C92.80 70.01 93.70 74.81 83.68 79.33C73.68 83.86 43.75 91.60 33.54 92.56C23.34 93.52 26.71 91.70 22.46 85.10C18.22 78.50 10.45 59.71 8.04 52.95C5.64 46.19 5.79 50.40 8.06 44.51C10.34 38.64 18.27 23.24 21.69 17.69C25.10 12.14 25.72 12.88 28.54 11.24C31.35 9.60 31.18 5.68 38.57 7.84C45.97 9.98 66.33 20.48 72.92 24.16C79.51 27.85 75.76 25.50 78.14 29.96C80.52 34.41 85.46 47.22 87.18 50.87C88.92 54.54 87.42 49.48 88.49 51.90Z",
   },
   {
-    id: "horns",
-    name: "Horns",
-    note: "Orb with two horn nubs at 11 and 1",
-    parts: [orb(56, 37), taper([33, 32], [27, 9], 7), taper([67, 32], [73, 9], 7)],
-    eyes: eyes(58, 19, 1.3),
+    id: "splat",
+    name: "Splat",
+    note: "Splat with six blunt points",
+    path:
+      "M91.59 50.19C92.14 51.13 93.77 52.56 93.70 54.80C93.64 57.04 92.68 61.22 91.23 63.64C89.77 66.05 87.03 68.18 84.97 69.27C82.92 70.36 80.50 69.31 78.92 70.17C77.32 71.05 76.18 72.19 75.43 74.49C74.67 76.78 76.56 80.97 74.38 83.97C72.19 86.98 65.37 91.34 62.35 92.49C59.34 93.64 59.12 93.07 56.26 90.85C53.41 88.64 47.84 81.26 45.22 79.24C42.60 77.21 42.78 78.05 40.55 78.72C38.33 79.39 34.64 82.96 31.86 83.27C29.07 83.59 25.66 81.78 23.85 80.60C22.03 79.42 20.97 78.73 20.97 76.16C20.97 73.59 23.60 68.03 23.85 65.19C24.08 62.34 24.95 61.59 22.41 59.09C19.88 56.59 11.26 52.62 8.65 50.19C6.02 47.76 6.00 47.46 6.66 44.51C7.33 41.55 10.31 34.84 12.65 32.46C15.00 30.07 18.63 31.33 20.73 30.19C22.84 29.06 24.22 28.15 25.28 25.64C26.33 23.13 25.80 17.86 27.08 15.15C28.36 12.46 30.86 10.74 32.94 9.42C35.02 8.11 37.81 7.46 39.53 7.28C41.23 7.10 40.96 6.17 43.20 8.35C45.44 10.53 50.32 18.14 52.96 20.35C55.61 22.57 56.62 22.19 59.10 21.66C61.57 21.11 65.08 17.60 67.78 17.10C70.50 16.60 73.41 17.14 75.37 18.64C77.33 20.15 79.31 23.30 79.54 26.13C79.76 28.94 76.82 32.87 76.71 35.59C76.59 38.30 76.52 40.17 78.81 42.43C81.09 44.68 88.27 47.83 90.40 49.13C92.53 50.42 91.04 49.24 91.59 50.19Z",
   },
   {
-    id: "antennae",
-    name: "Antennae",
-    note: "Orb with two stalks and round tips",
-    parts: [
-      orb(58, 35),
-      taper([37, 34], [31, 15], 2.6),
-      taper([63, 34], [69, 15], 2.6),
-      circle(31, 13, 4),
-      circle(69, 13, 4),
-    ],
-    eyes: eyes(60, 18, 1.28),
-  },
-  {
-    id: "scallop",
-    name: "Scallop",
-    note: "Squircle with a crown of three bumps",
-    parts: [
-      roundedPolygon(
-        [
-          [SAFE_MIN, 26],
-          [SAFE_MAX, 26],
-          [SAFE_MAX, SAFE_MAX],
-          [SAFE_MIN, SAFE_MAX],
-        ],
-        SPAN * 0.26,
-      ),
-      circle(50, 18, 12),
-      circle(27, 24, 9),
-      circle(73, 24, 9),
-    ],
-    eyes: eyes(56, 19, 1.3),
-  },
-  {
-    id: "shoulder",
-    name: "Shoulder",
-    note: "Wide shoulders narrowing to a rounded top",
-    parts: [superellipse(50, SPAN / 2, SPAN / 2, 3.2, 4.6)],
-    eyes: eyes(48),
+    id: "hexagon",
+    name: "Hexagon",
+    note: "Hexagon, tilted and eased",
+    path:
+      "M93.57 50.44C93.63 52.52 93.56 58.81 92.68 61.84C91.78 64.87 91.46 64.53 88.25 68.62C85.04 72.71 77.91 82.31 73.46 86.37C69.00 90.44 68.38 93.16 61.52 92.99C54.66 92.83 38.65 87.55 32.31 85.39C25.98 83.23 27.65 87.00 23.48 80.04C19.29 73.08 9.40 50.93 7.21 43.64C5.01 36.37 7.08 40.93 10.30 36.34C13.52 31.75 22.35 20.69 26.53 16.13C30.72 11.55 32.81 10.31 35.42 8.91C38.03 7.51 35.45 6.11 42.21 7.72C48.95 9.33 69.39 15.67 75.94 18.55C82.50 21.43 78.81 19.87 81.54 25.00C84.28 30.12 90.34 45.09 92.35 49.34C94.35 53.58 93.52 48.36 93.57 50.44Z",
   },
 ];
 
-/** Fits a composed silhouette into the safe area, keeping it symmetric. */
-function fit(path: string): { path: string; scale: number; dx: number; dy: number } {
-  const numbers = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let index = 0; index + 1 < numbers.length; index += 2) {
-    xs.push(numbers[index]!);
-    ys.push(numbers[index + 1]!);
-  }
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const scale = Math.min(SPAN / (maxX - minX || 1), SPAN / (maxY - minY || 1));
-  const dx = CENTRE - ((minX + maxX) / 2) * scale;
-  const dy = CENTRE - ((minY + maxY) / 2) * scale;
-
-  let cursor = 0;
-  const fitted = path.replace(/-?\d+(?:\.\d+)?/g, (token) => {
-    const value = Number(token) * scale + (cursor % 2 === 0 ? dx : dy);
-    cursor += 1;
-    return value.toFixed(2);
-  });
-
-  return { path: fitted, scale, dx, dy };
-}
-
-function build(draft: Draft): AvatarShape {
-  const fitted = fit(draft.parts.join(" "));
-  return {
-    id: draft.id,
-    name: draft.name,
-    note: draft.note,
-    definition: {
-      version: 1,
-      id: draft.id,
-      name: draft.name,
-      body: { path: fitted.path },
-      eyes: {
-        x: draft.eyes.x * fitted.scale + fitted.dx,
-        y: draft.eyes.y * fitted.scale + fitted.dy,
-        spacing: draft.eyes.spacing * fitted.scale,
-        scale: draft.eyes.scale * fitted.scale * 1.2,
-      },
-    } satisfies AvatarDefinition,
-  };
-}
-
-export const SHAPES: readonly AvatarShape[] = DRAFTS.map(build);
+export const SHAPES: readonly AvatarShape[] = TRACED.map(({ id, name, note, path }) => ({
+  id,
+  name,
+  note,
+  definition: {
+    version: 1,
+    id,
+    name,
+    body: { path },
+    eyes: { ...EYES },
+  } satisfies AvatarDefinition,
+}));
 
 export const SHAPE_IDS = SHAPES.map((shape) => shape.id);
 
-export const DEFAULT_SHAPE = "orb";
+export const DEFAULT_SHAPE = "circle";
 
 const byId = new Map(SHAPES.map((shape) => [shape.id, shape]));
 
@@ -367,6 +151,7 @@ export function isShapeId(value: string): boolean {
   return byId.has(value);
 }
 
+/** A stored avatar may name a shape that no longer exists; it renders as the default. */
 export function shapeDefinition(id: string): AvatarDefinition {
   const shape = byId.get(id) ?? byId.get(DEFAULT_SHAPE);
   if (!shape) throw new Error("no avatar shapes are registered");

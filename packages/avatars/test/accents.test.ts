@@ -55,12 +55,12 @@ describe("deriveAccent", () => {
 
 describe("renderAvatarSvg", () => {
   it("is identical across two calls for the same input", () => {
-    const first = renderAvatarSvg({ shape: "orb", color: "amber", size: 64 });
-    expect(renderAvatarSvg({ shape: "orb", color: "amber", size: 64 })).toBe(first);
+    const first = renderAvatarSvg({ shape: "circle", color: "amber", size: 64 });
+    expect(renderAvatarSvg({ shape: "circle", color: "amber", size: 64 })).toBe(first);
   });
 
   it("fills the head with the palette hex", () => {
-    expect(renderAvatarSvg({ shape: "orb", color: "amber", size: 64 }).toLowerCase()).toContain("#f69412");
+    expect(renderAvatarSvg({ shape: "circle", color: "amber", size: 64 }).toLowerCase()).toContain("#f69412");
   });
 
 

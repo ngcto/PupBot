@@ -5,20 +5,38 @@ Where the shipped build differs from `handoffs/spec/`, and why. The drive copy o
 
 ## Avatars
 
-Symmetric silhouettes only (`avatars.json`, home-44): no dog heads, no lopsided detail. The ids are
-`orb, squircle, drop, bell, arch, hexa, pill, gem, crest, horns, antennae, scallop, shoulder`.
+The 13 silhouettes are copied from Ng's Grok Bot screenshot (`handoffs/avatars-grok`), replacing
+both earlier families. The ids are
+`circle, cloud, square, star4, quatrefoil, heart, flower, drop, pill, pick, house, splat, hexagon`.
 
-- **Silhouettes fill 0.88 of the box; features cannot reach 0.96.** `open-bot-avatar` rejects
-  geometry outside 6..94 (its error message says 8..92, but 6..94 validates), so the widest a
-  silhouette *or* a horn can be is 0.88. Everything is fitted to that box.
+- **The set is asymmetric on purpose.** `square`, `pick` and `house` are tilted; `cloud`,
+  `quatrefoil`, `heart`, `flower` and `splat` are lobed unevenly. The old "mirror exactly about the
+  vertical axis" rule and its test are gone with the old family; nothing else enforced it.
+- **The traced paths were re-fitted to the safe area.** The handoff normalised its polylines to a
+  0.88 half-extent, but the Catmull-Rom control points it emitted bulge past the curve they shape,
+  so nearly every delivered path measured outside 6..94 once flattened and `validateAvatar`
+  rejected it. The silhouettes are unchanged: each curve is uniformly scaled about its own
+  bounding-box centre and re-centred on (50, 50) so its long side spans 87.4 units. Nothing was
+  re-traced.
+- **Control points may sit outside 6..94; the curve may not.** Because of the same Catmull-Rom
+  overshoot, `square` reaches x = 4.2 and x = 95.9 in control-point coordinates while its filled
+  outline stays inside the window. The safe-area check is therefore the library's own flattened
+  bounds check (`validateAvatar`), not a scan of the path's numbers.
 - **Eye proportions are the library's.** Its eye is a fixed 4:11 pill at `scale` ≤ 1.8, so the
-  contract's 0.22 × 0.34 slots with a 0.18 gap cannot be matched literally. We keep the reference's
-  visual weight (`scale` ≈ 1.36, spacing ≈ 20) and the 90% `#121212` ink.
-- **`arch` and `gem` are polyline approximations.** The renderer's path parser accepts `M/L/C/Q/Z`
-  only — no elliptical arcs — so the arch's semicircular top is 48 straight segments.
-- **Symmetry is enforced by a test, not by construction.** `shapes.test.ts` samples every path point
-  and asserts a mirrored partner exists within 0.35 units, plus a bounding-box check that the shape
-  is centred on x = 50. That is the thing that drifts when someone tweaks a control point.
+  reference's ~20 × 30 slots with a 16 gap cannot be matched literally: the widest slot the package
+  can draw is 7.2 × 19.8. We take the maximum (`scale` 1.8) and a 16.5 spacing, which keeps the
+  pair's gap-to-slot ratio as close to the reference as the cap allows, with the 90% `#121212` ink,
+  level and centred at `y = 48`. Every silhouette holds the pair with more than 12 units of
+  clearance, so no shape needed its own placement. Compared side by side with the screenshot at
+  16/32/96px, ours reads as the same character but with visibly narrower slots — the cap, not a
+  choice.
+- **`open-bot-avatar` 0.2.1 → 0.3.0** (`pnpm-workspace.yaml` gains the version in
+  `minimumReleaseAgeExclude`, since it shipped the day before). Same exports, same definition
+  contract, same validator. 0.3.0 adds `state`/`mood` (ribbons for `working`, marks for `thinking`
+  and `blocked`, a celebration for `done`) and OKLCH helpers, and keeps the deprecated `motion`
+  option we pass. Rendering all 13 shapes at 64px with our fixed options (`motion: "idle"`,
+  `time: 0`, `reducedMotion: true`, `depth: 5`) produces byte-identical SVG before and after: no
+  geometry, eye or ink change for a resting avatar. Nothing in this app asks for a state yet.
 
 ## Colour
 

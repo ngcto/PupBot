@@ -17,6 +17,7 @@ minimumReleaseAgeExclude:
   - "@better-auth/prisma-adapter@1.7.27"
   - "@better-auth/telemetry@1.7.27"
   - better-auth@1.7.27
+  - open-bot-avatar@0.3.0
 
 onlyBuiltDependencies:
   - esbuild
