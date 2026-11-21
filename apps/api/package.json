@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/app.ts"
+    ".": "./src/app.ts",
+    "./run-inline": "./src/run-inline.ts"
   },
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/index.ts",

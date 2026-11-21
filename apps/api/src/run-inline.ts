@@ -1,7 +1,9 @@
 import { executeRun } from "@terabot/agent";
 import { database } from "@terabot/db";
 import { createGateway } from "@terabot/providers";
-import type { EnqueueRun } from "./routes/conversations.ts";
+import type { EnqueueRequest, EnqueueRun } from "./routes/conversations.ts";
+
+export type { EnqueueRequest, EnqueueRun };
 
 let gateway: ReturnType<typeof createGateway> | undefined;
 
@@ -12,9 +14,9 @@ let gateway: ReturnType<typeof createGateway> | undefined;
  * `waitUntil` keeps the function alive after the POST has been answered.
  */
 export function createInlineEnqueue(): EnqueueRun {
-  return async ({ runId, waitUntil }) => {
+  return async ({ runId, waitUntil, computer }) => {
     gateway ??= createGateway();
-    const task = executeRun({ db: database(), gateway, runId })
+    const task = executeRun({ db: database(), gateway, runId, computer })
       .then((outcome) => {
         console.log(`[run ${runId}] ${outcome.status} (${outcome.text.length} chars)`);
       })

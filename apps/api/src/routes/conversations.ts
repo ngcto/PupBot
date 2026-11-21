@@ -10,6 +10,7 @@ import {
   RUN_QUEUE,
   startBoss,
 } from "@terabot/db";
+import type { RunComputer } from "@terabot/agent";
 import type { MessagePart } from "@terabot/db";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
@@ -41,6 +42,8 @@ export interface EnqueueRequest {
   runId: string;
   /** Keeps the work alive after the response on a serverless runtime. */
   waitUntil?: (promise: Promise<unknown>) => void;
+  /** Wakes and leases the bot's computer; without one a run never touches a machine. */
+  computer?: RunComputer;
 }
 
 export type EnqueueRun = (job: EnqueueRequest) => Promise<void>;

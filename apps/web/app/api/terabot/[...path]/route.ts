@@ -1,7 +1,9 @@
 import { createApp } from "@terabot/api";
+import { createInlineEnqueue } from "@terabot/api/run-inline";
 import { setRequestOidcToken } from "@terabot/config";
 import { Hono } from "hono";
 import { after } from "next/server";
+import { inlineComputers, withComputer } from "../../../../lib/computers-inline.ts";
 
 // One origin for the app and its API: the session cookie is then first-party,
 // there is no cross-site CORS, and a run executes in this same long-lived
@@ -20,7 +22,11 @@ let app: App | undefined;
  * environment and opens the Postgres pool, and a build machine has neither.
  */
 function hono(): App {
-  app ??= new Hono().route("/api/terabot", createApp());
+  // Inline is the only mode that serves a run from here; on a queue deployment
+  // the app hands the run to pg-boss as before. When it is inline, the run gets
+  // a computer: without one it streams model text and never touches a machine.
+  const options = inlineComputers ? { enqueue: withComputer(createInlineEnqueue()) } : {};
+  app ??= new Hono().route("/api/terabot", createApp(options));
   return app;
 }
 
