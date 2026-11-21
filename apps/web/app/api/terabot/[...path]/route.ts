@@ -25,7 +25,7 @@ function hono(): App {
   // Inline is the only mode that serves a run from here; on a queue deployment
   // the app hands the run to pg-boss as before. When it is inline, the run gets
   // a computer: without one it streams model text and never touches a machine.
-  const options = inlineComputers ? { enqueue: withComputer(createInlineEnqueue()) } : {};
+  const options = inlineComputers() ? { enqueue: withComputer(createInlineEnqueue()) } : {};
   app ??= new Hono().route("/api/terabot", createApp(options));
   return app;
 }

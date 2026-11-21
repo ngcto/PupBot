@@ -8,7 +8,7 @@ import {
   newId,
 } from "@terabot/db";
 import type { Database } from "@terabot/db";
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, eq, isNull, lt, ne } from "drizzle-orm";
 import type {
   AccountPatch,
   AccountRecord,
@@ -126,6 +126,21 @@ export class DrizzleComputerStore implements ComputerStore {
       reason: bot.reason,
       computer: links[0] ? toComputer(links[0].computer) : null,
     };
+  }
+
+  /**
+   * A cross-process claim on a bot's allocation. The allocator's own lock is a
+   * per-instance Map, so two serverless instances serving the same bot can both
+   * read "unbound" and both create a machine; this row is what serializes them.
+   * Whoever flips `binding` from a non-binding state to `binding` owns the work.
+   */
+  async claimBinding(botId: string): Promise<boolean> {
+    const claimed = await this.#db
+      .update(botTable)
+      .set({ computerState: "binding", computerReason: null, updatedAt: new Date() })
+      .where(and(eq(botTable.id, botId), ne(botTable.computerState, "binding")))
+      .returning({ id: botTable.id });
+    return claimed.length > 0;
   }
 
   async setBindingState(botId: string, state: BindingState, reason: string | null): Promise<void> {

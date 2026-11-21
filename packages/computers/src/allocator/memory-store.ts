@@ -95,6 +95,12 @@ export class MemoryComputerStore implements ComputerStore {
     };
   }
 
+  async claimBinding(botId: string): Promise<boolean> {
+    if (this.bindings.get(botId)?.state === "binding") return false;
+    await this.setBindingState(botId, "binding", null);
+    return true;
+  }
+
   async setBindingState(botId: string, state: BindingState, reason: string | null): Promise<void> {
     const binding = this.bindings.get(botId);
     if (binding) {

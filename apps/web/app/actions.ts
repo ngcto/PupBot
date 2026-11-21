@@ -279,7 +279,7 @@ export async function giveComputer(botId: string): Promise<{ state: string; reas
     // Inline mode is its own provisioning host: nothing drains the queue here,
     // so a bot left on a job would sit in `binding` forever. The allocation is
     // idempotent per bot, so the queue message below stays harmless.
-    if (inlineComputers) {
+    if (inlineComputers()) {
       const result = await allocateComputerInline(botId);
       revalidatePath("/", "layout");
       return { state: result.state, reason: result.reason ?? null };

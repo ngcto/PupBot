@@ -101,6 +101,13 @@ export class ComputerAllocator {
         return { state: "ready", computerId: current.computer.id };
       }
 
+      // An already-binding bot is another host's work in progress or a stalled
+      // request that `retryStalledBindings` resolves; starting a second
+      // allocation here is what would pay for a duplicate machine.
+      if (current?.state === "binding") {
+        return { state: "binding" };
+      }
+
       const accounts = (await this.store.listAccounts()).filter((account) => account.status === "active");
       if (accounts.length === 0) return this.#block(botId, "No computer account is connected.");
 

@@ -8,8 +8,14 @@ import type { AllocateResult } from "@terabot/computers";
  * Whether this process is the provisioning host. Read from the environment
  * rather than hardcoded so the same build runs as a queue or an inline
  * deployment, exactly like the run path's `RUN_MODE` check.
+ *
+ * A function, not a module constant: this module is imported by a route and by
+ * server actions, so evaluating it at import would run `serverEnv()` on the
+ * build machine, which has no secrets to validate.
  */
-export const inlineComputers = serverEnv().RUN_MODE === "inline";
+export function inlineComputers(): boolean {
+  return serverEnv().RUN_MODE === "inline";
+}
 
 let allocator: ComputerAllocator | undefined;
 
@@ -27,13 +33,16 @@ function allocatorFor(): ComputerAllocator {
 }
 
 /**
- * `allocateForBot` is idempotent per bot: it returns an existing ready binding
- * without provisioning again, and takes a per-bot lock so two requests arriving
- * together make one box. A failure is written as `blocked` with a reason, which
- * is what the composer shows instead of a spinner that never resolves.
+ * Provisions a bot on this host. `allocateForBot` is idempotent per bot and takes
+ * a per-bot lock, but that lock is per process and this runtime is several
+ * instances, so the claim is taken through the store first: flipping the bot to
+ * `binding` is atomic across instances, and whoever loses the race leaves the
+ * work to the winner instead of paying for a second machine.
  */
 export async function allocateComputerInline(botId: string): Promise<AllocateResult> {
-  return allocatorFor().allocateForBot(botId);
+  const allocator = allocatorFor();
+  if (!(await allocator.store.claimBinding(botId))) return { state: "binding" };
+  return allocator.allocateForBot(botId);
 }
 
 export function inlineRunComputer(): RunComputer {

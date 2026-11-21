@@ -408,3 +408,27 @@ describe("allocator — capacity, account health and wake auth", () => {
     expect((await store.listAccounts()).find((account) => account.id === "a")?.status).toBe("error");
   });
 });
+
+describe("allocator — one allocation per bot across hosts", () => {
+  it("leaves a bot another host is already provisioning alone", async () => {
+    const { store, allocator } = harness();
+    store.addBot("bot-1");
+    store.addAccount({ id: "a", label: "a", capacity: 2 });
+
+    // Another instance claimed the bot and died before binding anything.
+    await store.claimBinding("bot-1");
+
+    const result = await allocator.allocateForBot("bot-1");
+    expect(result.state).toBe("binding");
+    expect(result.computerId).toBeUndefined();
+    expect(await store.listComputers()).toHaveLength(0);
+  });
+
+  it("only lets one claim win", async () => {
+    const { store } = harness();
+    store.addBot("bot-1");
+
+    expect(await store.claimBinding("bot-1")).toBe(true);
+    expect(await store.claimBinding("bot-1")).toBe(false);
+  });
+});
