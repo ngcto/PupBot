@@ -38,6 +38,50 @@ packages that declare a `lint` script, so `scripts/check-lint-coverage.mjs` fail
 ships source without one — and also when it cannot read a package at all. A coverage gate that
 quietly covers nothing is the hole it exists to close.
 
+## The release pipeline
+
+`release.yml` is a different workflow with different rules. It runs on a `v*` tag, or by hand
+(`workflow_dispatch`) with a version and an optional `dry_run`.
+
+Six jobs. `meta` resolves the version and the commit; `desktop (linux)`, `desktop (windows)` and
+`mobile (android)` build one installer each; `publish` collects them, writes the release notes, and
+prints what the token holds; `release` creates the GitHub Release and uploads the assets.
+
+The split between `publish` and `release` is deliberate, and two things follow from it:
+
+- **`publish` and `release` each declare their own `contents: write`.** The permission surface of
+  the job that writes to GitHub is one line wide, and it does not inherit anything from a job that
+  only builds.
+- **The bytes published are the bytes tested.** `release` re-downloads the artifacts the build jobs
+  uploaded rather than rebuilding, so what a user gets is exactly what CI produced.
+
+**A dry run skips the `release` job wholesale.** Not per step. If a step is added to `release`
+later, the drill does not break — which matters, because a drill that needs maintenance every time
+the release path changes is a drill whose failures get mistaken for real ones.
+
+### The tag has to point at the workflow you want
+
+Every build job checks out `needs.meta.outputs.sha`, and `meta` resolves the tag to a commit **from
+the checkout of that tag**. So the workflow that runs is the one in the tagged commit, not the one
+on `main`.
+
+That has a consequence worth knowing before it costs an hour: **if you fix something in
+`release.yml` and re-run the existing tag, nothing changes.** The tag still resolves to the old
+commit and the old workflow. You have to move the tag onto the commit that contains the fix. Do
+that only while nothing has been published from the old tag — once a release exists, the tag is the
+record of what shipped it.
+
+### What the release body says, and what the page shows
+
+The release body states what is signed (nothing on Windows, debug-signed on Android) and what is
+missing (macOS, iOS — both need a paid service). `apps/marketing/releases.ts` derives every download
+URL from `apps/marketing/released.version.json`, which holds the version and the exact asset file
+names a release actually carries. A platform whose build job failed is absent from that list, so its
+button keeps saying "Coming soon" instead of pointing at a file that is not there.
+
+Stamping that file is a human's job — the workflow prints a `release-site.patch` artifact rather
+than pushing to a branch.
+
 ### A 403 from a workflow is the client's report, not GitHub's
 
 The most expensive hour of this pipeline's construction came from reading a `403 Resource not
