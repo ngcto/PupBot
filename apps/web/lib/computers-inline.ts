@@ -1,7 +1,8 @@
 import type { EnqueueRun } from "@terabot/api/run-inline";
 import type { RunComputer } from "@terabot/agent";
 import { serverEnv } from "@terabot/config";
-import { ComputerAllocator, DrizzleComputerStore, createProviderFactory } from "@terabot/computers";
+import { ComputerAllocator, DrizzleComputerStore, createComputerRuntime } from "@terabot/computers";
+import type { RunComputerSignature } from "@terabot/computers";
 import type { AllocateResult } from "@terabot/computers";
 
 /**
@@ -17,19 +18,25 @@ export function inlineComputers(): boolean {
   return serverEnv().RUN_MODE === "inline";
 }
 
-let allocator: ComputerAllocator | undefined;
+let runtime: ReturnType<typeof createComputerRuntime> | undefined;
+
+/** The runtime, built once per server process, so the allocator and the run seam agree. */
+function runtimeFor(): ReturnType<typeof createComputerRuntime> {
+  runtime ??= createComputerRuntime({ store: new DrizzleComputerStore() });
+  return runtime;
+}
 
 /**
- * `RUN_MODE=inline`: this process also provisions. The queue is still published
- * to — `apps/worker` drains it on a queue deployment — but here the request does
- * the allocation itself, exactly as `createInlineEnqueue` does for a run.
+ * The allocator, built once per server process.
+ *
+ * The web app provisions computers on an inline deployment and destroys them on
+ * every deployment (deleting a bot, removing an account), so both paths take this
+ * one instance. Built through `createComputerRuntime` rather than assembled by
+ * hand: the runtime is what arms the provider's own idle pause, and an allocator
+ * without it sleeps boxes in the database while they keep running at the provider.
  */
-function allocatorFor(): ComputerAllocator {
-  allocator ??= new ComputerAllocator({
-    store: new DrizzleComputerStore(),
-    providers: createProviderFactory({ agent37Template: serverEnv().AGENT37_TEMPLATE }),
-  });
-  return allocator;
+export function runAllocator(): ComputerAllocator {
+  return runtimeFor().allocator;
 }
 
 /**
@@ -38,7 +45,7 @@ function allocatorFor(): ComputerAllocator {
  * stale `binding` both recover by asking again.
  */
 export async function allocateComputerInline(botId: string): Promise<AllocateResult> {
-  return allocatorFor().allocateForBot(botId);
+  return runAllocator().allocateForBot(botId);
 }
 
 /**
@@ -47,15 +54,16 @@ export async function allocateComputerInline(botId: string): Promise<AllocateRes
  * its own.
  */
 export async function sweepComputersInline(): Promise<void> {
-  await allocatorFor().sweepIdle();
+  await runAllocator().sweepIdle();
 }
 
+/**
+ * The run seam for an inline deployment. Taken from the same runtime the request
+ * path uses, so a run and a settings "connect" see one pool, not two.
+ */
 export function inlineRunComputer(): RunComputer {
-  const computers = allocatorFor();
-  return {
-    ensureReady: (botId) => computers.ensureReady(botId),
-    release: (botId, leaseId) => computers.releaseLease(botId, leaseId),
-  };
+  const computer: RunComputerSignature = runtimeFor().runComputer;
+  return { withLease: (botId, fn) => computer(botId, fn) };
 }
 
 /**

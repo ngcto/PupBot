@@ -31,7 +31,6 @@ export function Chat({
   initialMessages,
   activeRunId,
   pendingRequest,
-  onGiveComputer,
   onManageProviders,
 }: {
   bot: BotView;
@@ -40,7 +39,6 @@ export function Chat({
   activeRunId: string | null;
   /** A card the bot is still waiting on, read on load so a reload never loses it. */
   pendingRequest: PendingRequestView | null;
-  onGiveComputer: () => void;
   onManageProviders: () => void;
 }) {
   const router = useRouter();
@@ -171,7 +169,6 @@ export function Chat({
         onAttach={upload}
         reply={reply}
         onCancelReply={() => setReply(null)}
-        onGiveComputer={onGiveComputer}
         onManageProviders={onManageProviders}
         pending={sending}
       />

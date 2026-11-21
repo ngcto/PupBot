@@ -1,4 +1,6 @@
 import { executeRun } from "@terabot/agent";
+import type { RunComputer } from "@terabot/agent";
+import { DrizzleComputerStore, createComputerRuntime } from "@terabot/computers";
 import { database, run as runTable } from "@terabot/db";
 import { createGateway } from "@terabot/providers";
 import { eq } from "drizzle-orm";
@@ -10,6 +12,24 @@ import { releaseRunSecrets, toolsForRun } from "./vault-tools.ts";
 export type { EnqueueRequest, EnqueueRun };
 
 let gateway: ReturnType<typeof createGateway> | undefined;
+let runComputer: RunComputer | undefined;
+
+/**
+ * The computer seam, built once per process and shared with the worker.
+ *
+ * `RUN_MODE=inline` deployments have no worker at all, so a run in request has to
+ * reach the allocator itself. It is the same `runComputerWithLease` the worker
+ * uses, which is what keeps the hosted path and the queue path from behaving
+ * differently: there is exactly one implementation of "give this bot a machine
+ * when a tool asks", and `runComputerWithLease` is where its type is checked
+ * against the harness's.
+ */
+function computerForRuns(): RunComputer {
+  if (runComputer) return runComputer;
+  const { runComputer: withLease } = createComputerRuntime({ store: new DrizzleComputerStore() });
+  runComputer = { withLease };
+  return runComputer;
+}
 
 /**
  * `RUN_MODE=inline`: the API request runs the work itself instead of handing it
@@ -20,6 +40,8 @@ let gateway: ReturnType<typeof createGateway> | undefined;
 export function createInlineEnqueue(): EnqueueRun {
   return async ({ runId, waitUntil, computer }) => {
     gateway ??= createGateway();
+    // `apps/web` passes its own seam so a run and the request path share one
+    // allocator; without one, this process's runtime stands in.
     const db = database();
 
     // Which bot this run belongs to, so the vault can find its computer. Nothing extra
@@ -38,7 +60,7 @@ export function createInlineEnqueue(): EnqueueRun {
       db,
       gateway,
       runId,
-      computer,
+      computer: computer ?? computerForRuns(),
       // The vault's tools, plus the bridge that lets a card's answer reach this
       // run: inline mode runs the bot in the process that accepts the submit.
       tools: toolsForRun({

@@ -273,27 +273,35 @@ export function BotSettingsDialog({
 
           <Group label="Computer">
             <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-body">{bot.computer ? "Computer" : "No computer bound"}</span>
+              <span className="text-body">{bot.computer.externalId ? "Computer" : "No computer yet"}</span>
               <span className="text-body text-ink-muted">
-                {bot.computer ? (bot.computer.status === "awake" ? "Awake" : "Asleep") : "Chat is blocked"}
+                {bot.computer.externalId
+                  ? bot.computer.status === "awake"
+                    ? "Awake"
+                    : "Asleep"
+                  : "Built on first use"}
               </span>
             </div>
-            {bot.computer ? (
+            {bot.computer.externalId ? (
               <div className="border-t border-hairline px-4 py-3 text-sm text-ink-muted">
                 Provider {bot.computer.provider} · {bot.computer.status}
               </div>
             ) : (
-              <div className="border-t border-hairline p-4">
+              <div className="border-t border-hairline px-4 py-3">
+                <p className="text-sm text-ink-muted">
+                  Nothing to set up: the first thing this bot actually does with a computer builds one.
+                </p>
                 <Button
                   size="sm"
-                  variant="primary"
+                  variant="secondary"
+                  className="mt-2"
                   onClick={async () => {
                     await giveComputer(bot.id);
                     router.refresh();
-                    toast("Computer attached");
+                    toast("Building a computer");
                   }}
                 >
-                  Give it a computer
+                  Build it now
                 </Button>
               </div>
             )}
@@ -304,7 +312,7 @@ export function BotSettingsDialog({
               <div>
                 <p className="text-body text-ink">Delete {bot.name}</p>
                 <p className="text-sm text-ink-muted">
-                  Its conversation, memory and routines are removed. Its computer returns to the pool.
+                  Its conversation, memory and routines are removed, and its computer is destroyed now so it stops billing.
                 </p>
               </div>
               <Button

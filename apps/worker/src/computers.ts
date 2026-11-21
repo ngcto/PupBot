@@ -1,28 +1,26 @@
 import type { RunComputer } from "@terabot/agent";
-import { serverEnv } from "@terabot/config";
-import { ComputerAllocator, DrizzleComputerStore, createProviderFactory } from "@terabot/computers";
+import { ComputerAllocator, DrizzleComputerStore, createComputerRuntime } from "@terabot/computers";
 
 /**
- * The worker owns the allocator: the run path wakes a bot's computer here, and
- * the maintenance jobs sleep, renew and reconcile. The web app enqueues a
- * provision request but never provisions synchronously.
+ * The worker owns the allocator: the run asks this for a machine when a tool needs
+ * one, and the maintenance jobs sleep, renew, reconcile and reap. Nothing
+ * provisions on a page load or before a model call, so a bot that only chats
+ * never costs a box.
+ *
+ * The seam itself lives in `@terabot/computers` as `createRunComputer`, because
+ * the web app implements the identical thing: a deployment on `RUN_MODE=inline`
+ * has no worker process at all, so the runs there have to reach the allocator in
+ * request. One implementation means the two cannot drift.
  */
 export function createComputers(): { allocator: ComputerAllocator; runComputer: RunComputer } {
-  const env = serverEnv();
-  const allocator = new ComputerAllocator({
+  // One runtime for the whole process: the providers keep per-account state (the
+  // fake's boxes are in this process' memory), so building them per call would
+  // hand every exec a provider that has never heard of the box just made. The
+  // runtime also arms the provider-side idle pause with the same number the
+  // reaper uses.
+  const { allocator, runComputer: withLease } = createComputerRuntime({
     store: new DrizzleComputerStore(),
-    // A deployment's choice of shape and image is configuration, not product
-    // code: the template a provider starts from belongs here, at the one place
-    // that builds providers.
-    providers: createProviderFactory({
-      agent37Template: env.AGENT37_TEMPLATE,
-    }),
   });
-
-  const runComputer: RunComputer = {
-    ensureReady: (botId) => allocator.ensureReady(botId),
-    release: (botId, leaseId) => allocator.releaseLease(botId, leaseId),
-  };
-
+  const runComputer: RunComputer = { withLease };
   return { allocator, runComputer };
 }

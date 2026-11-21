@@ -28,14 +28,14 @@ import type { DetailField, EndpointKind, ModelEndpointConfig, ModelEvent } from 
 import { isGatewayAvailable, serverEnv } from "@terabot/config";
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import {
-  connectComputerAccount as connectComputerAccountFor,
-  disconnectComputerAccount as removeComputerAccountFor,
-} from "../lib/computer-accounts.ts";
-import { allocateComputerInline, inlineComputers, sweepComputersInline } from "../lib/computers-inline.ts";
+import { allocateComputerInline, inlineComputers, runAllocator, sweepComputersInline } from "../lib/computers-inline.ts";
 import { ensureComputerPool } from "../lib/computers.ts";
 import { detailColumnsFor, endpointConfigFor, fillEndpointDetails, storedSources } from "../lib/endpoint-config.ts";
 import type { EndpointDetailSource } from "../lib/endpoint-config.ts";
+import {
+  connectComputerAccount as connectFor,
+  disconnectComputerAccount as disconnectFor,
+} from "../lib/computer-accounts.ts";
 import {
   assertPublicDestination,
   assertPublicEndpointUrl,
@@ -167,6 +167,15 @@ export async function renameBot(botId: string, name: string): Promise<void> {
   revalidatePath("/", "layout");
 }
 
+/**
+ * Delete a bot and its computer.
+ *
+ * The box goes first, and its destruction is awaited: the row is what lets us find
+ * the box, so deleting the bot first would cascade `bot_computer` away and leave a
+ * machine running at the provider with nothing pointing at it. `destroyForBot`
+ * itself never throws — a provider that refuses records an orphan instead — so a
+ * user is never stuck with a bot they asked to remove.
+ */
 export async function deleteBot(botId: string): Promise<void> {
   const { workspace, db } = await context();
   const found = await ownedBot(workspace.id, botId);
@@ -175,6 +184,16 @@ export async function deleteBot(botId: string): Promise<void> {
     .from(conversation)
     .where(eq(conversation.botId, botId))
     .limit(1);
+
+  await runAllocator().destroyForBot(botId).catch((error: unknown) => {
+    // The destroy path already records what it could not delete; reaching here
+    // means the allocator itself failed, and a bot the user deleted must still go.
+    //
+    // The label is a constant and the id is passed as an argument, never built
+    // into the string: `botId` comes from the client, and a format string that
+    // includes it is a log-injection and format-string hazard.
+    console.error("[computers] destroying the box for a deleted bot failed", botId, error);
+  });
 
   await db.delete(botTable).where(eq(botTable.id, botId));
 
@@ -288,10 +307,17 @@ export async function updateBotSettings(botId: string, input: BotSettingsInput):
 }
 
 /**
- * The one-click fix behind a blocked composer, and the "Connect a computer"
- * button. On a queue deployment this marks the bot and lets the worker allocate;
- * on an inline deployment there is no worker to drain that queue, so the request
- * allocates directly instead of leaving the bot in `binding` forever.
+ * Provision a bot's computer now, on request.
+ *
+ * This is no longer how a bot normally gets a machine: the first tool call in a
+ * run does that, lazily, so a bot that only chats costs nothing. This exists for
+ * the one case a person wants a machine before using one — pressing "connect" in
+ * settings — and it goes through exactly the same allocator call, so a bot given a
+ * box here is never given a second one by its first run.
+ *
+ * Provisioning takes seconds and can back off, so the request hands it to
+ * whichever host does provisioning: this one when the deployment is inline, the
+ * worker otherwise.
  */
 export async function giveComputer(botId: string): Promise<{ state: string; reason: string | null }> {
   const { workspace, db } = await context();
@@ -833,6 +859,47 @@ export async function updateModelEndpointProvider(input: ProviderUpdate): Promis
   await refreshEndpointModels(endpoint.id).catch(() => undefined);
 }
 
+/**
+ * Connect one computer provider for the signed-in user.
+ *
+ * The one-account-per-provider rule is enforced in `connectComputerAccount` and
+ * again in Postgres, on purpose: the database is what survives two tabs saving
+ * at once, but its message names an index, and a person adding their second
+ * Instabox key deserves to be told what happened. Several different providers
+ * stay allowed — that is how one provider running out of capacity stops being
+ * the user's problem.
+ */
+export async function connectComputerAccount(input: {
+  provider: string;
+  apiKey: string;
+  label?: string;
+}): Promise<{ id: string }> {
+  const { user } = await context();
+  const result = await connectFor(user.id, input);
+  revalidatePath("/", "layout");
+  return result;
+}
+
+/**
+ * Remove one of the user's own accounts, destroying the boxes it owns first.
+ *
+ * A managed account is refused on the server, not just hidden: it belongs to
+ * the deployment, and deleting it would take every user's fallback away. A box
+ * the provider will not delete keeps its account alive, because the credential
+ * is the only thing that can still reach it.
+ */
+export async function disconnectComputerAccount(accountId: string): Promise<void> {
+  const { user } = await context();
+  const { outstanding } = await runAllocator().destroyForAccount(accountId);
+  if (outstanding > 0) {
+    throw new Error(
+      `${outstanding} ${outstanding === 1 ? "computer" : "computers"} could not be deleted just now, so the account is still needed to clean them up. Try again in a few minutes.`,
+    );
+  }
+  await disconnectFor(user.id, accountId);
+  revalidatePath("/", "layout");
+}
+
 export async function deleteModelEndpoint(endpointId: string): Promise<void> {
   const { workspace, db } = await context();
   const [endpoint] = await db
@@ -1220,26 +1287,3 @@ export async function testModelEndpoint(input: TestEndpointInput): Promise<TestE
   };
 }
 
-
-/**
- * Connect the user's own computer account. Their key is encrypted before it is
- * stored and never comes back to the browser: the settings panel only ever
- * learns whether a key exists.
- */
-export async function connectComputerAccount(input: { provider: string; apiKey: string }): Promise<{ id: string }> {
-  const { user } = await context();
-  const result = await connectComputerAccountFor(user.id, input);
-  revalidatePath("/", "layout");
-  return result;
-}
-
-/**
- * Remove one of the user's own computer accounts. A managed account is refused
- * on the server, not just hidden in the UI: it belongs to the deployment and
- * deleting it would take every user's fallback computer away.
- */
-export async function disconnectComputerAccount(accountId: string): Promise<void> {
-  const { user } = await context();
-  await removeComputerAccountFor(user.id, accountId);
-  revalidatePath("/", "layout");
-}
