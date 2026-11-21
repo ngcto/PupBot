@@ -13,7 +13,7 @@ import type {
   Screenshot,
 } from "../contract.ts";
 import { Agent37Client, AGENT37_TRANSITIONAL, providerErrorFrom } from "./client.ts";
-import type { Agent37CreateBody, Agent37Instance } from "./client.ts";
+import type { Agent37CreateBody, Agent37ExecResult, Agent37Instance } from "./client.ts";
 
 export interface Agent37ProviderOptions {
   /** Pool account key, e.g. "agent37:acct-1". Capacity is counted per account. */
@@ -120,8 +120,10 @@ export class Agent37Provider implements ComputerProvider {
         "Agent37 has no delete-after field; a leaked box is bounded by auto-sleep plus reconcile instead",
     },
     partial: {
+      exec:
+        "the sandbox exec endpoint answers once at exit, so onOutput receives the whole output in one chunk instead of live chunks",
       files:
-        "list/putFile/getFile need the agent file API, which agent37-base, agent37-n8n, agent37-android and agent37-ubuntu do not serve",
+        "list/putFile/getFile need the agent file API, which agent37-base, agent37-n8n, agent37-android and agent37-ubuntu do not serve; a directory holding more than 1000 entries is refused rather than half-listed, because the contract cannot carry the API's `truncated` flag",
     },
   };
 
@@ -275,6 +277,10 @@ export class Agent37Provider implements ComputerProvider {
       throw asProviderError(error);
     }
 
+    // Agent37 deletes are cheap (`deleting` -> `deleted`), so wait for the id to
+    // stop resolving. A box that outlives the deadline is reported rather than
+    // resolved: an instance that still resolves is still billing disk, and a
+    // caller that believed it gone would never look at it again.
     const deadline = Date.now() + 120_000;
     for (;;) {
       let instance: Agent37Instance;
@@ -285,7 +291,13 @@ export class Agent37Provider implements ComputerProvider {
         throw asProviderError(error);
       }
       if (instance.status === "deleted") return;
-      if (Date.now() >= deadline) return;
+      if (Date.now() >= deadline) {
+        throw new ProviderError(
+          "unavailable",
+          `Agent37 still reports ${ref.id} as ${instance.status} after the delete deadline`,
+          { providerCode: "delete_timeout", retryable: true },
+        );
+      }
       await sleep(500);
     }
   }
@@ -296,44 +308,34 @@ export class Agent37Provider implements ComputerProvider {
    */
   async exec(ref: ComputerRef, command: string, options: ExecOptions = {}): Promise<ExecResult> {
     const seconds = clamp(options.timeoutSeconds ?? 60, 1, 900);
+
     let wrapped = command;
     // A `KEY=v cmd` prefix only scopes the variable to that one simple command,
-    // so `KEY=v cd /d && run` would leave `run` without it, and a compound body
-    // would only see it on its first word. Exports are set before the cd and
-    // apply to the whole shell, which is what a caller means.
+    // so `KEY=v cd /d && run` would leave `run` without it. Exports reach the
+    // whole shell, which is what a caller means.
     if (options.env && Object.keys(options.env).length > 0) {
       const exports = Object.entries(options.env)
         .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
         .join("; ");
       wrapped = `${exports}; ${wrapped}`;
     }
-    if (options.cwd) wrapped = `cd ${shellQuote(options.cwd)} && ${wrapped}`;
-    // Agent37 has no per-call timeout field: the endpoint waits up to 15 minutes
-    // and then answers, leaving the command running. A caller asking for less
-    // gets a `timeout` wrapper inside the instance, so the deadline is honoured
-    // and the command actually stops rather than being abandoned.
-    if (options.timeoutSeconds !== undefined) {
-      wrapped = `timeout ${seconds}s sh -c ${shellQuote(wrapped)}`;
-    }
+    // Prepended last so it runs first: a cwd that does not exist fails the whole
+    // call instead of running the command somewhere else, and nothing after it
+    // runs at all.
+    if (options.cwd) wrapped = `cd ${shellQuote(options.cwd)} || exit 1; ${wrapped}`;
+    // The sandbox exec endpoint has no timeout field of its own: it waits up to
+    // 15 minutes and then answers, leaving the command running. The wrapper goes
+    // on every call, not only on the ones that asked for a deadline, so an
+    // abandoned command cannot outlive the request that started it.
+    wrapped = `timeout ${seconds}s sh -c ${shellQuote(wrapped)}`;
 
     const started = Date.now();
+    let result: Agent37ExecResult;
     try {
-      const result = await this.client.exec(ref.id, wrapped, {
+      result = await this.client.exec(ref.id, wrapped, {
         signal: options.signal,
         timeoutMs: (seconds + 60) * 1000,
       });
-      const timedOut = options.timeoutSeconds !== undefined && result.exit_code === 124;
-      if (options.onOutput) {
-        if (result.stdout) options.onOutput({ stream: "stdout", text: result.stdout });
-        if (result.stderr) options.onOutput({ stream: "stderr", text: result.stderr });
-      }
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.exit_code,
-        timedOut,
-        truncated: result.truncated,
-      };
     } catch (error) {
       const providerError = asProviderError(error);
       if (providerError.code === "timeout" && Date.now() - started >= seconds * 1000) {
@@ -341,6 +343,21 @@ export class Agent37Provider implements ComputerProvider {
       }
       throw providerError;
     }
+
+    // The endpoint answers once, at exit, so there are no chunks to deliver
+    // while the command runs: the whole output goes to onOutput as one chunk
+    // rather than being dropped, and `capabilities.partial.exec` says so.
+    if (options.onOutput) {
+      if (result.stdout) options.onOutput({ stream: "stdout", text: result.stdout });
+      if (result.stderr) options.onOutput({ stream: "stderr", text: result.stderr });
+    }
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exit_code,
+      timedOut: result.exit_code === 124,
+      truncated: result.truncated,
+    };
   }
 
   /**
@@ -387,7 +404,19 @@ export class Agent37Provider implements ComputerProvider {
 
     const body = (await response.json()) as {
       entries?: Array<{ name: string; type: string; size: number | null; modified: number }>;
+      truncated?: boolean;
     };
+    // The file API returns at most 1000 entries and says so with `truncated`.
+    // The contract's `list` has nowhere to carry that flag, and a short list
+    // reads as a complete directory, so refuse rather than under-report: the
+    // caller narrows the path and gets a real answer.
+    if (body.truncated) {
+      throw new ProviderError(
+        "bad_request",
+        `Agent37 truncated the listing of ${path || "~"}: 1000 entries is one page, so list a narrower path`,
+        { providerCode: "listing_truncated" },
+      );
+    }
     return (body.entries ?? []).map((entry) => ({
       name: entry.name,
       type:

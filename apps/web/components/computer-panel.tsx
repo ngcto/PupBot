@@ -128,6 +128,12 @@ function AccountRow({
   const [confirming, setConfirming] = useState(false);
   const full = account.used >= account.capacity;
   const broken = account.status === "error";
+  const draining = account.status === "draining";
+  const parked = account.parkedUntil !== null && Date.parse(account.parkedUntil) > Date.now();
+  // A legacy or seed row is visible to every user but belongs to none of them,
+  // so there is nobody who may disconnect it. Showing "Yours" with a button that
+  // always rejects would be a control that cannot work.
+  const unowned = account.ownerUserId === null;
 
   return (
     <div className="px-4 py-3" data-testid={`computer-account-${account.id}`}>
@@ -136,31 +142,40 @@ function AccountRow({
           <p className="flex items-center gap-2 text-body font-medium text-ink">
             <HugeiconsIcon icon={ComputerIcon} size={15} strokeWidth={1.7} className="text-ink-secondary" />
             {account.label}
-            {account.managed ? (
-              <span className="rounded-pill bg-raised-3 px-2 py-0.5 text-sm text-ink-muted">Included</span>
-            ) : (
-              <span className="rounded-pill bg-raised-3 px-2 py-0.5 text-sm text-ink-muted">Yours</span>
-            )}
+            <span className="rounded-pill bg-raised-3 px-2 py-0.5 text-sm text-ink-muted">
+              {account.managed ? "Included" : unowned ? "Deployment" : "Yours"}
+            </span>
           </p>
           <p className="mt-0.5 text-sm text-ink-muted">
             {broken
               ? (account.lastError ?? "This computer was refused by the provider.")
-              : full
-                ? "In use right now. Another bot waits until this one sleeps."
-                : "Ready when a bot needs it."}
+              : draining
+                ? "No new bots start here. Its boxes finish their work first."
+                : parked
+                  ? "The provider asked us to wait before using this computer again."
+                  : full
+                    ? account.capacity === 1
+                      ? "One bot at a time, and it stays taken until that bot's box is deleted."
+                      : `All ${account.capacity} places are taken until those bots' boxes are deleted.`
+                    : "Ready when a bot needs it."}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {broken ? (
             <Status text="Needs attention" tone="danger" />
+          ) : draining ? (
+            <Status text="Draining" tone="muted" />
+          ) : parked ? (
+            <Status text="Waiting" tone="muted" />
           ) : full ? (
             <Status text="In use" tone="muted" />
           ) : (
             <Status text="Ready" tone="success" />
           )}
-          {/* A managed computer belongs to the deployment: there is nothing here
-              a user may remove, so the control is absent rather than disabled. */}
-          {account.managed ? null : confirming ? (
+          {/* Nothing here a user may remove: a managed computer belongs to the
+              deployment, and an unowned row belongs to no one. The control is
+              absent rather than disabled, so there is nothing to press. */}
+          {account.managed || unowned ? null : confirming ? (
             <>
               <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
                 Cancel

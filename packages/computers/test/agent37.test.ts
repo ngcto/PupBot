@@ -291,6 +291,18 @@ describe("agent37 — exec", () => {
     expect(sent.startsWith("timeout 5s sh -c ")).toBe(true);
   });
 
+  it("wraps every exec in a deadline, so a command cannot outlive its request", async () => {
+    const { provider: box, calls } = provider(() => ({
+      status: 200,
+      body: { exit_code: 0, stdout: "", stderr: "", truncated: false },
+    }));
+    await box.exec({ provider: "agent37", account: "a", id: "ab12cd34ef" }, "sleep 100");
+    const sent = JSON.parse(calls.find((call) => call.url.includes("/exec"))!.body!).command as string;
+    // The caller asked for no deadline, but the endpoint has none of its own:
+    // without the wrapper the command keeps running after the request returns.
+    expect(sent).toBe("timeout 60s sh -c 'sleep 100'");
+  });
+
   it("passes cwd and env into the instance's shell, with env applying to the command", async () => {
     const { provider: box, calls } = provider(() => ({
       status: 200,
@@ -301,10 +313,13 @@ describe("agent37 — exec", () => {
       env: { NODE_ENV: "test" },
     });
     const sent = JSON.parse(calls.find((call) => call.url.includes("/exec"))!.body!).command as string;
-    // A `KEY=v cmd` prefix would scope the variable to `cd` alone, leaving the
-    // real command without it, so the export must come first and the cd after.
-    expect(sent).toBe("cd '/home/node/app' && export NODE_ENV='test'; pwd");
-    expect(sent.indexOf("export NODE_ENV")).toBeGreaterThan(sent.indexOf("cd "));
+    // The cd comes first and is guarded, so a cwd that does not exist fails the
+    // call instead of running the command somewhere else; the export follows it
+    // and reaches the whole command, which a `KEY=v cmd` prefix would not.
+    expect(sent).toBe(
+      String.raw`timeout 60s sh -c 'cd '\''/home/node/app'\'' || exit 1; export NODE_ENV='\''test'\''; pwd'`,
+    );
+    expect(sent.indexOf("cd ")).toBeLessThan(sent.indexOf("export NODE_ENV"));
   });
 
   it("keeps env applying to a compound command, not only its first word", async () => {
@@ -317,7 +332,7 @@ describe("agent37 — exec", () => {
     });
     const sent = JSON.parse(calls.find((call) => call.url.includes("/exec"))!.body!).command as string;
     // An export is what reaches both halves of an && chain.
-    expect(sent.startsWith("export FLAG='1'; ")).toBe(true);
+    expect(sent).toBe(String.raw`timeout 60s sh -c 'export FLAG='\''1'\''; a && b'`);
   });
 
   it("reports truncation instead of pretending it got the whole output", async () => {
@@ -386,6 +401,28 @@ describe("agent37 — files", () => {
     expect(entries[0]).toMatchObject({ name: "reports", type: "dir", size: 0 });
     expect(entries[1]).toMatchObject({ name: "leads.csv", type: "file", size: 18244 });
     expect(entries[1]?.modifiedAt).toBe(new Date(1781049642000).toISOString());
+  });
+
+  it("refuses a truncated listing instead of returning a page as the directory", async () => {
+    // The file API caps a listing at 1000 entries and sets `truncated`. The
+    // contract's list has nowhere to carry that flag, and a short list would read
+    // as a complete directory.
+    const { provider: box } = provider((call) => {
+      if (call.url.includes("/v1/files?")) {
+        return {
+          status: 200,
+          body: { path: "/home/node", parentPath: "/home", entries: [], truncated: true },
+        };
+      }
+      return { status: 200, body: instance() };
+    });
+
+    const error = await box
+      .list({ provider: "agent37", account: "a", id: "ab12cd34ef" }, "/home/node")
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as ProviderError).providerCode).toBe("listing_truncated");
+    expect((error as ProviderError).message).toContain("1000");
   });
 
   it("says a template has no file API rather than returning an empty directory", async () => {

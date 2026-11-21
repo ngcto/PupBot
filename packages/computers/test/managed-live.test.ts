@@ -95,16 +95,22 @@ describe.skipIf(!live)("managed computers, live", () => {
       const binding = await allocator.bindingForBot(botId);
       expect(binding.state).toBe("ready");
     } finally {
-      await allocator.destroyForBot(botId);
-      const [after] = computerId
-        ? await db.select().from(computer).where(eq(computer.id, computerId))
-        : [undefined];
-      console.log(`  after destroy: computer row=${after?.status ?? "none"}`);
-      expect(after?.status).toBe("deleted");
-      const [botRow] = await db.select().from(bot).where(eq(bot.id, botId));
-      expect(botRow?.computerState).toBe("unbound");
-      await db.delete(bot).where(eq(bot.id, botId));
-      await db.delete(user).where(eq(user.id, userId));
+      // The destroy can be the thing that failed, so the fixtures are removed in
+      // their own finally: a real key against the real application database must
+      // never leave a live proof bot behind for the next run to find.
+      try {
+        await allocator.destroyForBot(botId);
+        const [after] = computerId
+          ? await db.select().from(computer).where(eq(computer.id, computerId))
+          : [undefined];
+        console.log(`  after destroy: computer row=${after?.status ?? "none"}`);
+        expect(after?.status).toBe("deleted");
+        const [botRow] = await db.select().from(bot).where(eq(bot.id, botId));
+        expect(botRow?.computerState).toBe("unbound");
+      } finally {
+        await db.delete(bot).where(eq(bot.id, botId));
+        await db.delete(user).where(eq(user.id, userId));
+      }
     }
   }, 600_000);
 });

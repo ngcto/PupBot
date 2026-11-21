@@ -73,10 +73,6 @@ export async function listComputerAccounts(userId: string): Promise<ComputerAcco
 }
 
 /**
- * One entry per provider the product supports, with the two facts the UI needs
- * to avoid offering a control that cannot work.
- */
-/**
  * One entry per provider a user may connect.
  *
  * A provider is offered only if the product can actually run a bot on it: Boat
@@ -174,7 +170,11 @@ export async function disconnectComputerAccount(userId: string, accountId: strin
   // `computer.account_id` is ON DELETE SET NULL, so deleting the row would leave
   // every box it owns attached to nothing: the idle sweep skips a box with no
   // account and reconcile only walks accounts that still exist, so nothing would
-  // ever destroy it. Refuse while a box is alive rather than orphan it.
+  // ever destroy it. Refuse while a box exists rather than orphan it.
+  //
+  // Waiting for the box to sleep does not help: a sleeping box still occupies
+  // this account, which is why the count is every non-deleted row, and the only
+  // way out is to delete the bots that own them.
   const [attached] = await db
     .select({ count: sql<number>`count(*)` })
     .from(computer)
@@ -183,8 +183,8 @@ export async function disconnectComputerAccount(userId: string, accountId: strin
   if (live > 0) {
     throw new Error(
       live === 1
-        ? "this computer is running one bot's box. Let it sleep, or delete that bot, then disconnect."
-        : `this computer is running ${live} boxes. Let them sleep, or delete those bots, then disconnect.`,
+        ? "this computer still has a bot's machine. Delete that bot, then disconnect."
+        : `this computer still has ${live} bots' machines. Delete those bots, then disconnect.`,
     );
   }
 

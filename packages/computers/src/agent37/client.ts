@@ -139,8 +139,6 @@ export interface Agent37ClientOptions {
 export interface Agent37RequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
-  /** Bytes for a raw write; JSON callers leave it out. */
-  rawBody?: string | Uint8Array;
 }
 
 /**
@@ -194,6 +192,19 @@ export function classifyAgent37(code: string): ProviderErrorCode {
 /** Whether a failure is worth retrying, per the documented remedies. */
 function retryableFor(code: ProviderErrorCode): boolean {
   return code === "no_capacity" || code === "rate_limited" || code === "unavailable" || code === "busy";
+}
+
+/**
+ * `fetch` will not take this package's Uint8Array directly, so a raw write hands
+ * it a fresh ArrayBuffer-backed view. Strings pass through: the file API takes a
+ * text body as-is.
+ */
+function bodyInit(body: string | Uint8Array | undefined): string | ArrayBuffer | undefined {
+  if (body === undefined) return undefined;
+  if (typeof body === "string") return body;
+  const copy = new ArrayBuffer(body.byteLength);
+  new Uint8Array(copy).set(body);
+  return copy;
 }
 
 export function providerErrorFrom(
@@ -278,15 +289,18 @@ export class Agent37Client {
   }
 
   async deleteInstance(id: string, options: Agent37RequestOptions = {}): Promise<void> {
-    const response = await this.#send("DELETE", `${this.apiUrl}/v1/instances/${encodeURIComponent(id)}`, undefined, options);
+    const { response, bytes } = await this.readRaw(
+      "DELETE",
+      `${this.apiUrl}/v1/instances/${encodeURIComponent(id)}`,
+      options,
+    );
     if (response.ok) return;
     // A delete that failed silently would leave the instance billing disk while
     // the caller believed it was gone. Read the envelope so the reason reaches
     // the allocator as a real ProviderError code.
-    const text = await response.text();
     let parsed: unknown = null;
     try {
-      parsed = text ? JSON.parse(text) : null;
+      parsed = bytes.length ? JSON.parse(new TextDecoder().decode(bytes)) : null;
     } catch {
       parsed = null;
     }
@@ -333,16 +347,51 @@ export class Agent37Client {
    * One raw request to the instance URL, used for the agent template's file API,
    * whose writes are the file's exact bytes rather than JSON. The key goes as
    * `X-Agent37-Key`, the same header the instance plane uses.
+   *
+   * This returns the live Response and leaves the body to the caller, because a
+   * download must stream rather than buffer. `readRaw` is the buffered form and
+   * keeps the deadline through the body read.
    */
   async requestRaw(
     method: "GET" | "PUT" | "DELETE" | "PATCH",
     url: string,
     options: Agent37RequestOptions & { body?: string | Uint8Array } = {},
   ): Promise<Response> {
-    return this.#send(method, url, undefined, { ...options, rawBody: options.body }, true);
+    return this.#withAbort(
+      options,
+      (signal) =>
+        this.#fetch(url, {
+          method,
+          headers: this.#headers("instance", options.body === undefined ? undefined : "octet"),
+          body: bodyInit(options.body),
+          signal,
+        }),
+      `${method} ${url}`,
+    );
   }
 
-  // ── Plumbing ───────────────────────────────────────────────────────────────
+  /** A raw request whose body is read inside the same deadline. */
+  async readRaw(
+    method: "GET" | "PUT" | "DELETE" | "PATCH",
+    url: string,
+    options: Agent37RequestOptions & { body?: string | Uint8Array } = {},
+  ): Promise<{ response: Response; bytes: Uint8Array }> {
+    return this.#withAbort(
+      options,
+      async (signal) => {
+        const response = await this.#fetch(url, {
+          method,
+          headers: this.#headers("instance", options.body === undefined ? undefined : "octet"),
+          body: bodyInit(options.body),
+          signal,
+        });
+        return { response, bytes: new Uint8Array(await response.arrayBuffer()) };
+      },
+      `${method} ${url}`,
+    );
+  }
+
+  // Plumbing
 
   async #json<T>(
     method: string,
@@ -351,8 +400,25 @@ export class Agent37Client {
     schema: z.ZodType<T>,
     options: Agent37RequestOptions,
   ): Promise<T> {
-    const response = await this.#send(method, url, body, options);
-    const text = await response.text();
+    // One deadline for the whole exchange, the body read included: a stalled
+    // body must not outlive the timeout the caller set for the operation.
+    const { response, text } = await this.#withAbort(
+      options,
+      async (signal) => {
+        const response = await this.#fetch(url, {
+          method,
+          headers: this.#headers(
+            url.startsWith(this.sandboxUrl) ? "instance" : "control",
+            body === undefined ? undefined : "json",
+          ),
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal,
+        });
+        return { response, text: await response.text() };
+      },
+      `${method} ${url}`,
+    );
+
     let parsed: unknown;
     try {
       parsed = text ? JSON.parse(text) : null;
@@ -373,58 +439,68 @@ export class Agent37Client {
     return result.data;
   }
 
-  async #send(
-    method: string,
-    url: string,
-    body: unknown,
+  /**
+   * The header set for one call.
+   *
+   * Three planes, two keys. The control plane at api.agent37.com wants a Bearer
+   * token; the sandbox plane at sandbox.agent37.app and an instance's own `url`
+   * want `X-Agent37-Key`. The instance's hostname cannot be recognised from the
+   * URL, so callers on that plane say so.
+   */
+  #headers(plane: "control" | "instance", contentType?: "json" | "octet"): Record<string, string> {
+    const headers: Record<string, string> =
+      plane === "instance" ? { "x-agent37-key": this.#apiKey } : { authorization: `Bearer ${this.#apiKey}` };
+    if (contentType === "octet") headers["content-type"] = "application/octet-stream";
+    if (contentType === "json") headers["content-type"] = "application/json";
+    return headers;
+  }
+
+  /**
+   * One deadline per operation, honouring the caller's signal as well as the
+   * timeout, and covering the body read because the caller awaits its work
+   * inside this scope.
+   *
+   * An already-aborted signal aborts immediately: adding a listener does not
+   * replay an earlier abort, so without the explicit check a cancelled caller
+   * would still create an instance.
+   */
+  async #withAbort<T>(
     options: Agent37RequestOptions,
-    instancePlane = false,
-  ): Promise<Response> {
-    // exec, the file API and everything else served by the instance's own
-    // machine wants `X-Agent37-Key`; every control-plane call at api.agent37.com
-    // wants a Bearer token. Both take the same key.
-    const onInstance = instancePlane || url.startsWith(this.sandboxUrl);
-    const headers: Record<string, string> = onInstance
-      ? { "x-agent37-key": this.#apiKey }
-      : { authorization: `Bearer ${this.#apiKey}` };
-    const raw = options.rawBody;
-    if (raw !== undefined) {
-      // A raw write carries the file's own bytes; the docs do not require a
-      // content type, and octet-stream is the honest one for an arbitrary file.
-      headers["content-type"] = "application/octet-stream";
-    } else if (body !== undefined) {
-      headers["content-type"] = "application/json";
+    run: (signal: AbortSignal) => Promise<T>,
+    label: string,
+  ): Promise<T> {
+    const timeoutMs = options.timeoutMs ?? 60_000;
+
+    if (options.signal?.aborted) {
+      throw new ProviderError("unavailable", `${label} was cancelled before it started`, {
+        providerCode: "aborted",
+      });
     }
 
     const controller = new AbortController();
-    const timeoutMs = options.timeoutMs ?? 60_000;
-    const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
-    const abort = () => controller.abort(options.signal?.reason);
-    options.signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => controller.abort(new ProviderError("timeout", "timeout", {})), timeoutMs);
+    const onAbort = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
-      return await this.#fetch(url, {
-        method,
-        headers,
-        body: raw !== undefined ? (typeof raw === "string" ? raw : new Blob([raw as Uint8Array<ArrayBuffer>])) : body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-      });
+      return await run(controller.signal);
     } catch (error) {
       if (controller.signal.aborted) {
         const reason = controller.signal.reason;
-        if (reason instanceof Error && reason.message === "timeout") {
-          throw new ProviderError("timeout", `Agent37 did not answer ${method} ${url} within ${timeoutMs} ms`, {
+        if (reason instanceof ProviderError && reason.code === "timeout") {
+          throw new ProviderError("timeout", `Agent37 did not answer ${label} within ${timeoutMs} ms`, {
             providerCode: "request_timeout",
           });
         }
-        throw new ProviderError("unavailable", "the Agent37 request was aborted", { providerCode: "aborted" });
+        throw new ProviderError("unavailable", `${label} was cancelled`, { providerCode: "aborted" });
       }
+      if (error instanceof ProviderError) throw error;
       throw new ProviderError("unavailable", error instanceof Error ? error.message : String(error), {
         providerCode: "network",
       });
     } finally {
       clearTimeout(timer);
-      options.signal?.removeEventListener("abort", abort);
+      options.signal?.removeEventListener("abort", onAbort);
     }
   }
 }
