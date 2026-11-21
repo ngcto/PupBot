@@ -11,7 +11,27 @@ import { expect, test } from "@playwright/test";
  * The box itself is the fake provider here: no provider account and no spend.
  */
 
-async function signUp(page: import("@playwright/test").Page) {
+/**
+ * Sign up as the suite's Owner. Configuring a computer provider is an Owner-only
+ * act — a member's panel says managed cloud comes with their plan — so the specs
+ * that connect an account must run as the address `OWNER_EMAILS` names, which the
+ * config puts in `E2E_OWNER_EMAIL` for both the server and this file.
+ */
+async function signUpAsOwner(page: import("@playwright/test").Page) {
+  const email = process.env.E2E_OWNER_EMAIL ?? "owner@terabot.dev";
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Computer Tester");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("terabot-computer-password");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.getByTestId("create-bot-dialog").waitFor();
+  await page.getByLabel("Bot name").fill("Scout");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByTestId("bot-chip")).toContainText("Scout");
+}
+
+/** Sign up as an ordinary member: nobody in `OWNER_EMAILS`, so no plan and no bypass. */
+async function signUpAsMember(page: import("@playwright/test").Page) {
   const email = `computer-${Date.now()}-${Math.random().toString(16).slice(2)}@terabot.dev`;
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Computer Tester");
@@ -31,7 +51,7 @@ async function openComputerSettings(page: import("@playwright/test").Page) {
 }
 
 test("a bot with no computer chats, and nothing is provisioned by opening it", async ({ page }) => {
-  await signUp(page);
+  await signUpAsMember(page);
 
   // The composer is available with no computer attached: this is the whole point
   // of lazy provisioning, and it used to be blocked behind a card.
@@ -45,7 +65,7 @@ test("a bot with no computer chats, and nothing is provisioned by opening it", a
 });
 
 test("one account per provider, and the second is not offered", async ({ page }) => {
-  await signUp(page);
+  await signUpAsOwner(page);
   await openComputerSettings(page);
 
   const panel = page.getByTestId("computer-panel");

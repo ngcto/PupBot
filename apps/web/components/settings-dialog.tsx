@@ -4,6 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ApiGatewayIcon,
   Cancel01Icon,
+  CreditCardIcon,
   ComputerIcon,
   InformationCircleIcon,
   LockPasswordIcon,
@@ -38,6 +39,7 @@ const NAV = [
   { value: "general", label: "General", icon: Settings01Icon },
   { value: "providers", label: "Providers", icon: ApiGatewayIcon },
   { value: "computer", label: "Computer", icon: ComputerIcon },
+  { value: "billing", label: "Billing", icon: CreditCardIcon },
   { value: "permissions", label: "Permissions", icon: Shield01Icon },
   { value: "vault", label: "Vault", icon: LockPasswordIcon },
   { value: "usage", label: "Usage & Billing", icon: NotificationIcon },
@@ -178,7 +180,32 @@ export function SettingsDialog({
 
             <TabsPanel value="computer">
               <DialogTitle className="text-xl font-semibold">Computer</DialogTitle>
-              <ComputerPanel accounts={computerAccounts} providers={computerProviders} />
+              <ComputerPanel accounts={computerAccounts} providers={computerProviders} role={user.role} />
+            </TabsPanel>
+
+            <TabsPanel value="billing">
+              <DialogTitle className="text-xl font-semibold">Billing</DialogTitle>
+              <GroupLabel>Plan</GroupLabel>
+              <Card>
+                <div className="px-4 py-4">
+                  <p className="text-body text-ink">
+                    {user.role === "owner"
+                      ? "This account owns the deployment."
+                      : "A plan pays for your bots' cloud computer."}
+                  </p>
+                  <p className="mt-1 text-base text-ink-muted">
+                    {user.role === "owner"
+                      ? "It uses the product without a plan, and it is the account allowed to configure computers."
+                      : "Choose one on the billing page; nothing is charged until you do."}
+                  </p>
+                  <a
+                    href="/settings/billing"
+                    className="mt-3 inline-flex h-8 items-center rounded-pill bg-raised-2 px-3 text-base text-ink"
+                  >
+                    {user.role === "owner" ? "View billing" : "Choose a plan"}
+                  </a>
+                </div>
+              </Card>
             </TabsPanel>
 
             <TabsPanel value="permissions">
@@ -310,3 +337,15 @@ function Row({
 }
 
 export type { UserIcon };
+
+/**
+ * Settings → Computer.
+ *
+ * A member never configures a computer provider: managed cloud comes with the
+ * plan, so the surface explains that and stops. It is read-only rather than
+ * hidden so the person can see what exists and why they cannot change it —
+ * a hidden control teaches nothing and reads as a bug when found.
+ *
+ * A member may still add their own *model* provider: that lives under
+ * Providers and is deliberately not gated.
+ */

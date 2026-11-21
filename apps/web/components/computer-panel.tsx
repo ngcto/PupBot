@@ -40,9 +40,12 @@ import type { ComputerAccountView, ProviderAvailability } from "../lib/types.ts"
 export function ComputerPanel({
   accounts,
   providers,
+  role,
 }: {
   accounts: ComputerAccountView[];
   providers: ProviderAvailability[];
+  /** A member does not configure a provider: managed cloud comes with the plan. */
+  role: "owner" | "member";
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
@@ -90,7 +93,18 @@ export function ComputerPanel({
         )}
       </div>
 
-      <div className="mt-4 flex items-center gap-2">
+      {role === "member" ? (
+        <div className="mt-4 max-w-[560px] rounded-sm border border-card bg-raised-2 px-3 py-2.5" data-testid="computer-readonly">
+          <p className="text-base text-ink">Managed cloud comes with your plan.</p>
+          <p className="mt-1 text-base text-ink-muted">
+            You do not configure a computer here — your bots use the ones the deployment provides. Adding your own{" "}
+            <span className="text-ink-secondary">model</span> provider is separate and still yours to do, under
+            Providers.
+          </p>
+        </div>
+      ) : null}
+
+      <div className={role === "member" ? "mt-4 hidden" : "mt-4 flex items-center gap-2"}>
         {connectable.length === 0 ? (
           <p className="text-sm text-ink-faint" data-testid="computer-no-more-providers">
             You have connected every provider this deployment supports.
