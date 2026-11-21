@@ -1,0 +1,26 @@
+{
+  "machine": "cox.local",
+  "model": "claude-sonnet-5-5",
+  "baseUrl": "https://api.tail04f1ff.ts.net",
+  "reps": 1,
+  "arms": [
+    "b"
+  ],
+  "generatedAt": "2026-11-21T15:31:40.266Z",
+  "runs": [
+    {
+      "arm": "b",
+      "taskId": 1,
+      "attemptable": true,
+      "ok": false,
+      "why": "run failed: endpoint answered 403: DeepAI Code: Free daily Theos are not available right now. Try again at 2026-11-22T13:06:58+00:00. (HTTP 403, machine_bound)",
+      "answer": "",
+      "turns": 1,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "wallMsModel": 6920,
+      "wallMsInclusive": 6959,
+      "error": "endpoint answered 403: DeepAI Code: Free daily Theos are not available right now. Try again at 2026-11-22T13:06:58+00:00. (HTTP 403, machine_bound)"
+    }
+  ]
+}

@@ -199,11 +199,16 @@ export const anthropicMessagesAdapter: StreamAdapter = async function* (request)
       switch (type) {
         case "message_start": {
           const usage = payload.message?.usage;
-          if (usage) {
+          // Only when it actually reports something. `message_start` on some endpoints
+          // arrives with `input_tokens: 0, output_tokens: 0` and the real counts on the
+          // delta; emitting an empty usage event for it is harmless to a caller that
+          // overwrites, and wrong for one that sums — it records a zero turn and then
+          // the delta's count separately, so the totals drift.
+          if (usage && (usage.input_tokens || usage.output_tokens || usage.cache_read_input_tokens || usage.cache_creation_input_tokens)) {
             yield {
               type: "usage",
-              inputTokens: usage.input_tokens,
-              outputTokens: usage.output_tokens,
+              ...(usage.input_tokens ? { inputTokens: usage.input_tokens } : {}),
+              ...(usage.output_tokens ? { outputTokens: usage.output_tokens } : {}),
               ...(usage.cache_read_input_tokens ? { cacheReadTokens: usage.cache_read_input_tokens } : {}),
               ...(usage.cache_creation_input_tokens
                 ? { cacheWriteTokens: usage.cache_creation_input_tokens }
