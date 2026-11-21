@@ -378,10 +378,14 @@ export class InstaboxProvider implements ComputerProvider {
 }
 
 const CAPTURE_SCRIPT = `set -u
+# scrot takes the display from DISPLAY; its -d is a delay in seconds, so passing
+# ":1" there made every capture fail on every box (measured: "option --delay:
+# ':1' is not an integer"). Set DISPLAY per tool instead of per shell, so a box
+# whose session is not on :1 still captures.
 for tool in scrot import ffmpeg; do
   command -v "$tool" >/dev/null 2>&1 || continue
   case "$tool" in
-    scrot)  scrot -o -z -d :1 ${SHOT_PATH} && exit 0 ;;
+    scrot)  DISPLAY=:1 scrot -o -z ${SHOT_PATH} && exit 0 ;;
     import) DISPLAY=:1 import -window root ${SHOT_PATH} && exit 0 ;;
     ffmpeg) DISPLAY=:1 ffmpeg -loglevel error -f x11grab -video_size 1280x800 -i :1 -frames:v 1 -y ${SHOT_PATH} && exit 0 ;;
   esac

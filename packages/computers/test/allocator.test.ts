@@ -325,6 +325,24 @@ describe("allocator — reconcile", () => {
     expect(binding?.computer?.externalId).toBe(ref.id);
   });
 
+  it("refuses to adopt a box past the account's capacity", async () => {
+    const { store, allocator, fake } = harness();
+    store.addBot("bot-1");
+    store.addBot("bot-2");
+    store.addAccount({ id: "a", capacity: 1 });
+    // Two boxes exist at the provider with live bots, but the account has room
+    // for one row. Adopting both is how a full pool silently overfills.
+    await fake("a").provision({ metadata: { botId: "bot-1" } });
+    await fake("a").provision({ metadata: { botId: "bot-2" } });
+
+    const summary = await allocator.reconcile();
+
+    expect(summary.adopted).toBe(1);
+    expect(summary.failed).toBe(1);
+    const live = (await store.listComputers()).filter((row) => row.status !== "deleted");
+    expect(live).toHaveLength(1);
+  });
+
   it("destroys a stray box whose bot is gone", async () => {
     const { store, allocator, fake } = harness();
     store.addAccount({ id: "a", capacity: 5 });
@@ -342,6 +360,9 @@ describe("allocator — reconcile", () => {
     store.addAccount({ id: "a", capacity: 5 });
     const row = store.addComputer({ accountId: "a", externalId: "a-lost-box", status: "awake", metadata: { botId: "bot-1" } });
     await store.bindComputer("bot-1", row);
+    // A live box the provider does report, so the listing is not empty: an empty
+    // listing is treated as "the provider cannot tell me", not "everything died".
+    await fake("a").provision({ metadata: { botId: "bot-1" } });
 
     const summary = await allocator.reconcile();
 
@@ -350,7 +371,8 @@ describe("allocator — reconcile", () => {
     const binding = await store.botBinding("bot-1");
     expect(binding?.state).toBe("ready");
     expect(binding?.computer?.externalId).not.toBe("a-lost-box");
-    expect((await fake("a").listComputers()).length).toBe(1);
+    // The live box was adopted and a replacement provisioned for the lost one.
+    expect((await fake("a").listComputers()).length).toBe(2);
   });
 
   it("does not destroy a box the database already tracks", async () => {

@@ -463,6 +463,17 @@ export class ComputerAllocator {
 
         const botId = box.metadata?.botId;
         if (botId && (await this.store.botExists(botId))) {
+          // Adoption books a row against this account, so it has to respect the
+          // same capacity the provisioning path does. Without this a reconcile
+          // can push an account past its capacity and starve every later bot.
+          const booked = (await this.store.listComputers()).filter(
+            (computer) => computer.accountId === account.id && computer.status !== "deleted",
+          ).length;
+          if (booked >= account.capacity) {
+            this.#log(`reconcile ${account.label}: over capacity, not adopting ${box.id}`);
+            summary.failed += 1;
+            continue;
+          }
           const computer = await this.store.createComputer({
             accountId: account.id,
             provider: provider.name,
@@ -486,6 +497,12 @@ export class ComputerAllocator {
           summary.failed += 1;
         }
       }
+
+      // An account whose inventory came back empty is indistinguishable from one
+      // that cannot list its boxes, and deleting every row on that reading
+      // destroys a live pool. The provider-side delete deadline is the backstop
+      // for a box that is genuinely gone, so an empty listing is skipped.
+      if (boxes.length === 0) continue;
 
       for (const row of rows) {
         if (row.status === "deleted" || seen.has(row.externalId)) continue;
