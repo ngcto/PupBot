@@ -155,12 +155,11 @@ jobs:
 
       # electron-builder is told `--publish never`; uploading is this workflow's
       # job, not the packager's, so nothing can publish by accident.
+      # No TERABOT_APP_URL here on purpose: the main process reads it from its own
+      # environment at launch and the bundle has no compile-time define, so setting
+      # it for electron-builder would do nothing. The release body says how to set
+      # it when running the app.
       - name: Package
-        env:
-          # The Electron main process reads TERABOT_APP_URL at launch and falls
-          # back to its documented localhost default when it is empty. The release
-          # body tells the user which of the two they got.
-          TERABOT_APP_URL: ${{ vars.TERABOT_APP_URL }}
         run: pnpm --filter @terabot/desktop exec electron-builder --linux AppImage deb --x64 --config electron-builder.config.cjs --publish never
 
       - name: List what came out
@@ -208,8 +207,6 @@ jobs:
       # and an account Ng has to create. The installer works; the first run shows
       # a "Windows protected your PC" prompt. The release body says so plainly.
       - name: Package
-        env:
-          TERABOT_APP_URL: ${{ vars.TERABOT_APP_URL }}
         run: pnpm --filter @terabot/desktop exec electron-builder --win nsis --x64 --config electron-builder.config.cjs --publish never
 
       - name: List what came out
@@ -367,18 +364,16 @@ jobs:
             echo ""
             echo "### What this build points at"
             echo ""
-            if [ "$APP_CONFIGURED" = "true" ]; then
-              echo "- Desktop wraps \`$APP_URL\`."
-            else
-              echo "- **Preview build.** \`TERABOT_APP_URL\` was not set when this was built, so the desktop app keeps its development default (\`http://localhost:3000\`) and needs that server running locally."
-            fi
+            # The desktop app resolves TERABOT_APP_URL from its own environment at
+            # launch, and its bundle has no compile-time define, so an origin set
+            # here cannot be baked into the installer; it has to be set on the
+            # machine that runs the app.
+            echo "- **Desktop** opens \`${APP_URL:-http://localhost:3000}\` by default. That is a launch-time default: set \`TERABOT_APP_URL\` in the environment that starts the app to wrap a hosted product, for example \`TERABOT_APP_URL=$APP_URL ./Terabot-*.AppImage\`. Baking the origin into the installer needs a build-time define in \`apps/desktop/scripts/build.mjs\`, which this workflow does not do."
             if [ "$API_CONFIGURED" = "true" ]; then
-              echo "- Android calls the configured API origin."
+              echo "- **Android** calls the API origin configured when this was built."
             else
-              echo "- **Preview build.** \`TERABOT_API_URL\` was not set, so the APK calls \`http://localhost:8787\`, which a phone cannot reach."
+              echo "- **Android** calls \`http://localhost:8787\`, which a phone cannot reach. Set the \`TERABOT_API_URL\` repository variable and re-run this tag to get an APK that works away from this machine."
             fi
-            echo ""
-            echo "Set either repository variable and re-run this tag to rebuild the same artifacts for real; nothing else changes."
             echo ""
             echo "### Notes"
             echo ""
