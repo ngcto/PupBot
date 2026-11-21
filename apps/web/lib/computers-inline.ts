@@ -27,7 +27,7 @@ let allocator: ComputerAllocator | undefined;
 function allocatorFor(): ComputerAllocator {
   allocator ??= new ComputerAllocator({
     store: new DrizzleComputerStore(),
-    providers: createProviderFactory(),
+    providers: createProviderFactory({ agent37Template: serverEnv().AGENT37_TEMPLATE }),
   });
   return allocator;
 }

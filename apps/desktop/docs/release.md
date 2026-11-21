@@ -11,8 +11,8 @@ real key or password.
 | platform | command | artifacts |
 | --- | --- | --- |
 | macOS | `package:mac` | `Terabot-<version>-arm64.dmg`, `Terabot-<version>-x64.dmg`, matching `.zip` |
-| Windows | `package:win` | `Terabot Setup <version>.exe` (NSIS, per-user, choose install dir) |
-| Linux | `package:linux` | `Terabot-<version>-x86_64.AppImage`, `terabot_<version>_amd64.deb`, arm64 equivalents |
+| Windows | `package:win` | `Terabot-<version>-setup.exe` (NSIS, per-user, choose install dir) |
+| Linux | `package:linux` | `Terabot-<version>-x86_64.AppImage`, `Terabot-<version>-amd64.deb`, arm64 equivalents |
 
 The version comes from `apps/desktop/package.json`. Bump it before a release; `electron-updater`
 compares that string.
@@ -94,7 +94,7 @@ short-lived cert). Then one of:
 
 or, for Azure Trusted Signing, `azureSignOptions` in the `win` block (`publisherName`, `endpoint`,
 `codeSigningAccountName`, `certificateProfileName`) plus the `signtool`/Azure CLI credentials.
-Verify with `signtool verify /pa /v "release/Terabot Setup <version>.exe"`.
+Verify with `signtool verify /pa /v "release/Terabot-<version>-setup.exe"`.
 
 Unsigned Windows builds run, but SmartScreen shows "unrecognised app" until reputation
 accumulates; the NSIS installer is per-user, so no admin prompt is required.

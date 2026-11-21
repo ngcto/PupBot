@@ -7,7 +7,14 @@
  */
 const feed = process.env.TERABOT_UPDATE_FEED_URL?.trim();
 
-/** @type {import("electron-builder").Configuration} */
+/**
+ * Artifact names carry no spaces or architecture guesses beyond what the
+ * platform needs: a GitHub release stores a space in an asset name as a dot, so
+ * a name with a space in it is one the download page can never match. These
+ * templates are what `apps/marketing/releases.ts` derives its URLs from.
+ *
+ * @type {import("electron-builder").Configuration}
+ */
 module.exports = {
   appId: "ai.terabot.desktop",
   productName: "Terabot",
@@ -39,6 +46,7 @@ module.exports = {
     target: [{ target: "nsis", arch: ["x64", "arm64"] }],
   },
   nsis: {
+    artifactName: "Terabot-${version}-setup.${ext}",
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
@@ -46,6 +54,7 @@ module.exports = {
   },
 
   linux: {
+    artifactName: "Terabot-${version}-${arch}.${ext}",
     icon: "build/icon.png",
     category: "Network",
     executableName: "terabot",

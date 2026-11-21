@@ -11,9 +11,11 @@ import {
   run,
   usageEvent,
 } from "@terabot/db";
-import { providerHintForBaseUrl } from "@terabot/providers";
+import { isGatewayAvailable, serverEnv } from "@terabot/config";
+import { builtinProvider, endpointUsableForBot, providerHintForBaseUrl } from "@terabot/providers";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { listConnectionsFor } from "./apps.ts";
+import { listComputerAccounts, providerAvailability } from "./computer-accounts.ts";
 import type {
   BotView,
   ConnectedApp,
@@ -24,6 +26,21 @@ import type {
   ShellUser,
   UsageView,
 } from "./types.ts";
+
+/**
+ * Whether the deployment's own credentials authenticate this row, so it needs no
+ * stored key. Mirrors the server action's rule; the two must agree or the dialog
+ * offers a provider the save path then refuses.
+ */
+function gatewayAuthenticatedByDeployment(builtinId: string | null, baseUrl: string): boolean {
+  if (builtinId !== "vercel-ai-gateway") return false;
+  // Mirror the server action: a deployment with no credential cannot authenticate
+  // the row, so the dialog must not offer it either.
+  const env = serverEnv();
+  if (!isGatewayAvailable(env)) return false;
+  const normalise = (value: string) => value.replace(/\/+$/, "");
+  return normalise(baseUrl) === normalise(env.AI_GATEWAY_BASE_URL);
+}
 
 function botQuery(workspaceId: string) {
   const db = database();
@@ -155,6 +172,10 @@ export async function loadShellData(input: {
       contextWindow: modelEndpoint.contextWindow,
       catalogMatch: modelEndpoint.catalogMatch,
       modelList: modelEndpoint.modelList,
+      builtinId: modelEndpoint.builtinId,
+      pricing: modelEndpoint.pricing,
+      toolSupport: modelEndpoint.toolSupport,
+      autoFilledFields: modelEndpoint.autoFilledFields,
       // Only whether a key exists. The key never leaves the server.
       hasKey: sql<boolean>`${modelEndpoint.encryptedKey} is not null`,
     })
@@ -162,18 +183,33 @@ export async function loadShellData(input: {
     .where(eq(modelEndpoint.workspaceId, input.workspaceId))
     .orderBy(asc(modelEndpoint.createdAt));
 
-  const endpoints: EndpointView[] = endpointRows.map((row) => ({
-    id: row.id,
-    label: row.label,
-    kind: row.kind,
-    baseUrl: row.baseUrl,
-    modelId: row.modelId,
-    contextWindow: row.contextWindow,
-    catalogMatch: row.catalogMatch,
-    modelCount: row.modelList?.length ?? null,
-    hasKey: row.hasKey,
-    providerHint: providerHintForBaseUrl(row.baseUrl) ?? null,
-  }));
+  const endpoints: EndpointView[] = endpointRows.map((row) => {
+    const builtin = builtinProvider(row.builtinId);
+    return {
+      id: row.id,
+      label: row.label,
+      kind: row.kind,
+      // A built-in's URL is not the user's to see, so it never leaves the server
+      // for one; a custom endpoint's is shown so it can be identified.
+      baseUrl: builtin ? null : row.baseUrl,
+      builtinId: row.builtinId,
+      builtinName: builtin?.name ?? null,
+      modelId: row.modelId,
+      contextWindow: row.contextWindow,
+      catalogMatch: row.catalogMatch,
+      modelCount: row.modelList?.length ?? null,
+      hasKey: row.hasKey,
+      providerHint: providerHintForBaseUrl(builtin?.baseUrl ?? row.baseUrl) ?? null,
+      // A built-in with no key cannot answer, so bot creation must not offer it;
+      // one the deployment itself authenticates is keyless by design and stays.
+      ready: endpointUsableForBot({
+        builtinId: row.builtinId,
+        hasKey: row.hasKey,
+        deploymentAuthenticated: gatewayAuthenticatedByDeployment(row.builtinId, row.baseUrl),
+      }),
+      detailSources: (row.autoFilledFields ?? []) as string[],
+    };
+  });
 
   const usage: UsageView[] = [];
   if (bots.length > 0) {
@@ -237,5 +273,7 @@ export async function loadShellData(input: {
     endpoints,
     usage,
     connections,
+    computerAccounts: await listComputerAccounts(input.user.id),
+    computerProviders: await providerAvailability(input.user.id),
   };
 }

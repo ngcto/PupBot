@@ -43,17 +43,20 @@ export function CreateBotDialog({
   const [pending, setPending] = useState(false);
 
   const accent = COLORS.find((entry) => entry.id === color)?.hex ?? "#1884fc";
-  const endpoint = endpoints.find((entry) => entry.id === endpointId) ?? null;
-  const ready = endpoints.length === 0 || Boolean(endpointId && modelId.trim());
+  // A provider that cannot answer is not a choice: a built-in with no key is
+  // hidden here until the key is added, rather than offered and then failing.
+  const usable = endpoints.filter((entry) => entry.ready);
+  const endpoint = usable.find((entry) => entry.id === endpointId) ?? null;
+  const ready = usable.length === 0 || Boolean(endpointId && modelId.trim());
 
   // Arrive on a working choice: the first provider and its own default model.
   useEffect(() => {
     if (!open) return;
-    if (endpointId && endpoints.some((entry) => entry.id === endpointId)) return;
-    const first = endpoints[0];
+    if (endpointId && usable.some((entry) => entry.id === endpointId)) return;
+    const first = usable[0];
     setEndpointId(first?.id ?? null);
     setModelId(first?.modelId ?? "");
-  }, [endpoints, endpointId, open]);
+  }, [usable, endpointId, open]);
 
   async function submit() {
     if (!name.trim() || pending || !ready) return;
@@ -86,12 +89,15 @@ export function CreateBotDialog({
           </DialogClose>
         </div>
 
-        {endpoints.length === 0 ? (
+        {usable.length === 0 ? (
           <div className="flex flex-1 flex-col items-center gap-3 px-6 py-10 text-center" data-testid="create-bot-no-provider">
-            <p className="text-body font-medium text-ink">Add a provider first</p>
+            <p className="text-body font-medium text-ink">
+              {endpoints.length === 0 ? "Add a provider first" : "Add a key to your provider"}
+            </p>
             <p className="max-w-[320px] text-body text-ink-secondary">
-              A bot answers through a model provider. Connect one in Settings, then come back and name
-              your bot.
+              {endpoints.length === 0
+                ? "A bot answers through a model provider. Connect one in Settings, then come back and name your bot."
+                : `Your provider needs its key before a bot can use it. Add it in Settings → Providers, then come back and name your bot.`}
             </p>
             <Button
               variant="primary"
@@ -127,11 +133,11 @@ export function CreateBotDialog({
                     value={endpointId ?? undefined}
                     onValueChange={(value) => {
                       setEndpointId(value);
-                      const next = endpoints.find((entry) => entry.id === value);
+                      const next = usable.find((entry) => entry.id === value);
                       setModelId(next?.modelId ?? "");
                     }}
                     placeholder="Pick a provider"
-                    options={endpoints.map((entry) => ({ value: entry.id, label: entry.label }))}
+                    options={usable.map((entry) => ({ value: entry.id, label: entry.label }))}
                   />
                 </div>
                 <div className="flex items-center justify-between gap-3">

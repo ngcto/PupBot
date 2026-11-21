@@ -1,41 +1,48 @@
 import { isStubProviderEnabled, serverEnv } from "@terabot/config";
+import { ensureManagedComputerAccounts } from "@terabot/computers";
 import { computerAccount, database, encryptSecret, newId } from "@terabot/db";
 import { and, eq } from "drizzle-orm";
 
 /**
- * The pool has to have at least one account. In development that is the fake
- * provider (no key, no spend); with INSTABOX_API_KEY in the environment and no
- * account yet, the key becomes an Instabox account. In production an account is
- * normally managed as data, and this does nothing.
+ * The pool a bot's computer comes from.
  *
- * The lookup is per provider, not "is any row there": a seeded or abandoned
- * account of another kind must not stop the real pool from being created, and
- * must not be handed to the allocator as if it could run boxes.
+ * A deployment that sets `INSTABOX_API_KEY` lends out its own computers: this
+ * makes the account row for that key, encrypted the same way a user's key is, so
+ * a new user with no plan and no configuration still gets a working computer.
+ * Without a key the deployment lends nothing.
+ *
+ * Development additionally gets the in-memory fake so the app runs with no key
+ * and no spend. In production nothing is created implicitly: a missing key means
+ * no managed capacity, and the product says so plainly instead of provisioning.
+ *
+ * This only ensures *rows*. Which bot gets which box, and when, belongs to the
+ * allocator's single provisioning path.
  */
 export async function ensureComputerPool(): Promise<void> {
-  const apiKey = serverEnv().INSTABOX_API_KEY;
-  const provider = apiKey ? "instabox" : "fake";
-  if (provider === "fake" && !isStubProviderEnabled()) return;
+  const env = serverEnv();
+  await ensureManagedComputerAccounts({
+    INSTABOX_API_KEY: env.INSTABOX_API_KEY,
+    AGENT37_API_KEY: env.AGENT37_API_KEY,
+    INSTABOX_CAPACITY: env.INSTABOX_CAPACITY,
+    AGENT37_CAPACITY: env.AGENT37_CAPACITY,
+  });
 
+  if (isStubProviderEnabled()) await ensureFakeAccount();
+}
+
+/**
+ * The stub provider lives in one process' memory, so it is a development
+ * convenience rather than a computer source. It is never managed: a deployment
+ * did not provide it, and a user did not configure it.
+ */
+async function ensureFakeAccount(): Promise<void> {
   const db = database();
   const existing = await db
     .select({ id: computerAccount.id })
     .from(computerAccount)
-    .where(and(eq(computerAccount.provider, provider), eq(computerAccount.status, "active")))
+    .where(and(eq(computerAccount.provider, "fake"), eq(computerAccount.status, "active")))
     .limit(1);
   if (existing.length > 0) return;
-
-  if (apiKey) {
-    await db.insert(computerAccount).values({
-      id: newId(),
-      provider: "instabox",
-      label: "Instabox (environment key)",
-      encryptedCredential: encryptSecret(apiKey),
-      status: "active",
-      capacity: serverEnv().INSTABOX_CAPACITY,
-    });
-    return;
-  }
 
   await db.insert(computerAccount).values({
     id: newId(),
@@ -44,5 +51,6 @@ export async function ensureComputerPool(): Promise<void> {
     encryptedCredential: encryptSecret("fake"),
     status: "active",
     capacity: 5,
+    managed: false,
   });
 }

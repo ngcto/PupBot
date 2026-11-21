@@ -1,0 +1,620 @@
+# Release — turns a tag into downloadable installers and a published GitHub Release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# or run it by hand from the Actions tab (workflow_dispatch) with a version, which
+# is how it gets tested before anyone cuts a real tag.
+#
+# Three platforms are built from the source in this repo:
+#   desktop linux   AppImage + deb      (x64, plus arm64 in the desktop job's second pass)
+#   desktop windows nsis installer      (x64)
+#   android         .apk                (Expo prebuild + gradle assembleRelease)
+#
+# macOS is NOT built here, and iOS is NOT built here. Both need a paid service:
+# a macOS runner bills at 10x minutes on the free plan and a distributable macOS
+# build needs an Apple Developer certificate plus notarisation; iOS needs a paid
+# Apple account and a build host with Xcode. `apps/marketing/releases.ts` leaves
+# those two entries `null` so the page says "Coming soon" instead of lying, and
+# the reason is printed in the release body.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, without the leading "v" (for example 0.1.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and probe without creating or uploading a release'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+  # The download page and the release body both read these, so the version is
+  # resolved once and passed down instead of being retyped in each job.
+  NEXT_PUBLIC_SITE_URL: https://terabot.dev
+
+jobs:
+  # Work out what is being released, once, from the tag or the manual input.
+  meta:
+    name: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      node-version: ${{ steps.node.outputs.version }}
+      is-prerelease: ${{ steps.v.outputs.prerelease }}
+      app-configured: ${{ steps.targets.outputs.app-configured }}
+      api-configured: ${{ steps.targets.outputs.api-configured }}
+      api-url: ${{ steps.targets.outputs.api-url }}
+      sha: ${{ steps.v.outputs.sha }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Resolving `v1.2.3^{commit}` needs the tag ref, which the default
+          # depth-1 fetch of a branch does not include.
+          fetch-depth: 0
+
+      - id: v
+        name: Resolve the version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${{ github.ref_name }}"
+            version="${tag#v}"
+          else
+            version="${{ inputs.version }}"
+            version="${version#v}"
+            tag="v$version"
+          fi
+          # Strict semver 2.0: MAJOR.MINOR.PATCH with optional -prerelease and
+          # +build. Refuse anything else before five jobs find out the hard way.
+          printf '%s' "$version" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$' \
+            || { echo "::error::'$version' is not a semver 2.0 version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # Only a hyphen BEFORE any +build metadata marks a prerelease.
+          # `1.2.3+build-5` is a stable release whose metadata happens to contain
+          # a hyphen; matching on the whole string marked it prerelease.
+          core="${version%%+*}"
+          if printf '%s' "$core" | grep -q -- '-'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::'$version' is a prerelease; every artifact name carries that suffix."
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          # A manual run builds whatever ref it was dispatched on, which for an
+          # existing version would replace that release's installers with binaries
+          # from a different commit while the tag still points at the old one.
+          # Resolve the tag once and build that commit everywhere.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            sha="${{ github.sha }}"
+          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            sha="$(git rev-parse "$tag^{commit}")"
+            echo "::notice::$tag already exists; building its commit $sha, not the dispatched branch."
+          else
+            sha="${{ github.sha }}"
+            echo "::notice::$tag does not exist yet; building the dispatched commit $sha."
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag from \`${sha:0:7}\`" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Same rule as CI: the repo declares its Node major, this file never does.
+      # The two shipped clients need a reachable origin to be more than a preview.
+      # Neither is a secret, so they are repository variables, not secrets.
+      - id: targets
+        name: Check the shipped origins
+        env:
+          APP_URL: ${{ vars.TERABOT_APP_URL }}
+          API_URL: ${{ vars.TERABOT_API_URL }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_URL:-}" ]; then
+            echo "app-configured=true" >> "$GITHUB_OUTPUT"
+            echo "Desktop defaults to \`$APP_URL\` at launch." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "app-configured=false" >> "$GITHUB_OUTPUT"
+            echo "TERABOT_APP_URL is unset; the desktop app keeps its localhost:3000 launch default." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # An unset repository variable reaches a job as an empty string, and
+          # `process.env.X ?? fallback` does not treat "" as absent — so the env is
+          # only set below when this resolved to a real URL. Otherwise the app
+          # keeps its documented localhost default instead of calling "".
+          if [ -n "${API_URL:-}" ]; then
+            echo "api-configured=true" >> "$GITHUB_OUTPUT"
+            echo "api-url=$API_URL" >> "$GITHUB_OUTPUT"
+            echo "Android calls \`$API_URL\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "api-configured=false" >> "$GITHUB_OUTPUT"
+            echo "api-url=" >> "$GITHUB_OUTPUT"
+            echo "::warning::TERABOT_API_URL is unset: the APK is a PREVIEW that calls localhost, unreachable from a phone."
+          fi
+
+      - id: node
+        name: Resolve the Node version the repo declares
+        run: |
+          set -euo pipefail
+          if [ -f .nvmrc ]; then
+            version="$(tr -d '[:space:]' < .nvmrc)"
+          else
+            version="$(node -p "require('./package.json').engines.node" | grep -oE '[0-9]+' | head -1)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Node $version" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Desktop linux: AppImage (portable, no install) and .deb (apt). x64 only —
+  # arm64 desktop Linux is a second runner pass for a market nobody here has
+  # asked for yet, and the config still lists it for whoever wants to add it.
+  # ───────────────────────────────────────────────────────────────────────────
+  linux:
+    name: desktop (linux)
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The tag is the source of truth for artifact names: aligning the
+      # package version is what makes electron-builder emit
+      # `Terabot-<tag>.AppImage` instead of the committed version. The
+      # Electron bundle also has to exist first — `main` is dist/main.js,
+      # which is gitignored — or the packager rejects the app.
+      - name: Align the package version with the tag
+        run: node scripts/stamp-release-version.mjs ${{ needs.meta.outputs.version }}
+
+      # `main` is dist/main.js and dist is gitignored, so the bundle has to exist
+      # before the packager validates the app's entry point.
+      - name: Build the Electron bundle
+        run: pnpm --filter @terabot/desktop build
+
+      # electron-builder is told `--publish never`; uploading is this workflow's
+      # job, not the packager's, so nothing can publish by accident.
+      # No TERABOT_APP_URL here on purpose: the main process reads it from its own
+      # environment at launch and the bundle has no compile-time define, so setting
+      # it for electron-builder would do nothing. The release body says how to set
+      # it when running the app.
+      - name: Package
+        run: pnpm --filter @terabot/desktop exec electron-builder --linux AppImage deb --x64 --config electron-builder.config.cjs --publish never
+
+      - name: List what came out
+        run: ls -lh apps/desktop/release/ | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  win:
+    name: desktop (windows)
+    needs: meta
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The tag is the source of truth for artifact names: aligning the
+      # package version is what makes electron-builder emit
+      # `Terabot-<tag>.AppImage` instead of the committed version. The
+      # Electron bundle also has to exist first — `main` is dist/main.js,
+      # which is gitignored — or the packager rejects the app.
+      - name: Align the package version with the tag
+        run: node scripts/stamp-release-version.mjs ${{ needs.meta.outputs.version }}
+
+      # `main` is dist/main.js and dist is gitignored, so the bundle has to exist
+      # before the packager validates the app's entry point.
+      - name: Build the Electron bundle
+        run: pnpm --filter @terabot/desktop build
+
+      # UNSIGNED on purpose. A Windows build that Windows SmartScreen trusts
+      # needs an OV/EV code-signing certificate, which is a paid annual purchase
+      # and an account Ng has to create. The installer works; the first run shows
+      # a "Windows protected your PC" prompt. The release body says so plainly.
+      - name: Package
+        run: pnpm --filter @terabot/desktop exec electron-builder --win nsis --x64 --config electron-builder.config.cjs --publish never
+
+      - name: List what came out
+        run: Get-ChildItem apps/desktop/release | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Android: a real installable APK from the Expo project, without EAS.
+  #
+  # `expo prebuild` generates the native android/ project from app.json, and
+  # gradle assembles a release APK. Signed with the debug keystore that the
+  # Android SDK ships, which is enough to sideload for testing and NOT enough for
+  # Play Store or for distribution (a debug-signed APK cannot be published, and
+  # users must allow installs from unknown sources). A real release keystore is
+  # four secrets Ng has to generate and store; that is named in the release body
+  # instead of being faked here.
+  #
+  # iOS is absent: it needs macOS + Xcode + a paid Apple Developer account.
+  # ───────────────────────────────────────────────────────────────────────────
+  android:
+    name: mobile (android)
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # No setup-android action: ubuntu-latest already ships the SDK, and
+      # android-actions/setup-android@v3 fails on this image's preinstalled
+      # cmdline-tools ("Wrong version in preinstalled sdkmanager").
+      - name: Point gradle at the preinstalled SDK
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$sdk" || { echo "::error::no Android SDK at $sdk"; exit 1; }
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "sdk: $sdk" | tee -a "$GITHUB_STEP_SUMMARY"
+          ls "$sdk/platforms" 2>/dev/null | tail -3 || true
+
+      # `env:` would define EXPO_PUBLIC_API_URL as an empty string when the
+      # repository variable is unset, and `process.env.X ?? default` does not treat
+      # "" as absent — so it is exported through $GITHUB_ENV only when it is real.
+      # That leaves the app's documented localhost default intact.
+      - name: Export the API origin when one is configured
+        env:
+          API_URL: ${{ needs.meta.outputs.api-url }}
+        run: |
+          set -euo pipefail
+          if [ -n "${API_URL:-}" ]; then
+            echo "EXPO_PUBLIC_API_URL=$API_URL" >> "$GITHUB_ENV"
+            echo "Inlining API origin $API_URL into the bundle" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No API origin configured; the APK keeps its localhost default." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # `app.json` ships 1.0.0 with no versionCode, so every tagged APK would
+      # install as the same app version and the same build number. Derive both
+      # from the tag before prebuild reads them.
+      - name: Align the mobile version with the tag
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # versionCode is a positive 32-bit integer that must increase as the
+          # version rises. Packing the semver core does that and fits in 32 bits:
+          # 0.1.0 -> 1000, 1.2.3 -> 1002003. A prerelease shares the code of the
+          # stable it is a candidate for (0.1.0-rc.1 and 0.1.0 are both 1000), so
+          # installing one replaces the other instead of stacking two builds of
+          # the same version on the device.
+          code="$(printf '%s' "$VERSION" | awk -F'[.+-]' '{printf "%d", $1*1000000 + $2*1000 + $3}')"
+          CODE="$code" node -e '
+            const fs = require("node:fs");
+            const path = "apps/mobile/app.json";
+            const config = JSON.parse(fs.readFileSync(path, "utf8"));
+            config.expo.version = process.env.VERSION;
+            config.expo.android = { ...config.expo.android, versionCode: Number(process.env.CODE) };
+            fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+          '
+          echo "Mobile version $VERSION, versionCode $code" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate the native project
+        working-directory: apps/mobile
+        run: pnpm exec expo prebuild --platform android --no-install
+
+      # `assembleRelease` with no signing config falls back to the debug key and
+      # prints a warning; that is the intended, documented outcome here.
+      # `local.properties` is how gradle finds the SDK; it is generated (and
+      # gitignored), so it is written here rather than committed.
+      # `EXPO_PUBLIC_*` is inlined into the JS bundle at build time, which is why
+      # the export above has to precede both this step and the prebuild.
+      - name: Assemble the APK
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Locate the APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find apps/mobile/android/app/build/outputs/apk -name '*.apk' | head -1)"
+          [ -n "$apk" ] || { echo "::error::gradle produced no apk"; exit 1; }
+          mkdir -p out
+          cp "$apk" "out/terabot-${{ needs.meta.outputs.version }}.apk"
+          ls -lh out/ | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-android
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Publish: one GitHub Release per tag, every artifact attached, and a body that
+  # states what is signed, what is not, and what is missing.
+  # ───────────────────────────────────────────────────────────────────────────
+  publish:
+    name: publish
+    # `!cancelled()` rather than the default: one failed platform must not throw
+    # away the installers the other two built. The Collect step then requires at
+    # least one asset, and the stamped asset list names only what actually
+    # uploaded, so a platform that failed keeps its "Coming soon" button.
+    if: ${{ !cancelled() && needs.meta.result == 'success' }}
+    needs: [meta, linux, win, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # The whole point: create the release and upload assets with the run's own
+      # token. Nothing else is granted.
+      contents: write
+    steps:
+      # The stamp step below runs a repo script, so this job needs the tree, not
+      # only the downloaded artifacts.
+      - uses: actions/checkout@v4
+        with:
+          # Build the commit `meta` resolved, never the dispatched branch.
+          ref: ${{ needs.meta.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.meta.outputs.node-version }}
+
+      # A failed platform's artifact is simply absent; `download-artifact` fails
+      # on that by default, which would undo the point of tolerating the failure.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "*"
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Collect the assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.apk' -o -name 'latest*.yml' \) -exec cp {} assets/ \;
+          ls -lh assets/ | tee -a "$GITHUB_STEP_SUMMARY"
+          count="$(find assets -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.apk' \) | wc -l)"
+          [ "$count" -ge 1 ] || { echo "::error::no installers came through; every platform failed"; exit 1; }
+          echo "**$count installer(s) from this run**" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          APP_CONFIGURED: ${{ needs.meta.outputs.app-configured }}
+          API_CONFIGURED: ${{ needs.meta.outputs.api-configured }}
+          APP_URL: ${{ vars.TERABOT_APP_URL }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Terabot $VERSION"
+            echo ""
+            echo "### Desktop"
+            echo ""
+            echo "- **Linux** — \`.AppImage\` is portable: download, \`chmod +x\`, run. \`.deb\` installs with \`sudo apt install ./<file>.deb\`."
+            echo "- **Windows** — \`.exe\` installer (NSIS). **Unsigned**: Windows SmartScreen will show \"Windows protected your PC\" on first run; choose *More info* → *Run anyway*. Signing needs a paid code-signing certificate."
+            echo "- **macOS** — not built. Needs a macOS runner and an Apple Developer certificate for a distributable build. \`apps/marketing/releases.ts\` keeps its macOS entry \`null\` until that exists."
+            echo ""
+            echo "### Mobile"
+            echo ""
+            echo "- **Android** — \`.apk\`, **debug-signed**. Sideload it for testing: enable *Install unknown apps* for your browser or file manager. Not publishable to Google Play; that needs a release keystore."
+            echo "- **iOS** — not built. Needs macOS, Xcode and a paid Apple Developer account. Nothing here claims otherwise."
+            echo ""
+            echo "### What this build points at"
+            echo ""
+            # The desktop app resolves TERABOT_APP_URL from its own environment at
+            # launch, and its bundle has no compile-time define, so an origin set
+            # here cannot be baked into the installer; it has to be set on the
+            # machine that runs the app.
+            echo "- **Desktop** opens \`${APP_URL:-http://localhost:3000}\` by default. That is a launch-time default: set \`TERABOT_APP_URL\` in the environment that starts the app to wrap a hosted product, for example \`TERABOT_APP_URL=$APP_URL ./Terabot-*.AppImage\`. Baking the origin into the installer needs a build-time define in \`apps/desktop/scripts/build.mjs\`, which this workflow does not do."
+            if [ "$API_CONFIGURED" = "true" ]; then
+              echo "- **Android** calls the API origin configured when this was built."
+            else
+              echo "- **Android** calls \`http://localhost:8787\`, which a phone cannot reach. Set the \`TERABOT_API_URL\` repository variable and re-run this tag to get an APK that works away from this machine."
+            fi
+            echo ""
+            echo "### Notes"
+            echo ""
+            echo "- Built from \`$TAG\` on GitHub's free runners. No EAS, no paid services, no notarisation."
+            echo "- The website's download buttons are driven by \`apps/marketing/releases.ts\`; a platform with no asset stays \"Coming soon\" rather than linking to a file that is not here."
+          } > notes.md
+          cat notes.md
+
+      # Creating the release is idempotent: re-running a failed publish updates
+      # the existing release and re-uploads (--clobber) instead of colliding.
+      #
+      # Diagnose what the failing call is actually made with. "Resource not
+      # accessible by integration" says the API refused the token; it does not
+      # say why, and three theories have been wrong already: workflow permissions
+      # being read-only (they are `write`), a per-repo override (the runner's own
+      # `GITHUB_TOKEN Permissions` block reports `Contents: write`), and a
+      # missing GH_TOKEN on the step (all five set it). So this prints the
+      # identity, the accepted-permission headers, which credential is on the
+      # wire, and the effective repo setting — evidence instead of a theory.
+      - name: Probe the token's permissions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          {
+            echo "### Token probe"
+            echo ""
+            echo "**Who is the token?**"
+            echo '```'
+            gh api -i user 2>&1 | grep -iE '^HTTP/|^x-oauth-scopes:|^x-accepted-github-permissions:' || echo "(user endpoint not reachable)"
+            gh api user --jq '{login: .login, type: .type}' 2>&1 || true
+            echo '```'
+            echo "**What does it see on this repo?**"
+            echo '```'
+            gh api -i "repos/$GITHUB_REPOSITORY" 2>&1 | grep -iE '^HTTP/|^x-accepted-github-permissions:|^x-oauth-scopes:' || true
+            gh api "repos/$GITHUB_REPOSITORY" --jq '.permissions' 2>&1 || true
+            echo '```'
+            echo "**The exact call that fails:**"
+            echo '```'
+            gh api -i "repos/$GITHUB_REPOSITORY/releases" -X GET 2>&1 | grep -iE '^HTTP/|^x-accepted-github-permissions:|^x-oauth-scopes:|message' || true
+            echo '```'
+            # The runner says this job's minted token holds `Contents: write`, and
+            # the same job still gets 403 on POST /releases — so find out which
+            # credential is actually on the wire. `gh` resolves GH_TOKEN, then
+            # GITHUB_TOKEN, then its own stored auth, then the git credential
+            # helper that actions/checkout leaves behind.
+            echo "**Which credential is on the wire?**"
+            echo '```'
+            env | grep -iE '^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN)=' | sed 's/=.*/=<set>/' || echo "(none set)"
+            gh auth status 2>&1 | sed -E 's/(token: ).*/\1<redacted>/' | head -20 || true
+            printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null \
+              | sed -E 's/^(password)=.*/\1=<redacted>/' || echo "(no persisted git credential)"
+            echo '```'
+            echo "**What does this job's token actually hold?**"
+            echo '```'
+            echo "GITHUB_TOKEN env var: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-absent}"
+            gh api "repos/$GITHUB_REPOSITORY/actions/permissions/workflow" 2>&1 | head -3 || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          PRERELEASE: ${{ needs.meta.outputs.is-prerelease }}
+          SHA: ${{ needs.meta.outputs.sha }}
+          DRY_RUN: ${{ needs.meta.outputs.dry-run }}
+        run: |
+          set -euo pipefail
+          # A dry run exists to answer "what does this token hold?" without
+          # leaving a public release behind. It stops here, after the probe.
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry_run is set; not creating or uploading a release."
+            echo "Dry run: the probe above is the output, and nothing was published." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Terabot $VERSION" --notes-file notes.md
+          else
+            args=(--title "Terabot $VERSION" --notes-file notes.md --target "$SHA")
+            [ "$PRERELEASE" = "true" ] && args+=(--prerelease)
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${args[@]}"
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber assets/*
+
+      # The site reads one file: this release's version and the names of the
+      # assets that verifiably uploaded. A platform whose job failed is absent,
+      # so its button keeps saying "Coming soon" instead of pointing at nothing.
+      - name: Stamp the published version for the site
+        if: ${{ needs.meta.outputs.dry-run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          names="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | join(",")')"
+          node scripts/stamp-release-version.mjs "$VERSION" "$names"
+
+      # Committing is a human's job — a release must not push to a protected
+      # branch — so a patch that reproduces these edits is published, not just a
+      # `git add`. The stamped files exist only on this runner; telling someone to
+      # add files they do not have would leave the site unchanged.
+      - name: Publish the patch that updates the site
+        if: ${{ needs.meta.outputs.dry-run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          git --no-pager diff -- apps/marketing/released.version.json apps/desktop/package.json > release-site.patch || true
+          {
+            echo "### Next step"
+            echo ""
+            echo "The stamped files live only on this runner. Apply the change in your checkout:"
+            echo ""
+            echo '```'
+            echo "gh run download ${{ github.run_id }} --repo $GITHUB_REPOSITORY -n release-site-patch"
+            echo "git apply release-site.patch"
+            echo "git add apps/marketing/released.version.json apps/desktop/package.json"
+            echo "git commit -m \"chore(release): publish $VERSION download links\""
+            echo '```'
+            echo ""
+            echo "The patch is attached to this run as \`release-site-patch\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-site-patch
+          path: release-site.patch
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Print the download URLs
+        if: ${{ needs.meta.outputs.dry-run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          {
+            echo "### Download URLs"
+            echo ""
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '.assets[] | "- \(.name) — \(.size) bytes — \(.url)"'
+          } >> "$GITHUB_STEP_SUMMARY"

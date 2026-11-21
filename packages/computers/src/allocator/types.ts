@@ -15,6 +15,14 @@ export interface AccountRecord {
   status: "active" | "draining" | "error";
   /** How many boxes this account's plan allows. */
   capacity: number;
+  /** True when the deployment provides this account, false when a user connected it. */
+  managed: boolean;
+  /**
+   * The user who connected an unmanaged account; null on a managed row. The
+   * allocator prefers this user's own account over a managed one for their own
+   * bots, and never hands one user's account to another user's bot.
+   */
+  ownerUserId: string | null;
   /** Set when the provider rate-limits the account: do not start a box before then. */
   parkedUntil: string | null;
   lastError: string | null;
@@ -84,6 +92,12 @@ export interface ComputerStore {
   updateComputer(id: string, patch: ComputerPatch): Promise<void>;
 
   botExists(botId: string): Promise<boolean>;
+  /**
+   * The user who owns the bot's workspace, so the allocator can prefer that
+   * user's own connected account over a deployment-provided one. Null when the
+   * bot or its owner cannot be resolved.
+   */
+  botOwnerUserId(botId: string): Promise<string | null>;
   /** The bot's binding and the box currently linked to it, if any. */
   botBinding(botId: string): Promise<BindingRecord | null>;
   setBindingState(botId: string, state: BindingState, reason: string | null): Promise<void>;
@@ -110,10 +124,59 @@ export interface AllocateResult {
   reason?: string;
 }
 
+/**
+ * A capability a caller needs from the box it gets. Placement reads
+ * `ComputerProvider.capabilities` and refuses an account whose provider cannot
+ * deliver it, instead of provisioning a box that will throw the moment the
+ * feature is used.
+ *
+ * `screenshot` is the one that matters today: a provider with no PNG of the
+ * screen is not the same product as one that has it, and a bot that needs to
+ * look at its screen must not be given a box that cannot show one.
+ */
+export type RequiredCapability = "exec" | "files" | "screenshot";
+
+/**
+ * What a bot's computer must be able to do when the caller does not say.
+ *
+ * Nothing: a box that cannot screenshot can still run commands and move files,
+ * so it is a real computer for a bot that never looks. Refusing it by default
+ * would take a working provider out of the pool for every bot — the opposite of
+ * allocating across every provider so one being out of capacity does not stop
+ * a bot.
+ *
+ * Strictness belongs to the caller, which is the only place that knows whether
+ * the run's tools can look at a screen. A run with computer-use tools passes
+ * `["screenshot"]`; one that only shells out passes nothing.
+ */
+export const DEFAULT_REQUIREMENTS: readonly RequiredCapability[] = [];
+
+export interface AllocateOptions {
+  /**
+   * Capabilities the box must have. Absent means `DEFAULT_REQUIREMENTS`, which
+   * is empty — any provider is acceptable. A caller whose run includes a tool
+   * that reads the screen passes `["screenshot"]`, and is then placed only on a
+   * provider that has one, or blocked with a reason naming the gap.
+   *
+   * This lives on the placement call rather than in the run loop so the rule is
+   * enforced where the choice of account is made: the run path only has to pass
+   * what its tool layer already knows, and nothing else changes.
+   */
+  requires?: readonly RequiredCapability[];
+}
+
 export interface EnsureReadyOptions {
   /** Reuse a lease id; absent, the allocator mints one per run. */
   leaseId?: string;
   timeoutMs?: number;
+  /**
+   * Capabilities this run needs. Absent means `DEFAULT_REQUIREMENTS`, which is
+   * empty. A run whose tools read the screen passes `["screenshot"]`, and it is
+   * then checked against a box the bot already has, so a bot bound before the
+   * requirement existed fails with a reason naming the gap rather than at the
+   * first screenshot call.
+   */
+  requires?: readonly RequiredCapability[];
 }
 
 export interface EnsureReadyResult {

@@ -95,3 +95,25 @@ objects. Add a new migration that brings the database to the intended state, and
 is applied in sequence.
 
 **An entry is missing entirely.** Restore it from `main`; the journal is append-only.
+
+## 3. Drop and re-migrate your local database after pulling a migration
+
+A local database is not a copy of `main`'s schema, it is a copy of **whatever journal position you
+applied last** — and while your branch was open that number may have belonged to a migration `main`
+never had. So a local database can hold, say, `0009_aberrant_sauron` at an id where `main` now has
+`0009_managed_computer_accounts`. The migrator compares one highest timestamp (see §2), decides there
+is nothing newer to run, and reports success. Your local schema is then quietly missing a table
+`main` added, and the next test you run fails on a missing column with no hint where it went.
+
+Nothing in the repo broke, so no gate catches this: CI migrates a fresh database every run. It only
+bites the person with a database that predates the pull.
+
+After pulling a migration from `main`, rebuild rather than migrate:
+
+```bash
+docker compose down -v && docker compose up -d postgres   # or the psql drop/create you use
+pnpm db:migrate && pnpm db:seed
+```
+
+Dropping is the point. `pnpm db:migrate` on a stale database cannot repair a journal position that
+already skipped a migration, for the same reason renumbering cannot (§2).

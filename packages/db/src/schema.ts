@@ -304,9 +304,31 @@ export const modelEndpoint = pgTable(
     modelCatalogId: uuid("model_catalog_id").references(() => modelCatalog.id, { onDelete: "set null" }),
     catalogMatch: catalogMatch("catalog_match").notNull().default("unmatched"),
     contextWindow: integer("context_window"),
+    /**
+     * The built-in this row is, from `BUILTIN_PROVIDERS` in `@terabot/providers`;
+     * null for a custom endpoint. Its base URL comes from that table rather than
+     * from `baseUrl` below, so a moved provider is one code change and not a
+     * migration of every saved row.
+     */
+    builtinId: text("builtin_id"),
+    /** USD per 1M tokens the user set, or that the catalogue filled. */
+    pricing: jsonb("pricing").$type<{
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+    }>(),
+    /** Whether the model accepts tools; null until set or filled. */
+    toolSupport: boolean("tool_support"),
+    /** Whether the model reasons before answering; null until set or filled. */
+    reasoningCapability: boolean("reasoning_capability"),
+    /** Fields in this row that the catalogue filled rather than the user. */
+    autoFilledFields: jsonb("auto_filled_fields").$type<string[]>(),
     /** Last `GET /models` answer from the endpoint itself, cached for the picker. */
     modelList: jsonb("model_list").$type<Array<{ id: string; ownedBy?: string; created?: number }>>(),
     modelListFetchedAt: timestamp("model_list_fetched_at", { withTimezone: true }),
+    /** An `ETag` from the same call, so the next refresh can be a conditional GET. */
+    modelListEtag: text("model_list_etag"),
     createdAt: createdAt(),
   },
   (t) => [index("model_endpoint_workspace_idx").on(t.workspaceId)],
@@ -314,19 +336,44 @@ export const modelEndpoint = pgTable(
 
 /* ───────────────────────────── computers ───────────────────────────── */
 
-export const computerAccount = pgTable("computer_account", {
-  id: uuid("id").primaryKey(),
-  provider: text("provider").notNull(),
-  label: text("label").notNull(),
-  encryptedCredential: text("encrypted_credential").notNull(),
-  status: computerAccountStatus("status").notNull().default("active"),
-  capacity: integer("capacity").notNull().default(1),
-  /** Do not start a box on this account before this instant (rate limits). */
-  parkedUntil: timestamp("parked_until", { withTimezone: true }),
-  lastError: text("last_error"),
-  usage: jsonb("usage").$type<Record<string, unknown>>(),
-  createdAt: createdAt(),
-});
+export const computerAccount = pgTable(
+  "computer_account",
+  {
+    id: uuid("id").primaryKey(),
+    provider: text("provider").notNull(),
+    label: text("label").notNull(),
+    encryptedCredential: text("encrypted_credential").notNull(),
+    status: computerAccountStatus("status").notNull().default("active"),
+    capacity: integer("capacity").notNull().default(1),
+    /**
+     * True when the deployment provided this account from its own key, so a
+     * user with no plan still gets a computer and no user can edit or delete
+     * the row. False for an account a user connected with their own key.
+     */
+    managed: boolean("managed").notNull().default(false),
+    /**
+     * Which user connected a non-managed account. Managed rows leave it null.
+     * A user's own account always outranks a managed one for their own bots.
+     */
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
+    /** Do not start a box on this account before this instant (rate limits). */
+    parkedUntil: timestamp("parked_until", { withTimezone: true }),
+    lastError: text("last_error"),
+    usage: jsonb("usage").$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // One account per provider per user, managed rows exempt. A user may still
+    // configure several providers; they just cannot stack up accounts of one.
+    uniqueIndex("computer_account_owner_provider_idx")
+      .on(t.ownerUserId, t.provider)
+      .where(sql`${t.ownerUserId} is not null`),
+    // One managed account per provider for the whole deployment.
+    uniqueIndex("computer_account_managed_provider_idx")
+      .on(t.provider)
+      .where(sql`${t.managed}`),
+  ],
+);
 
 export const computer = pgTable(
   "computer",

@@ -13,7 +13,7 @@ import {
 } from "@terabot/db";
 import type { Database, MessagePart } from "@terabot/db";
 import { gatewayCredential, serverEnv } from "@terabot/config";
-import { costAsDecimal, costOf, providerHintForBaseUrl } from "@terabot/providers";
+import { costAsDecimal, costOf, endpointConfigForRow, providerHintForBaseUrl } from "@terabot/providers";
 import type { ModelEndpointConfig, ModelGateway, ModelPricing } from "@terabot/providers";
 import { buildChatContext } from "./context.ts";
 import type { RunStreamEvent } from "./events.ts";
@@ -47,7 +47,12 @@ export interface ExecuteRunOptions {
   signal?: AbortSignal;
   /** Wakes the bot's computer before the model runs; chat is blocked without one. */
   computer?: RunComputer;
-  resolveEndpoint?: (botRow: BotRow) => Promise<ResolvedEndpoint | null>;
+  /**
+   * Resolves the endpoint for a bot. `session` is the run's conversation, which
+   * a built-in provider that routes per session needs; a caller overriding this
+   * hook should pass it through so those providers keep working.
+   */
+  resolveEndpoint?: (botRow: BotRow, session: string) => Promise<ResolvedEndpoint | null>;
   now?: () => Date;
 }
 
@@ -142,7 +147,11 @@ async function pricingForModel(
   return priced[0]?.pricing ?? null;
 }
 
-async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<ResolvedEndpoint | null> {
+async function defaultResolveEndpoint(
+  db: Database,
+  botRow: BotRow,
+  session: string,
+): Promise<ResolvedEndpoint | null> {
   if (!botRow.modelEndpointId) return null;
   const rows = await db
     .select()
@@ -168,12 +177,16 @@ async function defaultResolveEndpoint(db: Database, botRow: BotRow): Promise<Res
   return {
     label: endpoint.label,
     pricing: await pricingForModel(db, endpoint, model),
-    config: {
+    // One resolver for every call site: a built-in's URL, wire format and
+    // required headers come from the shared table, never from the row.
+    config: endpointConfigForRow({
       kind: endpoint.kind,
       baseUrl: endpoint.baseUrl,
+      builtinId: endpoint.builtinId,
       model,
-      apiKey,
-    },
+      session,
+      ...(apiKey ? { apiKey } : {}),
+    }),
   };
 }
 
@@ -217,9 +230,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<RunOutcome
     .set({ status: "running", startedAt: row.run.startedAt ?? now() })
     .where(eq(runTable.id, runId));
 
+  const session = row.conversation.id;
   const resolveEndpoint = options.resolveEndpoint
-    ? (botRow: BotRow) => options.resolveEndpoint!(botRow)
-    : (botRow: BotRow) => defaultResolveEndpoint(db, botRow);
+    ? (botRow: BotRow) => options.resolveEndpoint!(botRow, session)
+    : (botRow: BotRow) => defaultResolveEndpoint(db, botRow, session);
 
   const resolved = await resolveEndpoint({
     id: row.bot.id,

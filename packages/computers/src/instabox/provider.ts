@@ -8,6 +8,7 @@ import type {
   ExecOptions,
   ExecResult,
   FileEntry,
+  ProviderCapabilities,
   ProvisionOptions,
   Screenshot,
 } from "../contract.ts";
@@ -54,6 +55,16 @@ export class InstaboxProvider implements ComputerProvider {
   readonly name = "instabox";
   readonly account: string;
   readonly client: InstaboxClient;
+
+  /** MEASURED in the spike: every capability the contract names, minus none. */
+  readonly capabilities: ProviderCapabilities = {
+    exec: true,
+    files: true,
+    screenshot: true,
+    pausePreservesMemory: true,
+    deleteAfter: true,
+    unsupported: {},
+  };
 
   readonly #template: string;
   readonly #size: { vcpus: number; memMiB: number } | undefined;

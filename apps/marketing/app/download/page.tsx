@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ReleaseRow } from "../../components/release-row.tsx";
-import { releasesOfKind } from "../../releases.ts";
+import { publishedVersion, releasesOfKind } from "../../releases.ts";
 import { signInUrl } from "../../site.ts";
 
 export const metadata: Metadata = {
   title: "Download",
   description:
-    "Desktop builds for macOS, Windows and Linux, and the mobile app for iOS and Android. No build is published yet, and the buttons say so.",
+    "Desktop builds for macOS, Windows and Linux, and the mobile app for iOS and Android. Every published build is a direct download.",
   alternates: { canonical: "/download" },
   openGraph: {
     type: "website",
     title: "Download — Terabot",
     description:
-      "Desktop builds for macOS, Windows and Linux, and the mobile app for iOS and Android. No build is published yet.",
+      "Desktop builds for macOS, Windows and Linux, and the mobile app for iOS and Android. Every published build is a direct download.",
     url: "/download",
     images: [{ url: "/og/download.png", width: 1200, height: 630, alt: "Download Terabot for desktop and mobile" }],
   },
@@ -23,15 +23,18 @@ const desktop = releasesOfKind("desktop");
 const mobile = releasesOfKind("mobile");
 
 export default function DownloadPage() {
+  // The copy has to follow `released.version.json`, or the first real release
+  // ships a page that still tells people nothing is available.
+  const version = publishedVersion;
   return (
     <>
       <section className="section section-tight" style={{ borderTop: 0 }}>
         <div className="site-wrap">
           <h1 className="display">Download</h1>
           <p className="lede" style={{ marginTop: 20, maxWidth: 660 }}>
-            The desktop app comes to macOS, Windows and Linux. The mobile app comes to iOS and Android. Neither build
-            is published yet, so every button below says Coming soon rather than sending you to a file that is not
-            there.
+            {version
+              ? `Version ${version} is out. The desktop app runs on Windows and Linux, and the Android build sideloads on a phone. A platform the release does not include still says Coming soon rather than sending you to a file that is not there.`
+              : "The desktop app comes to macOS, Windows and Linux. The mobile app comes to iOS and Android. Nothing is published yet, so every button below says Coming soon rather than sending you to a file that is not there."}
           </p>
         </div>
       </section>
@@ -73,8 +76,9 @@ export default function DownloadPage() {
           <div>
             <h2 className="h2">When a build lands</h2>
             <p className="copy" style={{ marginTop: 14, maxWidth: 460 }}>
-              A published build appears in the list above with its version and a working link, and the button stops
-              saying Coming soon. Until then there is nothing to install.
+              {version
+                ? "Every build above downloads straight from this release. macOS, iOS and the stores come later; those buttons keep saying Coming soon until they are real."
+                : "A published build appears in the list above with its version and a working link, and the button stops saying Coming soon. Until then there is nothing to install."}
             </p>
           </div>
           <div className="hero-actions" style={{ marginTop: 0, alignSelf: "end" }}>

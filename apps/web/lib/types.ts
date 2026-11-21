@@ -103,8 +103,22 @@ export interface EndpointView {
   id: string;
   label: string;
   kind: string;
-  /** Shown in Settings > Providers so a custom gateway is identifiable. */
-  baseUrl: string;
+  /**
+   * Shown in Settings > Providers so a custom gateway is identifiable. Null for
+   * a built-in: its URL is fixed and not the user's to see.
+   */
+  baseUrl: string | null;
+  /** The built-in this row is, or null for a custom endpoint. */
+  builtinId: string | null;
+  /** The built-in's own name, for the Settings row. */
+  builtinName: string | null;
+  /**
+   * Whether a bot can chat through this provider. A built-in without a key
+   * cannot, so bot creation must not offer it.
+   */
+  ready: boolean;
+  /** Detail fields the catalogue filled rather than the user typed. */
+  detailSources: string[];
   /** The provider's default model; a bot picks its own when it is created. */
   modelId: string;
   contextWindow: number | null;
@@ -144,4 +158,38 @@ export interface ShellData {
   endpoints: EndpointView[];
   connections: ConnectedApp[];
   usage: UsageView[];
+  /** The computer pool Settings > Computer shows; managed rows first. */
+  computerAccounts: ComputerAccountView[];
+  /** One entry per supported provider: whether it is included, and connectable. */
+  computerProviders: ProviderAvailability[];
+}
+
+/**
+ * A computer account as Settings shows it. The credential is never part of this
+ * shape — the browser learns whether a key is stored, never what it is.
+ */
+export interface ComputerAccountView {
+  id: string;
+  provider: string;
+  label: string;
+  status: "active" | "draining" | "error";
+  capacity: number;
+  /** How many of this account's boxes exist right now. */
+  used: number;
+  /** True when the deployment provided it: no key to edit, no delete. */
+  managed: boolean;
+  /** Who connected it; null on a managed row or one that predates the column. */
+  ownerUserId: string | null;
+  hasKey: boolean;
+  lastError: string | null;
+  parkedUntil: string | null;
+}
+
+export interface ProviderAvailability {
+  provider: string;
+  label: string;
+  /** True when the deployment lends this provider out, so no key is needed. */
+  managed: boolean;
+  /** A user may not connect a second account of this provider. */
+  canConnect: boolean;
 }

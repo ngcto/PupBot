@@ -38,6 +38,54 @@ describe("listEndpointModels", () => {
     expect(Date.parse(result.fetchedAt)).toBeGreaterThan(0);
   });
 
+  it("records the endpoint's ETag and sends it back on the next refresh", async () => {
+    const seen: Array<Record<string, string>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen.push(init.headers as Record<string, string>);
+        return new Response(JSON.stringify({ data: [{ id: "a-model" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: 'W/"v1"' },
+        });
+      }),
+    );
+
+    const first = await listEndpointModels(endpoint);
+    expect(first.notModified).toBe(false);
+    expect(first.etag).toBe('W/"v1"');
+    expect(first.models).toEqual([{ id: "a-model" }]);
+    expect(seen[0]?.["if-none-match"]).toBeUndefined();
+
+    await listEndpointModels(endpoint, { etag: first.etag });
+    expect(seen[1]?.["if-none-match"]).toBe('W/"v1"');
+  });
+
+  it("treats a 304 as 'unchanged', never as 'this provider lists nothing'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(null, { status: 304 });
+      }),
+    );
+
+    const result = await listEndpointModels(endpoint, { etag: 'W/"v1"' });
+    expect(result.notModified).toBe(true);
+    expect(result.models).toEqual([]);
+    expect(result.etag).toBe('W/"v1"');
+  });
+
+  it("does not treat a 304 without a validator as unchanged", async () => {
+    // A 304 we did not ask for is not an answer we can use; it must not silently
+    // wipe a cached list.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 304 })),
+    );
+
+    await expect(listEndpointModels(endpoint)).rejects.toBeInstanceOf(ModelListingError);
+  });
+
   it("reads Anthropic's list shape with its own headers", async () => {
     vi.stubGlobal(
       "fetch",

@@ -1,4 +1,5 @@
 import type { RunComputer } from "@terabot/agent";
+import { serverEnv } from "@terabot/config";
 import { ComputerAllocator, DrizzleComputerStore, createProviderFactory } from "@terabot/computers";
 
 /**
@@ -7,9 +8,15 @@ import { ComputerAllocator, DrizzleComputerStore, createProviderFactory } from "
  * provision request but never provisions synchronously.
  */
 export function createComputers(): { allocator: ComputerAllocator; runComputer: RunComputer } {
+  const env = serverEnv();
   const allocator = new ComputerAllocator({
     store: new DrizzleComputerStore(),
-    providers: createProviderFactory(),
+    // A deployment's choice of shape and image is configuration, not product
+    // code: the template a provider starts from belongs here, at the one place
+    // that builds providers.
+    providers: createProviderFactory({
+      agent37Template: env.AGENT37_TEMPLATE,
+    }),
   });
 
   const runComputer: RunComputer = {

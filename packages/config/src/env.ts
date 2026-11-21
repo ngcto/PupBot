@@ -41,10 +41,25 @@ const serverSchema = z.object({
   CAPTCHA_SOLVER_PROVIDER: z.string().optional(),
   CAPTCHA_SOLVER_API_KEY: optionalSecret,
   CAPTCHA_SOLVER_BASE_URL: optionalUrl,
+  /**
+   * Agent37: a deployment key here turns on managed Agent37 computers.
+   * https://agent37.com/dashboard/cloud/api-keys
+   */
+  AGENT37_API_KEY: optionalSecret,
+  /**
+   * Agent37 instances awake at once. The workspace's memory limit divides into
+   * the shape's memory; the free credit allows 32 GB total, so the default
+   * 2 vCPU / 4 GB shape fits 8.
+   */
+  AGENT37_CAPACITY: z.coerce.number().int().positive().default(1),
+  /** Template a new Agent37 instance starts from. */
+  AGENT37_TEMPLATE: z.string().min(1).default("agent37-hermes"),
+
   /** Composio Platform project API key. Server-side only: it never reaches the client bundle. */
   COMPOSIO_PROJECT_API_KEY: optionalSecret,
   /** Overrides Composio's base URL. Only for tests, which point it at a local stub. */
   COMPOSIO_BASE_URL: optionalUrl,
+  COMPOSIO_API_KEY: optionalSecret,
   OPENAI_API_KEY: optionalSecret,
   ANTHROPIC_API_KEY: optionalSecret,
   MODELS_DEV_URL: url.default("https://models.dev/api.json"),

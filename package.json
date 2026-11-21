@@ -11,14 +11,15 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "lint": "turbo run lint",
+    "lint": "node scripts/check-lint-coverage.mjs && turbo run lint",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @terabot/db generate",
     "db:migrate": "pnpm --filter @terabot/db migrate",
     "db:seed": "pnpm --filter @terabot/db seed",
     "catalog:sync": "pnpm --filter @terabot/worker catalog:sync",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "check:lint-coverage": "node scripts/check-lint-coverage.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
