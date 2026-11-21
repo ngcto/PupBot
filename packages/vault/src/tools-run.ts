@@ -2,7 +2,7 @@ import { newId, secretRequest, type Database } from "@terabot/db";
 import type { RunTool, ToolContext, ToolOutcome } from "@terabot/agent";
 import { stringArg } from "@terabot/agent";
 import { and, eq } from "drizzle-orm";
-import { describeVaultError, VaultError } from "./errors.ts";
+import { describeVaultError } from "./errors.ts";
 import { fillFromVault } from "./fill.ts";
 import type { FillEffect, VaultFillSink } from "./fill.ts";
 import { isVaultKind } from "./kinds.ts";

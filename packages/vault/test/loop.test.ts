@@ -17,7 +17,6 @@ import {
   run,
   runEvent,
   user,
-  vaultItem,
 } from "@terabot/db";
 import type { Database } from "@terabot/db";
 import type { ModelGateway, ModelEvent, StreamRequest } from "@terabot/providers";
